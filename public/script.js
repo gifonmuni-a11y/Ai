@@ -401,7 +401,10 @@ async function sendToSenka() {
 
         const fullReply = msgDiv.innerText;
         const fileReq = parseFileRequest(fullReply);
-        const displayText = fileReq ? fileReq.displayText.trim() : fullReply;
+        let displayText = fileReq ? fileReq.displayText.trim() : fullReply;
+        if (!fileReq && displayText.includes('###SENKA_FILE###')) {
+            displayText = displayText.split('###SENKA_FILE###')[0].trim();
+        }
 
         msgDiv.innerHTML = formatReply(displayText);
         if (fileReq) msgDiv.appendChild(makeFileCard(fileReq.meta));
@@ -428,13 +431,19 @@ async function sendToSenka() {
 }
 
 function parseFileRequest(reply) {
-    const m = reply.match(/###SENKA_FILE###\s*(\{[\s\S]*?\})\s*$/);
-    if (!m) return null;
-    let meta = null;
-    try { meta = JSON.parse(m[1]); } catch (e) { return null; }
-    if (!meta || !meta.content || typeof meta.content !== 'string') return null;
-    const displayText = reply.slice(0, m.index);
-    return { meta, displayText };
+    const idx = reply.indexOf('###SENKA_FILE###');
+    if (idx === -1) return null;
+    const block = reply.slice(idx + '###SENKA_FILE###'.length);
+    const endIdx = block.indexOf('###END###');
+    const body = (endIdx === -1 ? block : block.slice(0, endIdx));
+    const typeM = body.match(/TYPE\s*:\s*([A-Za-z]+)/);
+    const nameM = body.match(/NAME\s*:\s*([^\r\n]+)/);
+    const contentM = body.match(/CONTENT\s*:\s*([\s\S]*)/);
+    if (!typeM || !nameM || !contentM) return null;
+    const content = contentM[1].trim();
+    if (!content) return null;
+    const displayText = reply.slice(0, idx);
+    return { meta: { type: typeM[1].toLowerCase(), name: nameM[1].trim(), content }, displayText };
 }
 
 function makeFileCard(meta) {
