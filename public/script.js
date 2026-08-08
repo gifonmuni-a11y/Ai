@@ -13,6 +13,7 @@ let panggilan = localStorage.getItem('senka_panggilan') || 'pengguna';
 let base64Image = null;
 let lastUserText = '';
 let lastUserImage = null;
+let isStreaming = false;
 
 document.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('touchstart', e => {
@@ -32,6 +33,11 @@ window.onload = async () => {
         availableModels = cfg.models || [];
     } catch (e) {
         availableModels = [];
+    }
+
+    if (modelKey && !availableModels.some(m => m.key === modelKey)) {
+        modelKey = '';
+        localStorage.removeItem('senka_model');
     }
     renderModelPicker();
 
@@ -106,8 +112,9 @@ function renderSessionList() {
         const item = document.createElement('div');
         item.className = 'session-item' + (s.id === activeId ? ' active' : '');
         const count = (s.messages || []).length;
-        item.innerHTML = `<div style="min-width:0"><div class="si-name">${s.name}</div><div class="si-meta">${count} pesan</div></div>
+        item.innerHTML = `<div style="min-width:0"><div class="si-name"></div><div class="si-meta">${count} pesan</div></div>
                           <i class="fa-solid fa-trash si-del" title="Hapus"></i>`;
+        item.querySelector('.si-name').innerText = s.name;
         item.onclick = () => switchSession(s.id);
         item.querySelector('.si-del').onclick = (e) => { e.stopPropagation(); deleteSession(s.id); };
         list.appendChild(item);
@@ -139,10 +146,16 @@ function renderModelPicker() {
     availableModels.forEach(m => {
         const btn = document.createElement('button');
         btn.className = 'model-opt' + (m.key === modelKey ? ' selected' : '');
-        const prov = m.provider === 'groq' ? '⚡ Groq' : '🌐 OpenRouter';
-        btn.innerHTML = `<span class="mo-label">${m.label}${m.vision ? ' 👁️' : ''}</span>
-                         <span class="mo-prov">${prov}${m.vision ? ' · bisa baca gambar' : ''}</span>
-                         <i class="fa-solid fa-check mo-check"></i>`;
+        btn.innerHTML = `<div class="mo-line">
+                            <span class="mo-label"></span>
+                            <span class="mo-chip"></span>
+                            <i class="fa-solid fa-check mo-check"></i>
+                         </div>
+                         <span class="mo-prov"></span>`;
+        btn.querySelector('.mo-label').innerText = m.label;
+        btn.querySelector('.mo-prov').innerText = m.vision ? 'Bisa baca gambar — dipakai otomatis saat kamu kirim foto' : 'Cepat dan responsif';
+        btn.querySelector('.mo-chip').innerText = m.provider === 'groq' ? 'Groq' : 'OpenRouter';
+        btn.querySelector('.mo-chip').classList.add(m.provider === 'groq' ? 'chip-groq' : 'chip-or');
         btn.onclick = () => { modelKey = m.key; renderModelPicker(); };
         picker.appendChild(btn);
     });
@@ -162,7 +175,7 @@ function saveSettings() {
         const label = (availableModels.find(m => m.key === modelKey) || {}).label || modelKey;
         appendMessage('senka', `Oke ${panggilan}, model ${label} siap dipakai.`);
     }
-    scrollToBottom();
+    scrollToBottom(true);
 }
 
 imageUpload.addEventListener('change', async (e) => {
@@ -225,12 +238,12 @@ function shrinkMemoryImages() {
 function renderChat() {
     chatHistoryDOM.innerHTML = '';
     if (!memoryList.length) {
-        const greeting = `Halo ${panggilan}! Senka online 🌸`;
+        const greeting = `Halo ${panggilan}! Senka online.`;
         memoryList.push({ role: 'assistant', content: [{ type: 'text', text: greeting }] });
         saveSessions();
         appendMessage('senka', greeting);
         if (!modelKey) {
-            appendMessage('senka', 'Sebelum ngobrol, pilih dulu model AI-nya lewat tombol ⚙️ di atas ya.');
+            appendMessage('senka', 'Sebelum ngobrol, pilih dulu model AI-nya lewat tombol pengaturan di atas.');
         }
     } else {
         memoryList.forEach(m => {
@@ -240,7 +253,7 @@ function renderChat() {
                 if (!c) return;
                 if (c.type === 'text') {
                     const p = document.createElement('div');
-                    p.innerText = c.text;
+                    p.innerHTML = formatReply(c.text);
                     bubble.appendChild(p);
                 } else if (c.type === 'image_url') {
                     const img = document.createElement('img');
@@ -253,7 +266,15 @@ function renderChat() {
             chatHistoryDOM.appendChild(bubble);
         });
     }
-    scrollToBottom();
+    scrollToBottom(true);
+}
+
+function formatReply(raw) {
+    if (!raw) return '';
+    let html = raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    html = html.replace(/\*\*([^*]+)\*\*/g, '<span class="em">$1</span>');
+    html = html.replace(/[*_`~#]/g, '');
+    return html;
 }
 
 function addMsgActions(bubble) {
@@ -284,17 +305,18 @@ function speak(text) {
 async function sendToSenka() {
     const text = messageInput.value.trim();
     if (!text && !base64Image) return;
+    if (isStreaming) return;
 
     if (!modelKey) {
         openSettings();
         appendMessage('senka', `Pilih dulu model AI-nya ya ${panggilan}, terus kirim lagi.`);
-        scrollToBottom();
+        scrollToBottom(true);
         return;
     }
 
     if (text.toLowerCase().startsWith('/gambar') && !base64Image) {
         const prompt = text.slice(7).trim();
-        if (!prompt) { appendMessage('senka', 'Contoh: /gambar gadis anime rambut merah di taman.'); scrollToBottom(); return; }
+        if (!prompt) { appendMessage('senka', 'Contoh: /gambar gadis anime rambut merah di taman.'); scrollToBottom(true); return; }
         generateImageWithPrompt(prompt);
         messageInput.value = '';
         return;
@@ -319,12 +341,14 @@ async function sendToSenka() {
 
     messageInput.value = '';
     removeImage();
-    scrollToBottom();
+    scrollToBottom(true);
 
-    if (senkaModel.src && senkaModel.style.display !== 'none') senkaModel.src = "assets/avatar.webp";
-
-    const msgDiv = appendMessage('senka', 'Senka ngetik…', true);
-    scrollToBottom();
+    const msgDiv = document.createElement('div');
+    msgDiv.classList.add('message', 'msg-senka');
+    msgDiv.innerText = 'Senka ngetik…';
+    chatHistoryDOM.appendChild(msgDiv);
+    scrollToBottom(true);
+    isStreaming = true;
 
     try {
         const response = await fetch('/api/chat/stream', {
@@ -362,9 +386,11 @@ async function sendToSenka() {
                     if (!j.choices) continue;
                     const delta = j.choices[0]?.delta?.content;
                     if (delta) {
-                        if (!started) { msgDiv.innerHTML = ''; started = true; }
+                        if (!started) { msgDiv.innerText = ''; started = true; }
                         msgDiv.innerText += delta;
-                        scrollToBottom();
+                        if (chatHistoryDOM.scrollHeight - chatHistoryDOM.scrollTop - chatHistoryDOM.clientHeight < 160) {
+                            chatHistoryDOM.scrollTop = chatHistoryDOM.scrollHeight;
+                        }
                     }
                 } catch (e) { }
             }
@@ -373,23 +399,128 @@ async function sendToSenka() {
         if (streamError) throw new Error(streamError);
         if (!started) throw new Error('empty');
 
-        const senkaReply = msgDiv.innerText;
-        memoryList.push({ role: 'assistant', content: [{ type: "text", text: senkaReply }] });
+        const fullReply = msgDiv.innerText;
+        const fileReq = parseFileRequest(fullReply);
+        const displayText = fileReq ? fileReq.displayText.trim() : fullReply;
+
+        msgDiv.innerHTML = formatReply(displayText);
+        if (fileReq) msgDiv.appendChild(makeFileCard(fileReq.meta));
         addMsgActions(msgDiv);
+
+        memoryList.push({ role: 'assistant', content: [{ type: "text", text: displayText }] });
         saveSessions();
         shrinkMemoryImages();
     } catch (error) {
         if (error.message === 'empty') {
             memoryList.pop();
             saveSessions();
+            msgDiv.remove();
             return;
         }
         const errBubble = document.createElement('div');
         errBubble.classList.add('message', 'msg-senka');
         errBubble.innerHTML = `Waduh error: ${error.message.replace(/</g, '&lt;')} — <span class="retry-btn" onclick="retryLast()">coba lagi</span>`;
         msgDiv.replaceWith(errBubble);
-        scrollToBottom();
+        scrollToBottom(true);
+    } finally {
+        isStreaming = false;
     }
+}
+
+function parseFileRequest(reply) {
+    const m = reply.match(/###SENKA_FILE###\s*(\{[\s\S]*?\})\s*$/);
+    if (!m) return null;
+    let meta = null;
+    try { meta = JSON.parse(m[1]); } catch (e) { return null; }
+    if (!meta || !meta.content || typeof meta.content !== 'string') return null;
+    const displayText = reply.slice(0, m.index);
+    return { meta, displayText };
+}
+
+function makeFileCard(meta) {
+    const type = (meta.type || 'txt').toLowerCase();
+    const name = (meta.name || 'file-senka').trim();
+    const sizeKb = Math.max(1, Math.round((meta.content || '').length / 1024));
+    const card = document.createElement('div');
+    card.className = 'file-card';
+    const iconMap = { txt: 'fa-file-lines', csv: 'fa-table', xlsx: 'fa-file-excel', doc: 'fa-file-word', pdf: 'fa-file-pdf' };
+    card.innerHTML = `<div class="fc-icon"><i class="fa-solid ${iconMap[type] || 'fa-file'}"></i></div>
+        <div class="fc-info">
+            <div class="fc-name"></div>
+            <div class="fc-meta">${type.toUpperCase()} · ${sizeKb} KB · siap diunduh</div>
+        </div>
+        <button class="fc-dl"><i class="fa-solid fa-download"></i></button>`;
+    card.querySelector('.fc-name').innerText = name;
+    card.querySelector('.fc-dl').onclick = () => downloadGeneratedFile(meta);
+    return card;
+}
+
+function downloadGeneratedFile(meta) {
+    const type = (meta.type || 'txt').toLowerCase();
+    let name = (meta.name || 'file-senka').trim();
+    const content = meta.content || '';
+    const hasCJK = /[\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af]/.test(content);
+
+    if (type === 'pdf' && !hasCJK) {
+        if (!window.jspdf) return;
+        const doc = new window.jspdf.jsPDF();
+        const lines = doc.splitTextToSize(content, 185);
+        let y = 14;
+        lines.forEach((l, i) => {
+            if (y > 282) { doc.addPage(); y = 14; }
+            doc.setFontSize(i === 0 && content.includes('\n') ? 13 : 11);
+            doc.text(l, 10, y);
+            y += 6;
+        });
+        if (!name.includes('.')) name += '.pdf';
+        doc.save(name);
+        return;
+    }
+
+    if (type === 'xlsx' || type === 'excel' || type === 'csv') {
+        const rows = content.split('\n').map(l => l.split(',')).filter(r => r.some(c => c.trim() !== ''));
+        if (type === 'xlsx' || type === 'excel') {
+            loadSheetJS(() => {
+                const ws = XLSX.utils.aoa_to_sheet(rows);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+                XLSX.writeFile(wb, name.includes('.') ? name : name + '.xlsx');
+            });
+            return;
+        }
+        const blob = new Blob(['\ufeff' + rows.map(r => r.join(',')).join('\n')], { type: 'text/csv;charset=utf-8' });
+        saveBlob(blob, name.includes('.') ? name : name + '.csv');
+        return;
+    }
+
+    if (type === 'doc' || type === 'docx' || hasCJK) {
+        const safe = content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const html = `<html><head><meta charset="utf-8"><title>${name}</title></head><body>${safe.split('\n').map(l => `<p>${l}</p>`).join('')}</body></html>`;
+        const blob = new Blob(['\ufeff' + html], { type: 'application/msword' });
+        saveBlob(blob, name.includes('.') ? name : name + '.doc');
+        return;
+    }
+
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    saveBlob(blob, name.includes('.') ? name : name + '.txt');
+}
+
+function loadSheetJS(cb) {
+    if (window.XLSX) return cb();
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    s.onload = () => cb();
+    document.body.appendChild(s);
+}
+
+function saveBlob(blob, filename) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 3000);
 }
 
 async function retryLast() {
@@ -412,9 +543,9 @@ function generateImage() {
 }
 
 function generateImageWithPrompt(prompt) {
-    appendMessage('user', '🎨 ' + prompt);
-    const loading = appendMessage('senka', '🎨 lagi bikin gambar...');
-    scrollToBottom();
+    appendMessage('user', prompt);
+    const loading = appendMessage('senka', 'Lagi bikin gambar, sebentar ya…');
+    scrollToBottom(true);
     fetch('/api/image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -425,7 +556,7 @@ function generateImageWithPrompt(prompt) {
             if (!response.ok) throw new Error(data.error || `API error (${response.status})`);
             const tag = document.createElement('div');
             tag.className = 'msg-tag';
-            tag.innerText = '✨ ' + (data.model || 'Gambar AI') + ' · tap ⬇ buat simpan';
+            tag.innerText = data.model || 'Gambar AI';
             loading.innerHTML = '';
             loading.appendChild(tag);
             const img = document.createElement('img');
@@ -442,11 +573,11 @@ function generateImageWithPrompt(prompt) {
             dl.onclick = () => downloadImage(data.url, 'senka-' + prompt.slice(0, 25).replace(/[^a-zA-Z0-9]+/g, '_') + '.jpg');
             actions.appendChild(dl);
             loading.appendChild(actions);
-            scrollToBottom();
+            scrollToBottom(true);
         })
         .catch((e) => {
             loading.innerText = 'Gagal: ' + e.message;
-            scrollToBottom();
+            scrollToBottom(true);
         });
 }
 
@@ -475,13 +606,7 @@ function downloadImage(url, filename) {
 }
 
 function exportPDF() {
-    if (!window.jspdf) {
-        const s = document.createElement('script');
-        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
-        s.onload = () => setTimeout(() => exportPDF(), 200);
-        document.body.appendChild(s);
-        return;
-    }
+    if (!window.jspdf) return;
     const doc = new window.jspdf.jsPDF();
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(16);
@@ -496,15 +621,12 @@ function exportPDF() {
         if (!text || !text.text) return;
         const who = m.role === 'user' ? panggilan : 'Senka';
         const lines = doc.splitTextToSize(who + ': ' + text.text, 185);
-        doc.setTextColor(m.role === 'user' ? 120 : 220);
-        doc.setFont('helvetica', 'bold');
         lines.forEach(l => {
             if (y > 282) { doc.addPage(); y = 14; }
             doc.text(l, 10, y);
             y += 6;
         });
         y += 3;
-        doc.setFont('helvetica', 'normal');
     });
     doc.save('chat-senka.pdf');
 }
@@ -520,13 +642,7 @@ function exportDOC() {
     });
     html += '</body></html>';
     const blob = new Blob(['\ufeff' + html], { type: 'application/msword' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'chat-senka.doc';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+    saveBlob(blob, 'chat-senka.doc');
 }
 
 function appendMessage(role, text, isTypewriter = false) {
@@ -535,12 +651,14 @@ function appendMessage(role, text, isTypewriter = false) {
     if (!isTypewriter) {
         msgDiv.innerText = text;
         chatHistoryDOM.appendChild(msgDiv);
-        scrollToBottom();
+        scrollToBottom(true);
     }
     return msgDiv;
 }
 
-function scrollToBottom() { chatHistoryDOM.scrollTop = chatHistoryDOM.scrollHeight; }
+function scrollToBottom(smooth = false) {
+    chatHistoryDOM.scrollTo({ top: chatHistoryDOM.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+}
 messageInput.addEventListener('keypress', e => { if (e.key === 'Enter') sendToSenka(); });
 document.getElementById('image-prompt').addEventListener('keydown', e => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) generateImage();
@@ -550,56 +668,78 @@ function initSakura() {
     const canvas = document.getElementById('sakura-canvas');
     const ctx = canvas.getContext('2d');
     let petals = [];
-    const COLORS = ['rgba(255,182,193,', 'rgba(255,192,203,', 'rgba(255,209,220,', 'rgba(252,182,216,'];
+    let w, h, dpr;
+    const COLORS = ['#ffd1dc', '#ffb7c5', '#ffc1cc', '#f9c8e2', '#ff9ec1'];
 
     function resize() {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-        const target = Math.min(26, Math.max(10, Math.round(window.innerWidth / 45)));
-        if (petals.length < target) {
-            for (let i = petals.length; i < target; i++) petals.push(makePetal());
-        } else {
-            petals.length = target;
-        }
+        dpr = Math.min(window.devicePixelRatio || 1, 2);
+        w = window.innerWidth;
+        h = window.innerHeight;
+        canvas.width = Math.round(w * dpr);
+        canvas.height = Math.round(h * dpr);
+        canvas.style.width = w + 'px';
+        canvas.style.height = h + 'px';
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        const target = w < 600 ? 9 : w < 1200 ? 15 : 22;
+        while (petals.length < target) petals.push(makePetal());
+        petals.length = target;
     }
 
     function makePetal() {
         return {
-            x: Math.random() * canvas.width,
-            y: -30 - Math.random() * canvas.height * 0.7,
-            size: 7 + Math.random() * 9,
-            speed: 0.7 + Math.random() * 1.4,
+            x: Math.random() * w,
+            y: -30 - Math.random() * h * 0.6,
+            size: 7 + Math.random() * 8,
+            vy: 0.55 + Math.random() * 1.05,
             sway: Math.random() * Math.PI * 2,
-            swaySpeed: 0.008 + Math.random() * 0.02,
-            swayAmp: 20 + Math.random() * 30,
+            swaySpd: 0.006 + Math.random() * 0.014,
+            swayAmp: 18 + Math.random() * 26,
             rot: Math.random() * Math.PI * 2,
-            rotSpeed: 0.004 + Math.random() * 0.015,
-            color: COLORS[Math.floor(Math.random() * COLORS.length)],
-            alpha: 0.45 + Math.random() * 0.35
+            rotSpd: 0.005 + Math.random() * 0.018,
+            alpha: 0.5 + Math.random() * 0.35,
+            color: COLORS[Math.floor(Math.random() * COLORS.length)]
         };
     }
 
     function drawPetal(p) {
+        const s = p.size;
         ctx.save();
         ctx.translate(p.x + Math.sin(p.sway) * p.swayAmp, p.y);
         ctx.rotate(p.rot);
+        ctx.scale(1 + 0.06 * Math.sin(p.sway * 1.7), 1);
+        ctx.globalAlpha = p.alpha;
+        const g = ctx.createLinearGradient(0, -s * 1.1, 0, s * 0.3);
+        g.addColorStop(0, p.color);
+        g.addColorStop(1, '#ffffff');
         ctx.beginPath();
         ctx.moveTo(0, 0);
-        ctx.bezierCurveTo(p.size * 0.9, -p.size * 0.55, -p.size * 0.9, -p.size * 0.55, 0, 0);
-        ctx.quadraticCurveTo(-p.size * 0.5, p.size * 0.5, 0, p.size * 0.2);
-        ctx.quadraticCurveTo(p.size * 0.5, p.size * 0.5, 0, 0);
-        ctx.fillStyle = p.color + p.alpha + ')';
+        ctx.bezierCurveTo(-s * 0.9, -s * 0.35, -s * 0.5, -s * 1.15, 0, -s * 0.85);
+        ctx.bezierCurveTo(s * 0.5, -s * 1.15, s * 0.9, -s * 0.35, 0, 0);
+        ctx.fillStyle = g;
         ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+        ctx.lineWidth = 0.6;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(0, -s * 0.6);
+        ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+        ctx.stroke();
         ctx.restore();
     }
 
-    function tick() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    let last = performance.now();
+    function tick(now) {
+        const dt = Math.min((now - last) / 16.6667, 3);
+        last = now;
+        ctx.clearRect(0, 0, w, h);
+        const wind = 0.12 + 0.08 * Math.sin(now / 4000);
         for (const p of petals) {
-            p.y += p.speed;
-            p.sway += p.swaySpeed;
-            p.rot += p.rotSpeed;
-            if (p.y > canvas.height + 40) {
+            p.sway += p.swaySpd * dt;
+            p.rot += p.rotSpd * dt;
+            p.y += p.vy * dt;
+            p.x += wind * dt;
+            if (p.y > h + 40) {
                 Object.assign(p, makePetal(), { y: -30 });
             }
             drawPetal(p);
@@ -609,5 +749,5 @@ function initSakura() {
 
     window.addEventListener('resize', resize);
     resize();
-    tick();
+    requestAnimationFrame(tick);
 }

@@ -15,7 +15,7 @@
             <div class="senka-glow"></div>
             <img id="senka-model" src="assets/avatar.webp" alt="Senka" onerror="this.style.display='none';document.getElementById('senka-fallback').style.display='flex';">
             <div id="senka-fallback" class="senka-fallback"><i class="fa-solid fa-robot"></i></div>
-            <div class="senka-name-plate">🌸 Senka — Sahabat Virtualmu</div>
+            <div class="senka-name-plate">Senka — Sahabat Virtualmu</div>
         </div>
 
         <div class="chat-section">
@@ -53,7 +53,9 @@
                     <button id="send-btn" onclick="sendToSenka()"><i class="fa-solid fa-paper-plane"></i></button>
                 </div>
                 <div class="input-hint">
-                    <span>🎨 bikin gambar</span> · <span>📎 kirim foto (AI bisa baca)</span> · <span>🔊 suara</span>
+                    <span><i class="fa-solid fa-wand-magic-sparkles"></i> Bikin gambar</span>
+                    <span><i class="fa-solid fa-paperclip"></i> Foto — AI bisa baca</span>
+                    <span><i class="fa-solid fa-file-circle-plus"></i> Bikin file: "bikin file isinya hiragana"</span>
                 </div>
             </div>
         </div>
@@ -69,7 +71,7 @@
             <input type="text" id="panggilan-input" class="modal-input" placeholder="pengguna" maxlength="30">
             <label class="modal-label">Pilih model AI</label>
             <div id="model-picker" class="model-picker"></div>
-            <p class="modal-hint">Model bertanda 👁️ bisa baca gambar — dipakai otomatis saat kamu kirim foto.</p>
+            <p class="modal-hint">Model "bisa baca gambar" dipakai otomatis saat kamu kirim foto.</p>
             <button class="modal-btn" onclick="saveSettings()"><i class="fa-solid fa-check"></i> Simpan</button>
         </div>
     </div>
