@@ -16,11 +16,11 @@ const PROVIDERS = {
 };
 
 const MODELS = [
-    { key: "groq-llama33",  label: "Llama 3.3 70B (Groq, cepat)",          provider: "groq",       id: "llama-3.3-70b-versatile" },
-    { key: "groq-nemo",     label: "Mistral Nemo 12B (Groq, cepat)",       provider: "groq",       id: "mistral-nemo-12b" },
-    { key: "or-gptoss",     label: "GPT-OSS 20B (OpenRouter, free)",       provider: "openrouter", id: "openai/gpt-oss-20b:free" },
-    { key: "or-gemma",      label: "Gemma 4 31B (OpenRouter, free)",       provider: "openrouter", id: "google/gemma-4-31b-it:free" },
-    { key: "or-nemotron",   label: "Nemotron Ultra 550B (OpenRouter)",     provider: "openrouter", id: "nvidia/nemotron-3-ultra-550b-a55b:free" }
+    { key: "groq-llama33",   label: "Llama 3.3 70B (Groq, cepat)",          provider: "groq",       id: "llama-3.3-70b-versatile" },
+    { key: "groq-oss120b",   label: "GPT-OSS 120B (Groq)",                  provider: "groq",       id: "openai/gpt-oss-120b" },
+    { key: "or-gptoss",      label: "GPT-OSS 20B (OpenRouter, free)",       provider: "openrouter", id: "openai/gpt-oss-20b:free" },
+    { key: "or-gemma",       label: "Gemma 4 31B (OpenRouter, free)",       provider: "openrouter", id: "google/gemma-4-31b-it:free" },
+    { key: "or-nemotron",    label: "Nemotron Ultra 550B (OpenRouter)",     provider: "openrouter", id: "nvidia/nemotron-3-ultra-550b-a55b:free" }
 ];
 
 const IMAGE_MODELS = {
