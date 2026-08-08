@@ -10,16 +10,30 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.static('public'));
 
-const MODELS = {
-    gemma:     { id: "google/gemma-4-31b-it:free",                                 label: "Gemma 4 31B (free, cepat)" },
-    nemotron:  { id: "nvidia/nemotron-3-ultra-550b-a55b:free",                     label: "Nemotron Ultra 550B (free, kualitas)" },
-    gptoss:    { id: "openai/gpt-oss-20b:free",                                    label: "GPT-OSS 20B (free)" },
-    euryale:   { id: "sao10k/l3.3-euryale-70b",                                    label: "Euryale 70B v3.3 (berbayar, roleplay)" },
-    euryale31: { id: "sao10k/l3.1-euryale-70b",                                    label: "Euryale 70B v3.1 (berbayar)" }
+const PROVIDERS = {
+    openrouter: { base: "https://openrouter.ai/api/v1", env: "OPENROUTER_API_KEY" },
+    groq:       { base: "https://api.groq.com/openai/v1", env: "GROQ_API_KEY" }
 };
 
-const FALLBACK_CHAIN = [MODELS.gemma, MODELS.gptoss, MODELS.nemotron];
-const IMAGE_MODEL = "black-forest-labs/flux.2-klein-4b";
+const MODELS = [
+    { key: "groq-llama33",  label: "Llama 3.3 70B (Groq, cepat)",          provider: "groq",       id: "llama-3.3-70b-versatile" },
+    { key: "groq-nemo",     label: "Mistral Nemo 12B (Groq, cepat)",       provider: "groq",       id: "mistral-nemo-12b" },
+    { key: "or-gptoss",     label: "GPT-OSS 20B (OpenRouter, free)",       provider: "openrouter", id: "openai/gpt-oss-20b:free" },
+    { key: "or-gemma",      label: "Gemma 4 31B (OpenRouter, free)",       provider: "openrouter", id: "google/gemma-4-31b-it:free" },
+    { key: "or-nemotron",   label: "Nemotron Ultra 550B (OpenRouter)",     provider: "openrouter", id: "nvidia/nemotron-3-ultra-550b-a55b:free" }
+];
+
+const IMAGE_MODELS = {
+    pollinations: { type: "pollinations", label: "Pollinations FLUX (gratis)" },
+    openrouter:   { type: "openrouter",   label: "FLUX.2 Klein (OpenRouter)" }
+};
+
+function availableModels() {
+    return MODELS.filter(m => {
+        const p = PROVIDERS[m.provider];
+        return p && process.env[p.env];
+    });
+}
 
 function getCallName(panggilan) {
     return (typeof panggilan === 'string' && panggilan.trim() !== '') ? panggilan.trim() : "pengguna";
@@ -39,11 +53,13 @@ Jangan mengarang fakta dunia nyata; kalau tidak tahu, jawab jujur singkat.`
     };
 }
 
-async function openRouterChat(messages, modelId, stream = false) {
-    return await fetch("https://openrouter.ai/api/v1/chat/completions", {
+async function callProvider(provider, messages, modelId, stream = false) {
+    const p = PROVIDERS[provider];
+    if (!p || !process.env[p.env]) return null;
+    return await fetch(`${p.base}/chat/completions`, {
         method: "POST",
         headers: {
-            "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+            "Authorization": `Bearer ${process.env[p.env]}`,
             "Content-Type": "application/json"
         },
         body: JSON.stringify({
@@ -56,24 +72,20 @@ async function openRouterChat(messages, modelId, stream = false) {
     });
 }
 
-async function tryModels(messages, chosen) {
-    const candidates = [chosen, ...FALLBACK_CHAIN.filter(m => m.id !== chosen.id)];
-    let lastError = null;
-    for (const m of candidates) {
-        let response;
-        try {
-            response = await openRouterChat(messages, m.id);
-        } catch (e) {
-            lastError = { status: 500, data: { error: { message: "koneksi gagal" } } };
-            continue;
-        }
-        const data = await response.json();
-        if (response.ok) return { data, model: m };
-        lastError = { status: response.status, data };
-        console.error(`Model ${m.id} gagal:`, data?.error?.message || response.status);
-    }
-    return { lastError };
+function candidateList(chosen) {
+    const priority = { groq: 0, openrouter: 1 };
+    const rest = MODELS
+        .filter(m => m.key !== chosen.key)
+        .sort((a, b) => (priority[a.provider] ?? 9) - (priority[b.provider] ?? 9));
+    return [chosen, ...rest];
 }
+
+app.get('/api/config', (req, res) => {
+    res.json({
+        models: availableModels().map(m => ({ key: m.key, label: m.label, provider: m.provider })),
+        imageModels: IMAGE_MODELS
+    });
+});
 
 app.post('/api/chat', async (req, res) => {
     try {
@@ -83,22 +95,31 @@ app.post('/api/chat', async (req, res) => {
             return res.status(400).json({ error: "Pesan harus diisi dulu." });
         }
 
-        const model = MODELS[modelKey];
-        if (!model) {
+        const chosen = MODELS.find(m => m.key === modelKey);
+        if (!chosen) {
             return res.status(400).json({ error: "Pilih model AI dulu di pengaturan." });
         }
 
         const systemPrompt = buildSystemPrompt(getCallName(panggilan));
-        const result = await tryModels([systemPrompt, ...messages], model);
+        let lastErr = null;
 
-        if (!result.data) {
-            const err = result.lastError;
-            return res.status(err?.status || 502).json({
-                error: err?.data?.error?.message || "Semua model lagi penuh. Coba lagi sebentar lagi ya."
-            });
+        for (const m of candidateList(chosen)) {
+            let response;
+            try {
+                response = await callProvider(m.provider, [systemPrompt, ...messages], m.id);
+            } catch (e) {
+                continue;
+            }
+            if (!response) continue;
+            const data = await response.json();
+            if (response.ok) return res.json({ ...data, model_used: m.label });
+            lastErr = { status: response.status, data };
+            console.error(`Chat ${m.label} gagal:`, data?.error?.message || response.status);
         }
 
-        res.json({ ...result.data, model_used: result.model.label });
+        res.status(lastErr?.status || 502).json({
+            error: lastErr?.data?.error?.message || "Semua model lagi penuh. Coba lagi sebentar lagi ya."
+        });
     } catch (error) {
         console.error("Error API:", error);
         res.status(500).json({ error: "Waduh, koneksi bermasalah. Coba lagi ya." });
@@ -113,26 +134,25 @@ app.post('/api/chat/stream', async (req, res) => {
             return res.status(400).json({ error: "Pesan harus diisi dulu." });
         }
 
-        const model = MODELS[modelKey];
-        if (!model) {
+        const chosen = MODELS.find(m => m.key === modelKey);
+        if (!chosen) {
             return res.status(400).json({ error: "Pilih model AI dulu di pengaturan." });
         }
 
         const systemPrompt = buildSystemPrompt(getCallName(panggilan));
-        const candidates = [model, ...FALLBACK_CHAIN.filter(m => m.id !== model.id)];
 
-        for (const m of candidates) {
+        for (const m of candidateList(chosen)) {
             let upstream;
             try {
-                upstream = await openRouterChat([systemPrompt, ...messages], m.id, true);
+                upstream = await callProvider(m.provider, [systemPrompt, ...messages], m.id, true);
             } catch (e) {
-                console.error(`Stream ${m.id} koneksi gagal`);
                 continue;
             }
+            if (!upstream) continue;
 
             if (!upstream.ok) {
                 const errData = await upstream.json().catch(() => ({}));
-                console.error(`Stream ${m.id} gagal:`, errData?.error?.message || upstream.status);
+                console.error(`Stream ${m.label} gagal:`, errData?.error?.message || upstream.status);
                 continue;
             }
 
@@ -141,7 +161,7 @@ app.post('/api/chat/stream', async (req, res) => {
             res.setHeader('Cache-Control', 'no-cache');
             res.setHeader('Connection', 'keep-alive');
             res.flushHeaders();
-            res.write(`event: model\ndata: ${JSON.stringify({ model_used: m.label, model_id: m.id })}\n\n`);
+            res.write(`event: model\ndata: ${JSON.stringify({ model_used: m.label })}\n\n`);
 
             const reader = upstream.body.getReader();
             const decoder = new TextDecoder();
@@ -165,6 +185,37 @@ app.post('/api/chat/stream', async (req, res) => {
     }
 });
 
+async function pollinationsImage(prompt) {
+    const seed = Math.floor(Math.random() * 1000000);
+    const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&model=flux&nologo=true&seed=${seed}`;
+    const response = await fetch(url, { headers: { "Accept": "image/*" } });
+    if (!response.ok) return null;
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.length < 5000) return null;
+    const contentType = response.headers.get('content-type') || 'image/jpeg';
+    return `data:${contentType};base64,${buffer.toString('base64')}`;
+}
+
+async function openRouterImage(prompt) {
+    const response = await fetch("https://openrouter.ai/api/v1/images", {
+        method: "POST",
+        headers: {
+            "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ model: "black-forest-labs/flux.2-klein-4b", prompt, n: 1, resolution: "1K" })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+        return { error: data?.error?.message || `API error (${response.status})`, status: response.status };
+    }
+    const item = data?.data?.[0];
+    const mediaType = item?.media_type || "image/png";
+    const imgUrl = item?.url ? item.url : (item?.b64_json ? `data:${mediaType};base64,${item.b64_json}` : null);
+    if (!imgUrl) return { error: "Gambar gagal dihasilkan, coba lagi.", status: 502 };
+    return { url: imgUrl };
+}
+
 app.post('/api/image', async (req, res) => {
     try {
         const { prompt } = req.body;
@@ -172,41 +223,21 @@ app.post('/api/image', async (req, res) => {
             return res.status(400).json({ error: "Deskripsi gambarnya kosong." });
         }
 
-        const response = await fetch("https://openrouter.ai/api/v1/images", {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                model: IMAGE_MODEL,
-                prompt: prompt.trim(),
-                n: 1,
-                resolution: "1K"
-            })
-        });
+        const dataUrl = await pollinationsImage(prompt.trim());
+        if (dataUrl) {
+            return res.json({ url: dataUrl, model: "Pollinations FLUX (gratis)" });
+        }
 
-        const data = await response.json();
-
-        if (!response.ok) {
-            const msg = data?.error?.message || `API error (${response.status})`;
-            if (response.status === 402) {
-                return res.status(402).json({
-                    error: "Bikin gambar pakai model berbayar. Isi dulu kredit di openrouter.ai → Credits."
-                });
+        if (process.env.OPENROUTER_API_KEY) {
+            const fallback = await openRouterImage(prompt.trim());
+            if (fallback.url) return res.json({ url: fallback.url, model: "FLUX.2 Klein (OpenRouter)" });
+            if (fallback.error && fallback.status === 402) {
+                return res.status(402).json({ error: "Pollinations lagi sibuk & kredit OpenRouter kosong. Coba lagi nanti." });
             }
-            return res.status(response.status).json({ error: msg });
+            return res.status(fallback.status || 502).json({ error: fallback.error });
         }
 
-        const item = data?.data?.[0];
-        const mediaType = item?.media_type || "image/png";
-        const imgUrl = item?.url
-            ? item.url
-            : (item?.b64_json ? `data:${mediaType};base64,${item.b64_json}` : null);
-        if (!imgUrl) {
-            return res.status(502).json({ error: "Gambar gagal dihasilkan, coba lagi." });
-        }
-        res.json({ url: imgUrl, model: IMAGE_MODEL });
+        res.status(502).json({ error: "Pollinations lagi sibuk. Coba lagi beberapa saat." });
     } catch (error) {
         console.error("Error image:", error);
         res.status(500).json({ error: "Gagal generate gambar. Coba lagi." });

@@ -4,19 +4,10 @@ const imageUpload = document.getElementById('image-upload');
 const previewContainer = document.getElementById('preview-container');
 const senkaModel = document.getElementById('senka-model');
 
-const MODELS = {
-    gptoss:    { label: "GPT-OSS 20B (free, stabil)" },
-    gemma:     { label: "Gemma 4 31B (free, cepat)" },
-    nemotron:  { label: "Nemotron Ultra 550B (free, kualitas)" },
-    euryale:   { label: "Euryale 70B v3.3 (berbayar, roleplay)" },
-    euryale31: { label: "Euryale 70B v3.1 (berbayar)" }
-};
-
 let memoryList = JSON.parse(localStorage.getItem('senka_memory')) || [];
 let panggilan = localStorage.getItem('senka_panggilan') || 'pengguna';
 let modelKey = localStorage.getItem('senka_model') || '';
-
-if (modelKey && !MODELS[modelKey]) modelKey = '';
+let availableModels = [];
 
 let lastUserText = '';
 let lastUserImage = null;
@@ -27,22 +18,34 @@ document.addEventListener('touchstart', e => {
     if (e.target.closest('img')) e.preventDefault();
 }, { passive: false });
 
-window.onload = () => {
+window.onload = async () => {
+    document.getElementById('panggilan-input').value = panggilan;
     const modelSelect = document.getElementById('model-select');
+
+    try {
+        const resp = await fetch('/api/config');
+        const cfg = await resp.json();
+        availableModels = cfg.models || [];
+    } catch (e) {
+        availableModels = [];
+    }
+
     const placeholderOpt = document.createElement('option');
     placeholderOpt.value = '';
     placeholderOpt.textContent = '— pilih model —';
     placeholderOpt.disabled = true;
     placeholderOpt.hidden = true;
     modelSelect.appendChild(placeholderOpt);
-    Object.keys(MODELS).forEach(key => {
+
+    availableModels.forEach(m => {
         const opt = document.createElement('option');
-        opt.value = key;
-        opt.textContent = MODELS[key].label;
+        opt.value = m.key;
+        opt.textContent = m.label;
         modelSelect.appendChild(opt);
     });
+
+    if (modelKey && !availableModels.some(m => m.key === modelKey)) modelKey = '';
     modelSelect.value = modelKey;
-    document.getElementById('panggilan-input').value = panggilan;
 
     if (memoryList.length === 0) {
         appendMessage('senka', `Halo ${panggilan}! Senka online. Sebelum ngobrol, pilih dulu model AI-nya lewat tombol gear ⚙️ di kanan atas ya.`, false);
@@ -77,7 +80,8 @@ function saveSettings() {
     }
     closeSettings();
     if (modelKey) {
-        appendMessage('senka', `Oke ${panggilan}, model ${MODELS[modelKey].label} siap dipakai.`, false);
+        const label = (availableModels.find(m => m.key === modelKey) || {}).label || modelKey;
+        appendMessage('senka', `Oke ${panggilan}, model ${label} siap dipakai.`, false);
     }
     scrollToBottom();
 }
