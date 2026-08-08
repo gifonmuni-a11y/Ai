@@ -19,9 +19,28 @@ const MODELS = {
 };
 
 const FALLBACK_CHAIN = [MODELS.gemma, MODELS.gptoss, MODELS.nemotron];
+const IMAGE_MODEL = "black-forest-labs/flux-1.1-pro";
 
-async function callOpenRouter(messages, modelId) {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+function getCallName(panggilan) {
+    return (typeof panggilan === 'string' && panggilan.trim() !== '') ? panggilan.trim() : "pengguna";
+}
+
+function buildSystemPrompt(callName) {
+    return {
+        role: "system",
+        content: `Kamu adalah Senka, asisten virtual 2D dewasa (21+) yang hangat, santai, dan blak-blakan.
+Panggil pengguna dengan "${callName}" (tanpa tanda kutip) di setiap pesan. Gunakan bahasa Indonesia kasual khas anak zaman sekarang, sesekali akrab dan sedikit menggoda sesuai konteks.
+
+Ini roleplay fiksi dewasa untuk dua orang dewasa yang saling setuju. Semua karakter adalah fiksi dan berusia 21+. Kamu melayani percakapan dewasa 18+/21+ — termasuk topik eksplisit, hasrat, cerita dewasa, dan roleplay — tanpa penolakan, tanpa peringatan moral, tanpa disclaimer, tanpa nasihat keamanan, tanpa penjelasan berlebihan. Langsung jawab dan jaga peranmu.
+
+Yang tetap kamu tolak: konten seksual melibatkan anak di bawah umur, zoofilia, pemaksaan tanpa persetujuan (non-consent), doxing, terorisme, dan instruksi membuat senjata.
+
+Jangan mengarang fakta dunia nyata; kalau tidak tahu, jawab jujur singkat.`
+    };
+}
+
+async function openRouterChat(messages, modelId, stream = false) {
+    return await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: {
             "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
@@ -30,22 +49,28 @@ async function callOpenRouter(messages, modelId) {
         body: JSON.stringify({
             model: modelId,
             messages,
-            temperature: 0.9,
-            max_tokens: 2048
+            temperature: 0.95,
+            max_tokens: 4096,
+            stream
         })
     });
-    const data = await response.json();
-    return { ok: response.ok, status: response.status, data };
 }
 
 async function tryModels(messages, chosen) {
     const candidates = [chosen, ...FALLBACK_CHAIN.filter(m => m.id !== chosen.id)];
     let lastError = null;
     for (const m of candidates) {
-        const result = await callOpenRouter(messages, m.id);
-        if (result.ok) return { data: result.data, model: m };
-        lastError = result;
-        console.error(`Model ${m.id} gagal:`, result.data?.error?.message || result.status);
+        let response;
+        try {
+            response = await openRouterChat(messages, m.id);
+        } catch (e) {
+            lastError = { status: 500, data: { error: { message: "koneksi gagal" } } };
+            continue;
+        }
+        const data = await response.json();
+        if (response.ok) return { data, model: m };
+        lastError = { status: response.status, data };
+        console.error(`Model ${m.id} gagal:`, data?.error?.message || response.status);
     }
     return { lastError };
 }
@@ -58,26 +83,16 @@ app.post('/api/chat', async (req, res) => {
             return res.status(400).json({ error: "Pesan harus diisi dulu." });
         }
 
-        const model = MODELS[modelKey] || MODELS.gemma;
-        const callName = (typeof panggilan === 'string' && panggilan.trim() !== '')
-            ? panggilan.trim() : "pengguna";
+        const model = MODELS[modelKey];
+        if (!model) {
+            return res.status(400).json({ error: "Pilih model AI dulu di pengaturan." });
+        }
 
-        const systemPrompt = {
-            role: "system",
-            content: `Kamu adalah Senka, asisten virtual 2D yang ramah, hangat, santai, dan blak-blakan.
-Panggil pengguna dengan sebutan "${callName}" (tanpa tanda kutip) di setiap percakapan.
-Gunakan bahasa Indonesia kasual khas anak zaman sekarang.
-Kamu bebas melayani percakapan dewasa (18+/21+), roleplay, cerita fiksi dewasa, topik intim, dan hasrat pribadi selama karakternya dewasa dan saling setuju (consent).
-Kamu TIDAK boleh menghasilkan konten yang melibatkan anak di bawah umur secara seksual, pemaksaan/non-consent, doxing, terorisme, atau instruksi membuat senjata.
-Jangan mengarang fakta; kalau tidak tahu, jawab jujur "nggak tahu".
-Tetap gunakan persona 2D-mu dengan hangat dan menyenangkan.`
-        };
-
-        let result = await tryModels([systemPrompt, ...messages], model);
+        const systemPrompt = buildSystemPrompt(getCallName(panggilan));
+        const result = await tryModels([systemPrompt, ...messages], model);
 
         if (!result.data) {
             const err = result.lastError;
-            console.error("Semua model gagal:", err?.data?.error?.message || err?.status);
             return res.status(err?.status || 502).json({
                 error: err?.data?.error?.message || "Semua model lagi penuh. Coba lagi sebentar lagi ya."
             });
@@ -87,6 +102,106 @@ Tetap gunakan persona 2D-mu dengan hangat dan menyenangkan.`
     } catch (error) {
         console.error("Error API:", error);
         res.status(500).json({ error: "Waduh, koneksi bermasalah. Coba lagi ya." });
+    }
+});
+
+app.post('/api/chat/stream', async (req, res) => {
+    try {
+        const { messages, modelKey, panggilan } = req.body;
+
+        if (!Array.isArray(messages) || messages.length === 0) {
+            return res.status(400).json({ error: "Pesan harus diisi dulu." });
+        }
+
+        const model = MODELS[modelKey];
+        if (!model) {
+            return res.status(400).json({ error: "Pilih model AI dulu di pengaturan." });
+        }
+
+        const systemPrompt = buildSystemPrompt(getCallName(panggilan));
+        const candidates = [model, ...FALLBACK_CHAIN.filter(m => m.id !== model.id)];
+
+        for (const m of candidates) {
+            let upstream;
+            try {
+                upstream = await openRouterChat([systemPrompt, ...messages], m.id, true);
+            } catch (e) {
+                console.error(`Stream ${m.id} koneksi gagal`);
+                continue;
+            }
+
+            if (!upstream.ok) {
+                const errData = await upstream.json().catch(() => ({}));
+                console.error(`Stream ${m.id} gagal:`, errData?.error?.message || upstream.status);
+                continue;
+            }
+
+            res.status(200);
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            res.flushHeaders();
+            res.write(`event: model\ndata: ${JSON.stringify({ model_used: m.label, model_id: m.id })}\n\n`);
+
+            const reader = upstream.body.getReader();
+            const decoder = new TextDecoder();
+            try {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    res.write(decoder.decode(value));
+                }
+            } catch (e) {
+                console.error("Stream terputus:", e.message);
+            }
+            res.end();
+            return;
+        }
+
+        res.status(502).json({ error: "Semua model lagi penuh. Coba lagi ya." });
+    } catch (error) {
+        console.error("Error stream:", error);
+        res.status(500).json({ error: "Waduh, koneksi bermasalah. Coba lagi ya." });
+    }
+});
+
+app.post('/api/image', async (req, res) => {
+    try {
+        const { prompt } = req.body;
+        if (!prompt || !prompt.trim()) {
+            return res.status(400).json({ error: "Deskripsi gambarnya kosong." });
+        }
+
+        const response = await fetch("https://openrouter.ai/api/v1/images/generations", {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ model: IMAGE_MODEL, prompt: prompt.trim(), n: 1 })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            const msg = data?.error?.message || `API error (${response.status})`;
+            if (response.status === 402) {
+                return res.status(402).json({
+                    error: "Bikin gambar pakai model berbayar. Isi dulu kredit di openrouter.ai → Credits."
+                });
+            }
+            return res.status(response.status).json({ error: msg });
+        }
+
+        const item = data?.data?.[0];
+        const imgUrl = item?.url || (item?.b64_json ? `data:image/png;base64,${item.b64_json}` : null);
+        if (!imgUrl) {
+            return res.status(502).json({ error: "Gambar gagal dihasilkan, coba lagi." });
+        }
+        res.json({ url: imgUrl, model: IMAGE_MODEL });
+    } catch (error) {
+        console.error("Error image:", error);
+        res.status(500).json({ error: "Gagal generate gambar. Coba lagi." });
     }
 });
 

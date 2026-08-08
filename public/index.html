@@ -35,6 +35,7 @@
                     <input type="text" id="message-input" placeholder="Ketik ke Senka..." autocomplete="off">
                     <button id="send-btn" onclick="sendToSenka()"><i class="fa-solid fa-paper-plane"></i></button>
                 </div>
+                <div class="input-hint">Perintah: /gambar &lt;deskripsi&gt; untuk bikin gambar AI</div>
             </div>
         </div>
     </div>
@@ -49,6 +50,7 @@
             <input type="text" id="panggilan-input" class="modal-input" placeholder="pengguna" maxlength="30">
             <label class="modal-label" for="model-select">Model AI</label>
             <select id="model-select" class="modal-input"></select>
+            <p class="modal-hint">Tanpa memilih model, chat tidak bisa dikirim.</p>
             <button class="modal-btn" onclick="saveSettings()"><i class="fa-solid fa-check"></i> Simpan</button>
         </div>
     </div>

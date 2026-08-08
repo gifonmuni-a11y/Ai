@@ -14,10 +14,27 @@ const MODELS = {
 
 let memoryList = JSON.parse(localStorage.getItem('senka_memory')) || [];
 let panggilan = localStorage.getItem('senka_panggilan') || 'pengguna';
-let modelKey = localStorage.getItem('senka_model') || 'gemma';
+let modelKey = localStorage.getItem('senka_model') || '';
+
+if (modelKey && !MODELS[modelKey]) modelKey = '';
+
+let lastUserText = '';
+let lastUserImage = null;
+
+document.addEventListener('contextmenu', e => e.preventDefault());
+document.addEventListener('touchstart', e => {
+    if (e.target.closest('input, textarea, select')) return;
+    if (e.target.closest('img')) e.preventDefault();
+}, { passive: false });
 
 window.onload = () => {
     const modelSelect = document.getElementById('model-select');
+    const placeholderOpt = document.createElement('option');
+    placeholderOpt.value = '';
+    placeholderOpt.textContent = '— pilih model —';
+    placeholderOpt.disabled = true;
+    placeholderOpt.hidden = true;
+    modelSelect.appendChild(placeholderOpt);
     Object.keys(MODELS).forEach(key => {
         const opt = document.createElement('option');
         opt.value = key;
@@ -28,10 +45,7 @@ window.onload = () => {
     document.getElementById('panggilan-input').value = panggilan;
 
     if (memoryList.length === 0) {
-        const initialGreeting = `Halo ${panggilan}! Senka udah online nih. Mau ngobrolin apa hari ini?`;
-        appendMessage('senka', initialGreeting, false);
-        memoryList.push({ role: 'assistant', content: [{ type: "text", text: initialGreeting }] });
-        localStorage.setItem('senka_memory', JSON.stringify(memoryList));
+        appendMessage('senka', `Halo ${panggilan}! Senka online. Sebelum ngobrol, pilih dulu model AI-nya lewat tombol gear ⚙️ di kanan atas ya.`, false);
     } else {
         memoryList.forEach(msg => {
             if (msg.content && msg.content[0]) appendMessage(msg.role, msg.content[0].text, false);
@@ -56,10 +70,15 @@ function saveSettings() {
         panggilan = newPanggilan;
         localStorage.setItem('senka_panggilan', panggilan);
     }
-    modelKey = document.getElementById('model-select').value;
-    localStorage.setItem('senka_model', modelKey);
+    const chosen = document.getElementById('model-select').value;
+    if (chosen) {
+        modelKey = chosen;
+        localStorage.setItem('senka_model', modelKey);
+    }
     closeSettings();
-    appendMessage('senka', `Oke ${panggilan}, mulai sekarang Senka manggil kamu gitu ya.`, false);
+    if (modelKey) {
+        appendMessage('senka', `Oke ${panggilan}, model ${MODELS[modelKey].label} siap dipakai.`, false);
+    }
     scrollToBottom();
 }
 
@@ -105,16 +124,31 @@ function removeImage() {
     previewContainer.style.display = 'none';
 }
 
-const toBase64 = file => new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = error => reject(error);
-});
-
 async function sendToSenka() {
     const text = messageInput.value.trim();
     if (!text && !base64Image) return;
+
+    if (!modelKey) {
+        openSettings();
+        appendMessage('senka', `Pilih dulu model AI-nya ya ${panggilan}, terus kirim lagi.`, false);
+        scrollToBottom();
+        return;
+    }
+
+    if (text.toLowerCase().startsWith('/gambar')) {
+        const prompt = text.slice(7).trim();
+        if (!prompt) {
+            appendMessage('senka', 'Contoh: /gambar <deskripsi>. Contoh: /gambar gadis anime berambut biru di taman.', false);
+            scrollToBottom();
+            return;
+        }
+        handleGambar(prompt);
+        messageInput.value = '';
+        return;
+    }
+
+    lastUserText = text;
+    lastUserImage = base64Image;
 
     const userMessageContent = [];
     if (text) userMessageContent.push({ type: "text", text: text });
@@ -130,32 +164,117 @@ async function sendToSenka() {
 
     if (senkaModel.src && senkaModel.style.display !== 'none') senkaModel.src = "assets/senka_talk.gif";
 
+    const msgDiv = appendMessage('senka', '', true);
+    msgDiv.innerText = 'Senka ngetik…';
+    chatHistoryDOM.appendChild(msgDiv);
+    scrollToBottom();
+
     try {
-        const response = await fetch('/api/chat', {
+        const response = await fetch('/api/chat/stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ messages: memoryList, modelKey, panggilan })
         });
 
-        const data = await response.json();
-
         if (!response.ok) {
-            throw new Error(data.error || `API error (${response.status})`);
-        }
-        if (!data.choices || !data.choices[0] || !data.choices[0].message) {
-            throw new Error("Respons API tidak sesuai format.");
+            let msg = `API error (${response.status})`;
+            try { msg = (await response.json()).error || msg; } catch (e) { }
+            throw new Error(msg);
         }
 
-        const senkaReply = data.choices[0].message.content;
-        await typeWriterEffect('senka', senkaReply);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let full = '';
+        let started = false;
 
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+
+            for (const line of lines) {
+                if (!line.startsWith('data:')) continue;
+                const payload = line.slice(5).trim();
+                if (payload === '[DONE]') continue;
+                try {
+                    const j = JSON.parse(payload);
+                    if (!j.choices) continue;
+                    const delta = j.choices[0]?.delta?.content;
+                    if (delta) {
+                        if (!started) { msgDiv.innerText = ''; started = true; }
+                        msgDiv.innerText += delta;
+                        scrollToBottom();
+                    }
+                } catch (e) { }
+            }
+        }
+
+        if (!started) {
+            if (full === '') msgDiv.innerText = '(jawaban kosong, coba lagi)';
+            throw new Error('empty');
+        }
+
+        const senkaReply = msgDiv.innerText;
         memoryList.push({ role: 'assistant', content: [{ type: "text", text: senkaReply }] });
         localStorage.setItem('senka_memory', JSON.stringify(memoryList));
     } catch (error) {
-        appendMessage('senka', "Waduh, lagi error nih. Coba lagi ya.", false);
+        if (error.message === 'empty') {
+            memoryList.pop();
+            localStorage.setItem('senka_memory', JSON.stringify(memoryList));
+            return;
+        }
+        const errBubble = document.createElement('div');
+        errBubble.classList.add('message', 'msg-senka');
+        errBubble.innerHTML = `Waduh error: ${error.message.replace(/</g, '&lt;')} — <span class="retry-btn" onclick="retryLast()">coba lagi</span>`;
+        msgDiv.replaceWith(errBubble);
+        scrollToBottom();
     }
 
     if (senkaModel.src && senkaModel.style.display !== 'none') senkaModel.src = "assets/senka_idle.png";
+}
+
+async function retryLast() {
+    if (!lastUserText && !lastUserImage) return;
+    messageInput.value = lastUserText;
+    base64Image = lastUserImage;
+    if (lastUserImage) {
+        document.getElementById('file-name-preview').innerText = " gambar";
+        previewContainer.style.display = 'flex';
+    }
+    sendToSenka();
+}
+
+async function handleGambar(prompt) {
+    appendMessage('user', `/gambar ${prompt}`, false);
+    const loading = appendMessage('senka', '🎨 bikin gambar...', false);
+    scrollToBottom();
+    try {
+        const response = await fetch('/api/image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            loading.innerText = 'Gagal: ' + (data.error || `API error (${response.status})`);
+            scrollToBottom();
+            return;
+        }
+        loading.innerHTML = '';
+        const img = document.createElement('img');
+        img.src = data.url;
+        img.classList.add('chat-img');
+        img.alt = prompt;
+        img.onerror = () => { loading.innerText = 'Gagal memuat gambar. Coba lagi.'; };
+        loading.appendChild(img);
+        scrollToBottom();
+    } catch (e) {
+        loading.innerText = 'Gagal generate gambar. Coba lagi.';
+        scrollToBottom();
+    }
 }
 
 function appendMessage(role, text, isTypewriter = false) {
@@ -168,24 +287,6 @@ function appendMessage(role, text, isTypewriter = false) {
         scrollToBottom();
     }
     return msgDiv;
-}
-
-function typeWriterEffect(role, text) {
-    return new Promise(resolve => {
-        const msgDiv = appendMessage(role, "", true);
-        chatHistoryDOM.appendChild(msgDiv);
-
-        let i = 0;
-        const interval = setInterval(() => {
-            msgDiv.innerText += text.charAt(i);
-            i++;
-            scrollToBottom();
-            if (i >= text.length) {
-                clearInterval(interval);
-                resolve();
-            }
-        }, 15);
-    });
 }
 
 function scrollToBottom() { chatHistoryDOM.scrollTop = chatHistoryDOM.scrollHeight; }

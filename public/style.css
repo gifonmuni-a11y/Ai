@@ -1,6 +1,10 @@
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
 * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Poppins', sans-serif; }
-body { background-color: #0f172a; background-image: radial-gradient(circle at top right, #0f2b38, #0f172a); height: 100vh; overflow: hidden; color: #f8fafc; }
+html, body { height: 100%; }
+body { background-color: #0f172a; background-image: radial-gradient(circle at top right, #0f2b38, #0f172a); height: 100vh; height: 100dvh; overflow: hidden; color: #f8fafc; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+input, textarea, select { user-select: text; -webkit-user-select: text; }
+img { -webkit-user-drag: none; user-drag: none; pointer-events: none; }
+img.chat-img { pointer-events: auto; }
 .main-wrapper { display: flex; height: 100vh; width: 100vw; }
 .senka-section { width: 40%; position: relative; display: flex; justify-content: center; align-items: flex-end; }
 #senka-model { height: 90vh; object-fit: contain; filter: drop-shadow(0 0 15px rgba(20, 184, 166, 0.3)); transition: 0.3s; }
@@ -16,12 +20,14 @@ body { background-color: #0f172a; background-image: radial-gradient(circle at to
 .chat-history { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; scroll-behavior: smooth; }
 .chat-history::-webkit-scrollbar { width: 5px; }
 .chat-history::-webkit-scrollbar-thumb { background: rgba(56, 189, 248, 0.3); border-radius: 10px; }
-.message { max-width: 85%; padding: 12px 16px; border-radius: 16px; font-size: 0.9rem; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; }
-.msg-user { align-self: flex-end; background: linear-gradient(135deg, #14b8a6, #0ea5e9); border-bottom-right-radius: 4px; box-shadow: 0 4px 15px rgba(14, 165, 233, 0.3); }
+.message { max-width: 85%; padding: 12px 16px; border-radius: 16px; font-size: 0.9rem; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: anywhere; min-width: 0; }
+.msg-user { align-self: flex-end; margin-left: auto; background: linear-gradient(135deg, #14b8a6, #0ea5e9); border-bottom-right-radius: 4px; box-shadow: 0 4px 15px rgba(14, 165, 233, 0.3); }
 .msg-senka { align-self: flex-start; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(56, 189, 248, 0.2); border-bottom-left-radius: 4px; }
 .preview-container { display: none; padding: 10px 20px; background: rgba(0,0,0,0.2); border-top: 1px solid rgba(56, 189, 248, 0.1); justify-content: space-between; align-items: center; font-size: 0.85rem; color: #38bdf8; }
 .remove-btn { cursor: pointer; color: #ef4444; }
-.input-area { padding: 15px 20px; display: flex; gap: 10px; align-items: center; border-top: 1px solid rgba(56, 189, 248, 0.2); }
+.input-area { padding: 15px 20px 8px; display: flex; gap: 10px; align-items: center; border-top: 1px solid rgba(56, 189, 248, 0.2); }
+.input-hint { text-align: center; font-size: 0.68rem; color: #64748b; padding: 0 20px 10px; }
+#message-input { flex: 1; min-width: 0; background: rgba(15, 23, 42, 0.5); border: 1px solid rgba(56, 189, 248, 0.3); color: #fff; padding: 12px 18px; border-radius: 25px; outline: none; transition: 0.3s; }
 .upload-btn { cursor: pointer; color: #38bdf8; font-size: 1.2rem; padding: 10px; transition: 0.3s; }
 .upload-btn:hover { color: #14b8a6; }
 #message-input { flex: 1; background: rgba(15, 23, 42, 0.5); border: 1px solid rgba(56, 189, 248, 0.3); color: #fff; padding: 12px 18px; border-radius: 25px; outline: none; transition: 0.3s; }
@@ -35,6 +41,9 @@ body { background-color: #0f172a; background-image: radial-gradient(circle at to
 .modal-header h3 { color: #38bdf8; font-size: 1rem; }
 .modal-close { color: #ef4444; cursor: pointer; }
 .modal-label { display: block; color: #94a3b8; font-size: 0.8rem; margin: 12px 0 6px; }
+.modal-hint { color: #64748b; font-size: 0.7rem; margin-top: 6px; }
+.chat-img { max-width: 100%; border-radius: 12px; margin-top: 8px; }
+.retry-btn { color: #38bdf8; cursor: pointer; text-decoration: underline; }
 .modal-input { width: 100%; background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(56, 189, 248, 0.3); color: #fff; padding: 10px 14px; border-radius: 10px; outline: none; font-size: 0.9rem; }
 .modal-input:focus { border-color: #14b8a6; }
 .modal-btn { width: 100%; margin-top: 18px; background: linear-gradient(135deg, #14b8a6, #0ea5e9); border: none; color: #fff; padding: 12px; border-radius: 10px; cursor: pointer; font-size: 0.9rem; transition: 0.3s; }
@@ -42,8 +51,11 @@ body { background-color: #0f172a; background-image: radial-gradient(circle at to
 
 @media (max-width: 768px) {
     .main-wrapper { flex-direction: column; }
-    .senka-section { width: 100%; height: 30vh; align-items: flex-start; overflow: hidden; }
-    #senka-model { height: 120%; margin-top: 20px; }
-    .senka-fallback { height: 30vh; font-size: 5rem; }
-    .chat-section { width: 100%; height: 70vh; padding: 10px; }
+    .senka-section { display: none; }
+    .chat-section { width: 100%; height: 100dvh; padding: 8px; }
+    .glass-panel { height: 100%; }
+    .message { max-width: 92%; }
+    .input-area { padding: 10px 12px 6px; }
+    .input-hint { padding: 0 12px 8px; }
+    .chat-header { padding: 14px; }
 }
