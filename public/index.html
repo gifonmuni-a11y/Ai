@@ -33,6 +33,7 @@
                             <i class="fa-solid fa-layer-group"></i><span id="session-name">Sesi 1</span>
                         </button>
                         <button class="icon-btn" onclick="newSession()" title="Sesi baru"><i class="fa-solid fa-plus"></i></button>
+                        <button class="icon-btn" onclick="openSearch()" title="Cari di chat"><i class="fa-solid fa-magnifying-glass"></i></button>
                         <button class="icon-btn" onclick="openExport()" title="Simpan chat (PDF/Word)"><i class="fa-solid fa-file-export"></i></button>
                         <button class="icon-btn gear-btn" onclick="openSettings()" title="Pengaturan"><i class="fa-solid fa-gear"></i></button>
                     </div>
@@ -46,6 +47,7 @@
                 </div>
 
                 <div class="input-area">
+                    <button class="tool-btn" id="mic-btn" onclick="toggleVoice()" title="Bicara ke Senka"><i class="fa-solid fa-microphone"></i></button>
                     <button class="tool-btn" onclick="openImageModal()" title="Bikin gambar AI"><i class="fa-solid fa-wand-magic-sparkles"></i></button>
                     <label for="image-upload" class="tool-btn upload-btn"><i class="fa-solid fa-paperclip"></i></label>
                     <input type="file" id="image-upload" accept="image/*" hidden>
@@ -53,9 +55,10 @@
                     <button id="send-btn" onclick="sendToSenka()"><i class="fa-solid fa-paper-plane"></i></button>
                 </div>
                 <div class="input-hint">
+                    <span><i class="fa-solid fa-microphone"></i> Bicara</span>
                     <span><i class="fa-solid fa-wand-magic-sparkles"></i> Bikin gambar</span>
                     <span><i class="fa-solid fa-paperclip"></i> Foto — AI bisa baca</span>
-                    <span><i class="fa-solid fa-file-circle-plus"></i> Bikin file: "bikin file isinya hiragana"</span>
+                    <span><i class="fa-solid fa-bell"></i> "ingetin jam 8 belajar"</span>
                 </div>
             </div>
         </div>
@@ -71,8 +74,24 @@
             <input type="text" id="panggilan-input" class="modal-input" placeholder="pengguna" maxlength="30">
             <label class="modal-label">Pilih model AI</label>
             <div id="model-picker" class="model-picker"></div>
+            <label class="modal-label">Senka membacakan jawaban otomatis</label>
+            <label class="switch">
+                <input type="checkbox" id="autospeak-input">
+                <span class="slider"></span>
+            </label>
             <p class="modal-hint">Model "bisa baca gambar" dipakai otomatis saat kamu kirim foto.</p>
             <button class="modal-btn" onclick="saveSettings()"><i class="fa-solid fa-check"></i> Simpan</button>
+        </div>
+    </div>
+
+    <div id="search-modal" class="modal-overlay" style="display:none;">
+        <div class="modal wide-modal">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-magnifying-glass"></i> Cari di Chat</h3>
+                <i class="fa-solid fa-xmark modal-close" onclick="closeSearch()"></i>
+            </div>
+            <input type="text" id="search-input" class="modal-input" placeholder="Ketik kata kunci..." autocomplete="off">
+            <div id="search-results" class="search-results"></div>
         </div>
     </div>
 

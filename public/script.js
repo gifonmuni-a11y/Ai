@@ -14,6 +14,9 @@ let base64Image = null;
 let lastUserText = '';
 let lastUserImage = null;
 let isStreaming = false;
+let autospeak = localStorage.getItem('senka_autospeak') === '1';
+let recognition = null;
+let listening = false;
 
 document.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('touchstart', e => {
@@ -21,11 +24,27 @@ document.addEventListener('touchstart', e => {
     if (e.target.closest('img') && !e.target.classList.contains('chat-img')) e.preventDefault();
 }, { passive: false });
 
+document.addEventListener('pointerdown', e => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    const rect = btn.getBoundingClientRect();
+    const d = Math.max(rect.width, rect.height) * 2;
+    const r = document.createElement('span');
+    r.className = 'ripple';
+    r.style.width = d + 'px';
+    r.style.height = d + 'px';
+    r.style.left = (e.clientX - rect.left - d / 2) + 'px';
+    r.style.top = (e.clientY - rect.top - d / 2) + 'px';
+    btn.appendChild(r);
+    setTimeout(() => r.remove(), 600);
+});
+
 window.onload = async () => {
     initSakura();
     loadSessions();
     renderSessionName();
     document.getElementById('panggilan-input').value = panggilan;
+    document.getElementById('autospeak-input').checked = autospeak;
 
     try {
         const resp = await fetch('/api/config');
@@ -112,17 +131,86 @@ function renderSessionList() {
         const item = document.createElement('div');
         item.className = 'session-item' + (s.id === activeId ? ' active' : '');
         const count = (s.messages || []).length;
-        item.innerHTML = `<div style="min-width:0"><div class="si-name"></div><div class="si-meta">${count} pesan</div></div>
-                          <i class="fa-solid fa-trash si-del" title="Hapus"></i>`;
+        item.innerHTML = `<div class="si-left"><div class="si-name"></div><div class="si-meta">${count} pesan</div></div>
+                          <div class="si-actions">
+                              <button class="si-act si-ren" title="Ganti nama"><i class="fa-solid fa-pen"></i></button>
+                              <button class="si-act si-del" title="Hapus"><i class="fa-solid fa-trash"></i></button>
+                          </div>`;
         item.querySelector('.si-name').innerText = s.name;
         item.onclick = () => switchSession(s.id);
+        item.querySelector('.si-ren').onclick = (e) => {
+            e.stopPropagation();
+            const nm = item.querySelector('.si-name');
+            const inp = document.createElement('input');
+            inp.className = 'modal-input si-input';
+            inp.value = s.name;
+            nm.replaceWith(inp);
+            inp.focus();
+            inp.select();
+            const commit = () => {
+                s.name = inp.value.trim() || s.name;
+                saveSessions();
+                renderSessionList();
+            };
+            inp.onkeydown = (ev) => {
+                if (ev.key === 'Enter') commit();
+                if (ev.key === 'Escape') renderSessionList();
+            };
+            inp.onblur = commit;
+        };
         item.querySelector('.si-del').onclick = (e) => { e.stopPropagation(); deleteSession(s.id); };
         list.appendChild(item);
     });
 }
 
+function openSearch() {
+    document.getElementById('search-input').value = '';
+    document.getElementById('search-results').innerHTML = '<p class="sr-empty">Ketik kata kunci untuk mencari pesan.</p>';
+    document.getElementById('search-modal').style.display = 'flex';
+    setTimeout(() => document.getElementById('search-input').focus(), 100);
+}
+function closeSearch() { document.getElementById('search-modal').style.display = 'none'; }
+
+function doSearch() {
+    const q = document.getElementById('search-input').value.trim().toLowerCase();
+    const box = document.getElementById('search-results');
+    box.innerHTML = '';
+    if (!q) { box.innerHTML = '<p class="sr-empty">Ketik kata kunci untuk mencari pesan.</p>'; return; }
+    const found = [];
+    memoryList.forEach((m, idx) => {
+        const text = (m.content || []).filter(c => c && c.type === 'text').map(c => c.text).join(' ');
+        if (!text) return;
+        const pos = text.toLowerCase().indexOf(q);
+        if (pos === -1) return;
+        found.push({ idx, who: m.role === 'user' ? panggilan : 'Senka', text });
+    });
+    if (!found.length) { box.innerHTML = '<p class="sr-empty">Tidak ada hasil untuk "' + q.replace(/</g, '&lt;') + '".</p>'; return; }
+    found.slice(0, 30).forEach(f => {
+        const item = document.createElement('button');
+        item.className = 'sr-item';
+        const start = Math.max(0, f.text.toLowerCase().indexOf(q) - 30);
+        const snippet = f.text.slice(start, start + 90);
+        item.innerHTML = `<span class="sr-who">${f.who}</span>
+                          <span class="sr-text">${escapeHtml(snippet).replace(new RegExp('(' + q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi'), '<b>$1</b>')}</span>`;
+        item.onclick = () => jumpToMessage(f.idx);
+        box.appendChild(item);
+    });
+}
+
+function jumpToMessage(idx) {
+    closeSearch();
+    const els = chatHistoryDOM.querySelectorAll('.message');
+    const el = els[idx];
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.remove('flash');
+    void el.offsetWidth;
+    el.classList.add('flash');
+}
+
 function openSettings() {
     document.getElementById('panggilan-input').value = panggilan;
+    document.getElementById('autospeak-input').checked = autospeak;
     renderModelPicker();
     document.getElementById('settings-modal').style.display = 'flex';
 }
@@ -132,7 +220,7 @@ function closeImageModal() { document.getElementById('image-modal').style.displa
 function openExport() { document.getElementById('export-modal').style.display = 'flex'; }
 function closeExport() { document.getElementById('export-modal').style.display = 'none'; }
 function closeAllModals() {
-    ['settings-modal', 'image-modal', 'sessions-modal', 'export-modal'].forEach(id => document.getElementById(id).style.display = 'none');
+    ['settings-modal', 'image-modal', 'sessions-modal', 'export-modal', 'search-modal'].forEach(id => document.getElementById(id).style.display = 'none');
 }
 document.querySelectorAll('.modal-overlay').forEach(ov => ov.addEventListener('click', e => { if (e.target === ov) ov.style.display = 'none'; }));
 
@@ -149,7 +237,6 @@ function renderModelPicker() {
         btn.innerHTML = `<div class="mo-line">
                             <span class="mo-label"></span>
                             <span class="mo-chip"></span>
-                            <i class="fa-solid fa-check mo-check"></i>
                          </div>
                          <span class="mo-prov"></span>`;
         btn.querySelector('.mo-label').innerText = m.label;
@@ -167,6 +254,8 @@ function saveSettings() {
         panggilan = newPanggilan;
         localStorage.setItem('senka_panggilan', panggilan);
     }
+    autospeak = document.getElementById('autospeak-input').checked;
+    localStorage.setItem('senka_autospeak', autospeak ? '1' : '0');
     if (modelKey) {
         localStorage.setItem('senka_model', modelKey);
     }
@@ -262,36 +351,80 @@ function renderChat() {
                     bubble.appendChild(img);
                 }
             });
-            if (m.role === 'senka' || m.role === 'assistant') addMsgActions(bubble);
+            addMsgActions(bubble, m.role === 'user' ? 'user' : 'senka');
             chatHistoryDOM.appendChild(bubble);
         });
     }
     scrollToBottom(true);
 }
 
-function formatReply(raw) {
-    if (!raw) return '';
-    let html = raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    html = html.replace(/\*\*([^*]+)\*\*/g, '<span class="em">$1</span>');
-    html = html.replace(/[*_`~#]/g, '');
-    return html;
+function escapeHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function addMsgActions(bubble) {
+function formatReply(raw) {
+    if (!raw) return '';
+    let out = '';
+    const re = /(\*\*[^*]+\*\*)|([0-9]+)|(["",.!?'"]+)|([*_`~#])/g;
+    let last = 0;
+    let m;
+    while ((m = re.exec(raw)) !== null) {
+        out += escapeHtml(raw.slice(last, m.index));
+        if (m[1]) out += '<span class="em">' + escapeHtml(m[1].slice(2, -2)) + '</span>';
+        else if (m[2]) out += '<span class="num">' + m[2] + '</span>';
+        else if (m[3]) out += '<span class="punct">' + m[3] + '</span>';
+        last = m.index + m[0].length;
+    }
+    out += escapeHtml(raw.slice(last));
+    return out;
+}
+
+function addMsgActions(bubble, role) {
     const text = bubble.innerText || '';
     if (!text.trim()) return;
     const actions = document.createElement('div');
     actions.className = 'msg-actions';
-    const speakBtn = document.createElement('button');
-    speakBtn.className = 'msg-action';
-    speakBtn.innerHTML = '<i class="fa-solid fa-volume-high"></i> Putar';
-    speakBtn.onclick = () => speak(text);
-    actions.appendChild(speakBtn);
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'msg-action';
+    copyBtn.innerHTML = '<i class="fa-solid fa-copy"></i> Salin';
+    copyBtn.onclick = () => copyText(text, copyBtn);
+    actions.appendChild(copyBtn);
+    if (role === 'senka') {
+        const speakBtn = document.createElement('button');
+        speakBtn.className = 'msg-action';
+        speakBtn.innerHTML = '<i class="fa-solid fa-volume-high"></i> Putar';
+        speakBtn.onclick = () => speak(text);
+        actions.appendChild(speakBtn);
+    }
     bubble.appendChild(actions);
 }
 
+function copyText(text, btn) {
+    const done = () => {
+        const old = btn.innerHTML;
+        btn.innerHTML = '<i class="fa-solid fa-check"></i> Tersalin';
+        setTimeout(() => { btn.innerHTML = old; }, 1500);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+    } else {
+        fallbackCopy(text, done);
+    }
+}
+
+function fallbackCopy(text, done) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); done(); } catch (e) { }
+    ta.remove();
+}
+
 function speak(text) {
-    if (!('speechSynthesis' in window)) { alert('Browser tidak mendukung suara.'); return; }
+    if (!('speechSynthesis' in window)) return;
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text.replace(/[*_#`]/g, ''));
     u.lang = 'id-ID';
@@ -300,6 +433,112 @@ function speak(text) {
     if (idv) u.voice = idv;
     u.rate = 1.05;
     speechSynthesis.speak(u);
+}
+
+function toggleVoice() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+        appendMessage('senka', 'Browser kamu tidak mendukung voice input. Coba Chrome di HP atau laptop.');
+        scrollToBottom(true);
+        return;
+    }
+    if (listening) { recognition.stop(); return; }
+    if (!recognition) {
+        recognition = new SR();
+        recognition.lang = 'id-ID';
+        recognition.interimResults = true;
+        recognition.maxAlternatives = 1;
+        recognition.onresult = (e) => {
+            let interim = '';
+            let final = '';
+            for (let i = e.resultIndex; i < e.results.length; i++) {
+                const t = e.results[i][0].transcript;
+                if (e.results[i].isFinal) final += t;
+                else interim += t;
+            }
+            if (final) {
+                messageInput.value = (messageInput.value ? messageInput.value + ' ' : '') + final;
+            } else if (interim) {
+                messageInput.value = (messageInput.value ? messageInput.value + ' ' : '') + interim;
+            }
+        };
+        recognition.onend = () => setMic(false);
+        recognition.onerror = () => setMic(false);
+    }
+    try {
+        recognition.start();
+        setMic(true);
+    } catch (e) { }
+}
+
+function setMic(on) {
+    listening = on;
+    document.getElementById('mic-btn').classList.toggle('mic-live', on);
+    document.getElementById('mic-btn').innerHTML = on ? '<i class="fa-solid fa-microphone-lines"></i>' : '<i class="fa-solid fa-microphone"></i>';
+}
+
+function parseReminder(text) {
+    const low = text.toLowerCase();
+    if (!/(ingetin|ingatkan|reminder|pengingat)/.test(low)) return null;
+    let what = text.replace(/(ingetin|ingatkan|reminder|pengingat)/gi, '').replace(/\b(saya|aku|gue|gw|aku ya)\b/gi, '');
+    let fireAt = null;
+    const jamM = low.match(/jam\s+(\d{1,2})(?:[.:](\d{2}))?/);
+    if (jamM) {
+        const h = parseInt(jamM[1], 10) % 24;
+        const min = jamM[2] ? parseInt(jamM[2], 10) % 60 : 0;
+        const t = new Date();
+        t.setHours(h, min, 0, 0);
+        if (t.getTime() <= Date.now()) t.setDate(t.getDate() + 1);
+        fireAt = t;
+        what = what.replace(/jam\s+\d{1,2}(?:[.:]\d{2})?/gi, '');
+    } else {
+        const durM = low.match(/(\d+)\s*(menit|detik)/);
+        if (durM) {
+            const n = parseInt(durM[1], 10);
+            const unit = durM[2] === 'menit' ? 60000 : 1000;
+            fireAt = new Date(Date.now() + n * unit);
+            what = what.replace(/\d+\s*(menit|detik)/gi, '');
+        }
+    }
+    what = what.replace(/^[\s,.:-]+/, '').replace(/[\s,.:-]+$/, '').trim();
+    if (!what) what = 'sesuatu yang kamu minta diingatkan';
+    return fireAt ? { fireAt, what } : null;
+}
+
+function scheduleReminder(text) {
+    const r = parseReminder(text);
+    if (!r) return false;
+    const sessId = activeId;
+    const delay = r.fireAt.getTime() - Date.now();
+    const timeStr = r.fireAt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+    memoryList.push({ role: 'user', content: [{ type: 'text', text: text }] });
+    saveSessions();
+    appendMessage('user', text);
+    const confirmMsg = `Oke, saya ingatkan jam ${timeStr}: ${r.what}.`;
+    const conf = appendMessage('senka', confirmMsg);
+    addMsgActions(conf, 'senka');
+    memoryList.push({ role: 'assistant', content: [{ type: 'text', text: confirmMsg }] });
+    saveSessions();
+    scrollToBottom(true);
+
+    if ('Notification' in window) {
+        Notification.requestPermission();
+    }
+
+    setTimeout(() => {
+        if ('Notification' in window && Notification.permission === 'granted') {
+            try { new Notification('Senka', { body: 'Pengingat: ' + r.what }); } catch (e) { }
+        }
+        if (activeId === sessId) {
+            const msg = `Pengingat: ${r.what}`;
+            const b = appendMessage('senka', msg);
+            addMsgActions(b, 'senka');
+            memoryList.push({ role: 'assistant', content: [{ type: 'text', text: msg }] });
+            saveSessions();
+            scrollToBottom(true);
+        }
+    }, delay);
+    return true;
 }
 
 async function sendToSenka() {
@@ -311,6 +550,11 @@ async function sendToSenka() {
         openSettings();
         appendMessage('senka', `Pilih dulu model AI-nya ya ${panggilan}, terus kirim lagi.`);
         scrollToBottom(true);
+        return;
+    }
+
+    if (scheduleReminder(text) && !base64Image) {
+        messageInput.value = '';
         return;
     }
 
@@ -345,7 +589,7 @@ async function sendToSenka() {
 
     const msgDiv = document.createElement('div');
     msgDiv.classList.add('message', 'msg-senka');
-    msgDiv.innerText = 'Senka ngetik…';
+    msgDiv.innerHTML = 'Senka ngetik<span class="tind"><i></i><i></i><i></i></span>';
     chatHistoryDOM.appendChild(msgDiv);
     scrollToBottom(true);
     isStreaming = true;
@@ -366,6 +610,7 @@ async function sendToSenka() {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
+        let streamBuf = '';
         let started = false;
         let streamError = null;
 
@@ -386,9 +631,10 @@ async function sendToSenka() {
                     if (!j.choices) continue;
                     const delta = j.choices[0]?.delta?.content;
                     if (delta) {
-                        if (!started) { msgDiv.innerText = ''; started = true; }
-                        msgDiv.innerText += delta;
-                        if (chatHistoryDOM.scrollHeight - chatHistoryDOM.scrollTop - chatHistoryDOM.clientHeight < 160) {
+                        if (!started) { streamBuf = ''; started = true; }
+                        streamBuf += delta;
+                        msgDiv.innerHTML = formatReply(streamBuf);
+                        if (chatHistoryDOM.scrollHeight - chatHistoryDOM.scrollTop - chatHistoryDOM.clientHeight < 200) {
                             chatHistoryDOM.scrollTop = chatHistoryDOM.scrollHeight;
                         }
                     }
@@ -399,7 +645,7 @@ async function sendToSenka() {
         if (streamError) throw new Error(streamError);
         if (!started) throw new Error('empty');
 
-        const fullReply = msgDiv.innerText;
+        const fullReply = streamBuf;
         const fileReq = parseFileRequest(fullReply);
         let displayText = fileReq ? fileReq.displayText.trim() : fullReply;
         if (!fileReq && displayText.includes('###SENKA_FILE###')) {
@@ -408,11 +654,12 @@ async function sendToSenka() {
 
         msgDiv.innerHTML = formatReply(displayText);
         if (fileReq) msgDiv.appendChild(makeFileCard(fileReq.meta));
-        addMsgActions(msgDiv);
+        addMsgActions(msgDiv, 'senka');
 
         memoryList.push({ role: 'assistant', content: [{ type: "text", text: displayText }] });
         saveSessions();
         shrinkMemoryImages();
+        if (autospeak && !fileReq) speak(displayText);
     } catch (error) {
         if (error.message === 'empty') {
             memoryList.pop();
@@ -672,6 +919,7 @@ messageInput.addEventListener('keypress', e => { if (e.key === 'Enter') sendToSe
 document.getElementById('image-prompt').addEventListener('keydown', e => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) generateImage();
 });
+document.getElementById('search-input').addEventListener('input', doSearch);
 
 function initSakura() {
     const canvas = document.getElementById('sakura-canvas');
