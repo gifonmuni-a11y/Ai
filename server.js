@@ -11,13 +11,14 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.static('public'));
 
 const MODELS = {
-    hermes:    { id: "nousresearch/hermes-3-llama-3.1-405b:free",               label: "Hermes 3 405B (free)" },
-    plutonium: { id: "garage-bAInd/plutonium-uncensored-llama-3-8b:free",       label: "Plutonium Uncensored 8B (free)" },
-    euryale:   { id: "sao10k/l3.1-euryale-70b",                                 label: "Euryale 70B (berbayar)" },
-    miqu:      { id: "mithril/midnight-miqu-70b",                               label: "Midnight Miqu 70B (berbayar)" }
+    gemma:     { id: "google/gemma-4-31b-it:free",                                 label: "Gemma 4 31B (free, cepat)" },
+    nemotron:  { id: "nvidia/nemotron-3-ultra-550b-a55b:free",                     label: "Nemotron Ultra 550B (free, kualitas)" },
+    gptoss:    { id: "openai/gpt-oss-20b:free",                                    label: "GPT-OSS 20B (free)" },
+    euryale:   { id: "sao10k/l3.3-euryale-70b",                                    label: "Euryale 70B v3.3 (berbayar, roleplay)" },
+    euryale31: { id: "sao10k/l3.1-euryale-70b",                                    label: "Euryale 70B v3.1 (berbayar)" }
 };
 
-const FALLBACK = MODELS.plutonium;
+const FALLBACK = MODELS.gemma;
 
 async function callOpenRouter(messages, modelId) {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -45,7 +46,7 @@ app.post('/api/chat', async (req, res) => {
             return res.status(400).json({ error: "Pesan harus diisi dulu." });
         }
 
-        const model = MODELS[modelKey] || MODELS.hermes;
+        const model = MODELS[modelKey] || MODELS.gemma;
         const callName = (typeof panggilan === 'string' && panggilan.trim() !== '')
             ? panggilan.trim() : "pengguna";
 

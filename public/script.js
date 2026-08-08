@@ -5,15 +5,16 @@ const previewContainer = document.getElementById('preview-container');
 const senkaModel = document.getElementById('senka-model');
 
 const MODELS = {
-    hermes:    { label: "Hermes 3 405B (free)" },
-    plutonium: { label: "Plutonium Uncensored 8B (free)" },
-    euryale:   { label: "Euryale 70B (berbayar)" },
-    miqu:      { label: "Midnight Miqu 70B (berbayar)" }
+    gemma:     { label: "Gemma 4 31B (free, cepat)" },
+    nemotron:  { label: "Nemotron Ultra 550B (free, kualitas)" },
+    gptoss:    { label: "GPT-OSS 20B (free)" },
+    euryale:   { label: "Euryale 70B v3.3 (berbayar, roleplay)" },
+    euryale31: { label: "Euryale 70B v3.1 (berbayar)" }
 };
 
 let memoryList = JSON.parse(localStorage.getItem('senka_memory')) || [];
 let panggilan = localStorage.getItem('senka_panggilan') || 'pengguna';
-let modelKey = localStorage.getItem('senka_model') || 'hermes';
+let modelKey = localStorage.getItem('senka_model') || 'gemma';
 
 window.onload = () => {
     const modelSelect = document.getElementById('model-select');
