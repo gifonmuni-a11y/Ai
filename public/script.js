@@ -447,47 +447,9 @@ function getGreeting() {
 }
 
 function addMsgActions(bubble, role) {
-    const text = bubble.innerText || '';
-    if (!text.trim()) return;
-    const actions = document.createElement('div');
-    actions.className = 'msg-actions';
-    const copyBtn = document.createElement('button');
-    copyBtn.className = 'msg-action';
-    copyBtn.innerHTML = '<i class="fa-solid fa-copy"></i> Salin';
-    copyBtn.onclick = () => copyText(text, copyBtn);
-    actions.appendChild(copyBtn);
-    if (role === 'senka') {
-        const speakBtn = document.createElement('button');
-        speakBtn.className = 'msg-action';
-        speakBtn.innerHTML = '<i class="fa-solid fa-volume-high"></i> Putar';
-        speakBtn.onclick = () => speak(text);
-        actions.appendChild(speakBtn);
-    }
-    bubble.appendChild(actions);
-}
-
-function copyText(text, btn) {
-    const done = () => {
-        const old = btn.innerHTML;
-        btn.innerHTML = '<i class="fa-solid fa-check"></i> Tersalin';
-        setTimeout(() => { btn.innerHTML = old; }, 1500);
-    };
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
-    } else {
-        fallbackCopy(text, done);
-    }
-}
-
-function fallbackCopy(text, done) {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.select();
-    try { document.execCommand('copy'); done(); } catch (e) { }
-    ta.remove();
+    // Aksi per-bubble (Salin/Putar) dihapus dari UI sesuai permintaan.
+    // TTS kini hanya lewat toggle autospeak di Pengaturan.
+    return;
 }
 
 function speak(text) {
