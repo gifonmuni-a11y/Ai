@@ -83,6 +83,11 @@ Tetap gunakan persona 2D-mu dengan hangat dan menyenangkan.`
     }
 });
 
-app.listen(port, () => {
-    console.log(`[ai by hw] Server jalan di http://localhost:${port}`);
-});
+const isVercel = process.env.VERCEL === '1';
+if (!isVercel) {
+    app.listen(port, () => {
+        console.log(`[ai by hw] Server jalan di http://localhost:${port}`);
+    });
+}
+
+export default app;

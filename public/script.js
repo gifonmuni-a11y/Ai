@@ -72,9 +72,31 @@ imageUpload.addEventListener('change', async (e) => {
     if (file) {
         document.getElementById('file-name-preview').innerText = " " + file.name;
         previewContainer.style.display = 'flex';
-        base64Image = await toBase64(file);
+        base64Image = await compressImage(file);
     }
 });
+
+function compressImage(file, maxSize = 1280, quality = 0.8) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            let { width, height } = img;
+            const scale = Math.min(maxSize / width, maxSize / height, 1);
+            width = Math.round(width * scale);
+            height = Math.round(height * scale);
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+            let dataUrl = canvas.toDataURL('image/jpeg', quality);
+            if (dataUrl.length > 4 * 1024 * 1024) dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+            resolve(dataUrl);
+        };
+        img.onerror = reject;
+        img.src = URL.createObjectURL(file);
+    });
+}
 
 function removeImage() {
     base64Image = null;
