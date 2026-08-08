@@ -19,7 +19,7 @@ const MODELS = {
 };
 
 const FALLBACK_CHAIN = [MODELS.gemma, MODELS.gptoss, MODELS.nemotron];
-const IMAGE_MODEL = "black-forest-labs/flux-1.1-pro";
+const IMAGE_MODEL = "black-forest-labs/flux.2-klein-4b";
 
 function getCallName(panggilan) {
     return (typeof panggilan === 'string' && panggilan.trim() !== '') ? panggilan.trim() : "pengguna";
@@ -172,13 +172,18 @@ app.post('/api/image', async (req, res) => {
             return res.status(400).json({ error: "Deskripsi gambarnya kosong." });
         }
 
-        const response = await fetch("https://openrouter.ai/api/v1/images/generations", {
+        const response = await fetch("https://openrouter.ai/api/v1/images", {
             method: "POST",
             headers: {
                 "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
                 "Content-Type": "application/json"
             },
-            body: JSON.stringify({ model: IMAGE_MODEL, prompt: prompt.trim(), n: 1 })
+            body: JSON.stringify({
+                model: IMAGE_MODEL,
+                prompt: prompt.trim(),
+                n: 1,
+                resolution: "1K"
+            })
         });
 
         const data = await response.json();
@@ -194,7 +199,10 @@ app.post('/api/image', async (req, res) => {
         }
 
         const item = data?.data?.[0];
-        const imgUrl = item?.url || (item?.b64_json ? `data:image/png;base64,${item.b64_json}` : null);
+        const mediaType = item?.media_type || "image/png";
+        const imgUrl = item?.url
+            ? item.url
+            : (item?.b64_json ? `data:${mediaType};base64,${item.b64_json}` : null);
         if (!imgUrl) {
             return res.status(502).json({ error: "Gambar gagal dihasilkan, coba lagi." });
         }
