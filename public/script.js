@@ -96,8 +96,22 @@ function newSession() {
     renderChat();
 }
 
+let sessionToDelete = null;
+
 function deleteSession(id) {
-    if (!confirm('Hapus sesi ini? Chat di dalamnya akan hilang.')) return;
+    sessionToDelete = id;
+    document.getElementById('confirm-delete-modal').style.display = 'flex';
+}
+
+function closeDeleteConfirm() {
+    sessionToDelete = null;
+    document.getElementById('confirm-delete-modal').style.display = 'none';
+}
+
+function confirmDeleteSession() {
+    const id = sessionToDelete;
+    closeDeleteConfirm();
+    if (!id) return;
     sessions = sessions.filter(s => s.id !== id);
     if (!sessions.length) sessions = [{ id: 's' + Date.now(), name: 'Sesi 1', messages: [] }];
     if (activeId === id) {
@@ -220,7 +234,7 @@ function closeImageModal() { document.getElementById('image-modal').style.displa
 function openExport() { document.getElementById('export-modal').style.display = 'flex'; }
 function closeExport() { document.getElementById('export-modal').style.display = 'none'; }
 function closeAllModals() {
-    ['settings-modal', 'image-modal', 'video-modal', 'sessions-modal', 'export-modal', 'search-modal'].forEach(id => document.getElementById(id).style.display = 'none');
+    ['settings-modal', 'image-modal', 'video-modal', 'sessions-modal', 'export-modal', 'search-modal', 'confirm-delete-modal'].forEach(id => document.getElementById(id).style.display = 'none');
 }
 document.querySelectorAll('.modal-overlay').forEach(ov => ov.addEventListener('click', e => { if (e.target === ov) ov.style.display = 'none'; }));
 
@@ -336,6 +350,7 @@ function renderChat() {
         memoryList.push({ role: 'assistant', content: [{ type: 'text', text: greeting }] });
         saveSessions();
         const gEl = appendMessage('senka', greeting);
+        gEl.innerHTML = formatReply(greeting);
         gEl.dataset.greeting = '1';
         if (away) {
             setTimeout(() => {

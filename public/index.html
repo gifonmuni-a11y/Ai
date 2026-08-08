@@ -80,7 +80,9 @@
                 <span class="slider"></span>
             </label>
             <p class="modal-hint">Model "bisa baca gambar" dipakai otomatis saat kamu kirim foto.</p>
-            <button class="modal-btn" onclick="saveSettings()"><i class="fa-solid fa-check"></i> Simpan</button>
+            <div class="modal-actions">
+                <button class="modal-btn" onclick="saveSettings()"><i class="fa-solid fa-check"></i> Simpan</button>
+            </div>
         </div>
     </div>
 
@@ -137,6 +139,19 @@
             </div>
             <button class="modal-btn" onclick="exportPDF()"><i class="fa-solid fa-file-pdf"></i> Simpan sebagai PDF</button>
             <button class="modal-btn btn-secondary" onclick="exportDOC()"><i class="fa-solid fa-file-word"></i> Simpan sebagai Word (.doc)</button>
+        </div>
+    </div>
+
+    <div id="confirm-delete-modal" class="modal-overlay cdm-overlay" style="display:none;">
+        <div class="modal cdm-card">
+            <div class="modal-header">
+                <h3 class="cdm-title"><i class="fa-solid fa-triangle-exclamation"></i> Hapus Sesi Ini?</h3>
+            </div>
+            <p class="cdm-desc">Chat di dalam sesi ini akan hilang secara permanen.</p>
+            <div class="cdm-actions">
+                <button class="cdm-btn cdm-cancel" onclick="closeDeleteConfirm()">Batal</button>
+                <button class="cdm-btn cdm-danger" onclick="confirmDeleteSession()">Hapus</button>
+            </div>
         </div>
     </div>
 
