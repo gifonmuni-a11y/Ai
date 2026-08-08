@@ -72,6 +72,7 @@ CONTENT:
 <isi file di sini, tulis apa adanya>
 ###END###
 - TYPE yang didukung: txt, csv (kolom dipisah koma, satu baris data per baris, baris pertama bisa judul kolom), xlsx (format sama seperti csv), doc (bisa huruf Jepang), pdf (HANYA huruf latin).
+- Kalau user minta isi huruf hiragana/katakana/kanji, tulis KARAKTER aslinya (あいうえお), JANGAN romaji (a i u e o).
 - Kalau isinya huruf Jepang (hiragana/katakana/kanji), WAJIB pakai TYPE txt atau doc, JANGAN pdf.
 - NAME harus berakhiran ekstensi yang sesuai TYPE.
 - CONTENT ditulis apa adanya: newline = baris baru beneran, JANGAN pakai tanda kutip atau escape apa pun.
