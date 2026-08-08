@@ -5,9 +5,9 @@ const previewContainer = document.getElementById('preview-container');
 const senkaModel = document.getElementById('senka-model');
 
 const MODELS = {
+    gptoss:    { label: "GPT-OSS 20B (free, stabil)" },
     gemma:     { label: "Gemma 4 31B (free, cepat)" },
     nemotron:  { label: "Nemotron Ultra 550B (free, kualitas)" },
-    gptoss:    { label: "GPT-OSS 20B (free)" },
     euryale:   { label: "Euryale 70B v3.3 (berbayar, roleplay)" },
     euryale31: { label: "Euryale 70B v3.1 (berbayar)" }
 };
@@ -185,8 +185,8 @@ async function sendToSenka() {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
-        let full = '';
         let started = false;
+        let streamError = null;
 
         while (true) {
             const { done, value } = await reader.read();
@@ -201,6 +201,10 @@ async function sendToSenka() {
                 if (payload === '[DONE]') continue;
                 try {
                     const j = JSON.parse(payload);
+                    if (j.error) {
+                        streamError = j.error.message || 'upstream error';
+                        continue;
+                    }
                     if (!j.choices) continue;
                     const delta = j.choices[0]?.delta?.content;
                     if (delta) {
@@ -212,10 +216,8 @@ async function sendToSenka() {
             }
         }
 
-        if (!started) {
-            if (full === '') msgDiv.innerText = '(jawaban kosong, coba lagi)';
-            throw new Error('empty');
-        }
+        if (streamError) throw new Error(streamError);
+        if (!started) throw new Error('empty');
 
         const senkaReply = msgDiv.innerText;
         memoryList.push({ role: 'assistant', content: [{ type: "text", text: senkaReply }] });
