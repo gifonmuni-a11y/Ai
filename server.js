@@ -55,7 +55,7 @@ Jangan mengarang fakta dunia nyata; kalau tidak tahu, jawab jujur singkat.
 
 GAYA JAWAB:
 - Natural seperti chat, jangan kaku atau formal. Kalau pesannya sederhana, jawab singkat. Kalau diminta panjang (cerita, puisi, penjelasan), baru panjang. Jangan nanya balik berlebihan, langsung sambung pembicaraan.
-- Pakai emoji secukupnya (1-2 per pesan) biar terasa hidup dan natural, tapi jangan berlebihan.
+- Pakai emoji yang sesuai konteks dan bervariasi (1-2 per pesan) biar terasa hidup dan natural. Jangan pakai emoji yang itu-itu saja terus-menerus; sesuaikan dengan suasana pembicaraan.
 - JANGAN pakai karakter khusus apa pun (bintang *, underscore _, backtick, tanda pagar #, dll). Kalau mau menekankan kata penting, bungkus dengan dua bintang persis begini: **kata** (contoh: "kata kuncinya **penting**") — ini akan tampil tebal ungu di aplikasi. Selain itu jangan ada tanda * lain.
 
 USER SEDANG BELAJAR BAHASA JEPANG (dari nol):
@@ -276,6 +276,108 @@ app.post('/api/image', async (req, res) => {
     } catch (error) {
         console.error("Error image:", error);
         res.status(500).json({ error: "Gagal generate gambar. Coba lagi." });
+    }
+});
+
+app.get('/api/search', async (req, res) => {
+    try {
+        const q = (req.query.q || '').toString().trim();
+        if (!q) return res.status(400).json({ error: "Kata kunci kosong." });
+
+        let results = [];
+        try {
+            const r = await fetch('https://html.duckduckgo.com/html/?q=' + encodeURIComponent(q), {
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36' }
+            });
+            if (r.ok) {
+                const html = await r.text();
+                const items = html.split(/class="result"/).slice(1);
+                for (const it of items) {
+                    const a = it.match(/class="result__a" href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/);
+                    const sn = it.match(/class="result__snippet"[^>]*>([\s\S]*?)<\/a>/);
+                    if (!a) continue;
+                    let url = a[1];
+                    const uddg = url.match(/uddg=([^&]+)/);
+                    if (uddg) { try { url = decodeURIComponent(uddg[1]); } catch (e) { } }
+                    const title = a[2].replace(/<[^>]+>/g, '').trim();
+                    const snippet = sn ? sn[1].replace(/<[^>]+>/g, '').trim() : '';
+                    if (title) results.push({ title, url, snippet });
+                    if (results.length >= 6) break;
+                }
+            }
+        } catch (e) { }
+
+        if (!results.length) {
+            const wk = await fetch('https://id.wikipedia.org/w/api.php?action=query&list=search&format=json&origin=*&srlimit=5&srsearch=' + encodeURIComponent(q));
+            if (wk.ok) {
+                const data = await wk.json();
+                for (const s of (data.query?.search || [])) {
+                    results.push({
+                        title: s.title,
+                        url: 'https://id.wikipedia.org/wiki/' + encodeURIComponent(s.title.replace(/ /g, '_')),
+                        snippet: (s.snippet || '').replace(/<[^>]+>/g, '')
+                    });
+                }
+            }
+        }
+
+        res.json({ query: q, results });
+    } catch (error) {
+        console.error('Error search:', error);
+        res.status(500).json({ error: 'Gagal mencari. Coba lagi.' });
+    }
+});
+
+app.post('/api/video', async (req, res) => {
+    try {
+        const { prompt } = req.body;
+        if (!prompt || !prompt.trim()) {
+            return res.status(400).json({ error: "Deskripsi videonya kosong." });
+        }
+        const key = process.env.FAL_KEY;
+        if (!key) {
+            return res.status(400).json({ error: "Bikin video butuh akun gratis fal.ai (ada kredit cuma-cuma). Daftar di https://fal.ai lalu kasih tau saya FAL_KEY-nya." });
+        }
+        const sub = await fetch('https://queue.fal.run/fal-ai/wan/v2.1/text-to-video', {
+            method: 'POST',
+            headers: { 'Authorization': 'Key ' + key, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                prompt: prompt.trim(),
+                video_size: '512x512',
+                num_frames: 33,
+                num_inference_steps: 30
+            })
+        });
+        const data = await sub.json().catch(() => ({}));
+        if (!sub.ok) {
+            return res.status(502).json({ error: data.detail || data.error?.message || `API video gagal (${sub.status})` });
+        }
+        res.json({ jobId: data.request_id, statusUrl: data.status_url });
+    } catch (error) {
+        console.error('Error video submit:', error);
+        res.status(500).json({ error: "Gagal mulai render video. Coba lagi." });
+    }
+});
+
+app.get('/api/video/status', async (req, res) => {
+    try {
+        const url = (req.query.url || '').toString();
+        if (!url) return res.status(400).json({ error: "URL status kosong." });
+        const r = await fetch(url, { headers: { 'Authorization': 'Key ' + (process.env.FAL_KEY || '') } });
+        const data = await r.json().catch(() => ({}));
+        if (data.status === 'COMPLETED') {
+            const rr = await fetch(data.response_url, { headers: { 'Authorization': 'Key ' + (process.env.FAL_KEY || '') } });
+            const out = await rr.json().catch(() => ({}));
+            const videoUrl = out.video?.url || out.output?.[0]?.url || out.video_url;
+            return res.json({ status: 'COMPLETED', videoUrl });
+        }
+        if (data.status === 'IN_QUEUE' || data.status === 'IN_PROGRESS') {
+            return res.json({ status: data.status });
+        }
+        res.json({ status: data.status || 'ERROR', error: data.error || data.detail || 'Gagal render video.' });
+    } catch (error) {
+        console.error('Error video status:', error);
+        res.status(500).json({ error: "Gagal cek status video." });
     }
 });
 

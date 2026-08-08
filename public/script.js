@@ -220,7 +220,7 @@ function closeImageModal() { document.getElementById('image-modal').style.displa
 function openExport() { document.getElementById('export-modal').style.display = 'flex'; }
 function closeExport() { document.getElementById('export-modal').style.display = 'none'; }
 function closeAllModals() {
-    ['settings-modal', 'image-modal', 'sessions-modal', 'export-modal', 'search-modal'].forEach(id => document.getElementById(id).style.display = 'none');
+    ['settings-modal', 'image-modal', 'video-modal', 'sessions-modal', 'export-modal', 'search-modal'].forEach(id => document.getElementById(id).style.display = 'none');
 }
 document.querySelectorAll('.modal-overlay').forEach(ov => ov.addEventListener('click', e => { if (e.target === ov) ov.style.display = 'none'; }));
 
@@ -327,10 +327,29 @@ function shrinkMemoryImages() {
 function renderChat() {
     chatHistoryDOM.innerHTML = '';
     if (!memoryList.length) {
-        const greeting = `Halo ${panggilan}! Senka online.`;
+        const lastVisit = parseInt(localStorage.getItem('senka_last_visit') || '0', 10);
+        localStorage.setItem('senka_last_visit', String(Date.now()));
+        const away = lastVisit > 0 && (Date.now() - lastVisit) > 5 * 60 * 60 * 1000;
+        let greeting;
+        if (away) greeting = `Selamat kembali ${panggilan}!`;
+        else greeting = getGreeting();
         memoryList.push({ role: 'assistant', content: [{ type: 'text', text: greeting }] });
         saveSessions();
-        appendMessage('senka', greeting);
+        const gEl = appendMessage('senka', greeting);
+        gEl.dataset.greeting = '1';
+        if (away) {
+            setTimeout(() => {
+                const el = chatHistoryDOM.querySelector('.message[data-greeting="1"]');
+                if (!el) return;
+                const newG = getGreeting();
+                el.innerHTML = formatReply(newG);
+                const idx = memoryList.findIndex(x => x.role === 'assistant' && x.content && x.content[0] && x.content[0].text === greeting);
+                if (idx !== -1) {
+                    memoryList[idx].content[0].text = newG;
+                    saveSessions();
+                }
+            }, 60000);
+        }
         if (!modelKey) {
             appendMessage('senka', 'Sebelum ngobrol, pilih dulu model AI-nya lewat tombol pengaturan di atas.');
         }
@@ -358,25 +377,58 @@ function renderChat() {
     scrollToBottom(true);
 }
 
+const IMPORTANT_WORDS = 'cerita|roleplay|belajar|info|penting|tips|materi|latihan|ingat|wajib|jadwal|catatan|hati-hati|jangan lupa|struktur|pelajaran';
+
 function escapeHtml(s) {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 function formatReply(raw) {
     if (!raw) return '';
+    const name = panggilan.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(
+        '(\\*\\*[^*]+\\*\\*)' +
+        '|(\\b(?:' + IMPORTANT_WORDS + ')\\b)' +
+        '|(\\b' + name + '\\b)' +
+        '|(\\b[Ss]enka\\b)' +
+        '|([0-9]+)' +
+        '|(["\'\u201c\u201d\u2018\u2019.,?!\u2014]+)' +
+        '|([\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af\u0400-\u04ff\u0600-\u06ff\u0e00-\u0e7f\u0900-\u097f\u3000-\u303f]+)' +
+        '|([*_`~#])',
+        'gi'
+    );
     let out = '';
-    const re = /(\*\*[^*]+\*\*)|([0-9]+)|(["",.!?'"]+)|([*_`~#])/g;
     let last = 0;
     let m;
     while ((m = re.exec(raw)) !== null) {
         out += escapeHtml(raw.slice(last, m.index));
         if (m[1]) out += '<span class="em">' + escapeHtml(m[1].slice(2, -2)) + '</span>';
-        else if (m[2]) out += '<span class="num">' + m[2] + '</span>';
-        else if (m[3]) out += '<span class="punct">' + m[3] + '</span>';
+        else if (m[2]) out += '<span class="em">' + escapeHtml(m[2]) + '</span>';
+        else if (m[3]) out += '<span class="who-user">' + escapeHtml(m[3]) + '</span>';
+        else if (m[4]) out += '<span class="who-senka">' + escapeHtml(m[4]) + '</span>';
+        else if (m[5]) out += '<span class="num">' + escapeHtml(m[5]) + '</span>';
+        else if (m[6]) out += '<span class="punct">' + escapeHtml(m[6]) + '</span>';
+        else if (m[7]) out += '<span class="jp">' + escapeHtml(m[7]) + '</span>';
         last = m.index + m[0].length;
     }
     out += escapeHtml(raw.slice(last));
     return out;
+}
+
+function getGreeting() {
+    const now = new Date();
+    const t = now.getHours() + now.getMinutes() / 60;
+    const P = panggilan;
+    if (t >= 0 && t < 4) return `Selamat pagi ${P}! Senka Online`;
+    if (t >= 4 && t <= 6) return `Bangun dan waktunya bersinar ${P}! Senka Online`;
+    if (t > 6 && t <= 10) return `Selamat pagi ${P}! Senka disini`;
+    if (t > 10 && t <= 11) return `Selamat siang ${P}! Senka Online`;
+    if (t > 11 && t <= 13) return `Selamat istirahat siang ${P}! Senka disini`;
+    if (t > 13 && t < 15) return `Selamat siang semangat hari ini ${P}! Senka disini`;
+    if (t >= 15 && t <= 18) return `Selamat sore ${P}! Senka Online`;
+    if (t > 18 && t <= 22) return `Selamat malam ${P}! Senka Online`;
+    if (t > 22 && t <= 22.99) return `Selamat beristirahat ${P}! Senka disini`;
+    return `Belom tidur ${P}! Si Kelelawar, Senka disini`;
 }
 
 function addMsgActions(bubble, role) {
@@ -473,8 +525,112 @@ function toggleVoice() {
 
 function setMic(on) {
     listening = on;
-    document.getElementById('mic-btn').classList.toggle('mic-live', on);
-    document.getElementById('mic-btn').innerHTML = on ? '<i class="fa-solid fa-microphone-lines"></i>' : '<i class="fa-solid fa-microphone"></i>';
+    const item = document.getElementById('pm-mic');
+    if (!item) return;
+    item.classList.toggle('mic-live', on);
+    item.innerHTML = on
+        ? '<i class="fa-solid fa-microphone-lines"></i> Berhenti bicara'
+        : '<i class="fa-solid fa-microphone"></i> Bicara';
+    if (on) closePlusMenu();
+}
+
+function togglePlusMenu() {
+    const menu = document.getElementById('plus-menu');
+    const btn = document.getElementById('plus-btn');
+    const show = !menu.classList.contains('show');
+    menu.classList.toggle('show', show);
+    btn.classList.toggle('open', show);
+}
+function closePlusMenu() {
+    document.getElementById('plus-menu').classList.remove('show');
+    document.getElementById('plus-btn').classList.remove('open');
+}
+document.addEventListener('click', e => {
+    if (!e.target.closest('.plus-wrap')) closePlusMenu();
+});
+
+function openVideoModal() {
+    document.getElementById('video-modal').style.display = 'flex';
+    setTimeout(() => document.getElementById('video-prompt').focus(), 100);
+}
+function closeVideoModal() { document.getElementById('video-modal').style.display = 'none'; }
+
+function generateVideo() {
+    const prompt = document.getElementById('video-prompt').value.trim();
+    if (!prompt) { document.getElementById('video-prompt').focus(); return; }
+    closeVideoModal();
+    document.getElementById('video-prompt').value = '';
+    generateVideoWithPrompt(prompt);
+}
+
+async function generateVideoWithPrompt(prompt) {
+    appendMessage('user', prompt);
+    const loading = appendMessage('senka', 'Lagi render video, biasanya 1-3 menit ya…');
+    scrollToBottom(true);
+    try {
+        const resp = await fetch('/api/video', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt })
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.error || `API error (${resp.status})`);
+        if (!data.statusUrl) throw new Error('Server tidak kasih status URL.');
+        for (let i = 0; i < 45; i++) {
+            await new Promise(r => setTimeout(r, 8000));
+            const sr = await fetch('/api/video/status?url=' + encodeURIComponent(data.statusUrl));
+            const sd = await sr.json().catch(() => ({}));
+            if (sd.status === 'COMPLETED' && sd.videoUrl) {
+                loading.innerHTML = '';
+                const tag = document.createElement('div');
+                tag.className = 'msg-tag';
+                tag.innerText = 'Video AI';
+                loading.appendChild(tag);
+                const v = document.createElement('video');
+                v.src = sd.videoUrl;
+                v.controls = true;
+                v.preload = 'metadata';
+                v.classList.add('chat-video');
+                loading.appendChild(v);
+                const actions = document.createElement('div');
+                actions.className = 'msg-actions';
+                const dl = document.createElement('button');
+                dl.className = 'msg-action';
+                dl.innerHTML = '<i class="fa-solid fa-download"></i> Download';
+                dl.onclick = () => downloadImage(sd.videoUrl, 'senka-video-' + Date.now() + '.mp4');
+                actions.appendChild(dl);
+                loading.appendChild(actions);
+                scrollToBottom(true);
+                return;
+            }
+            if (sd.status !== 'IN_QUEUE' && sd.status !== 'IN_PROGRESS' && sd.status !== 'PENDING') {
+                throw new Error(sd.error || 'Gagal render video.');
+            }
+        }
+        throw new Error('Waktu render habis. Coba lagi ya.');
+    } catch (e) {
+        loading.innerText = 'Gagal: ' + e.message;
+        scrollToBottom(true);
+    }
+}
+
+const SEARCH_RE = /(^|[\s,.?!])(siapa|siapakah|kapan|dimana|di\s+mana|berapa|kenapa|mengapa|bagaimana|apakah|kepanjangan|definisi|arti|sejarah|perbedaan|info\s+tentang|berita\s+tentang|tentang|jelaskan|cari|search)\b/i;
+
+async function getWebContext(text) {
+    if (!text || text.length < 20 || !SEARCH_RE.test(text)) return null;
+    try {
+        const r = await fetch('/api/search?q=' + encodeURIComponent(text.slice(0, 120)));
+        const d = await r.json().catch(() => ({}));
+        const res = (d.results || []).slice(0, 5);
+        if (!res.length) return null;
+        let ctx = 'Hasil pencarian web (pakai ini biar jawabanmu benar, jangan mengarang. Kalau perlu sebut sumbernya singkat):\n';
+        res.forEach((x, i) => {
+            ctx += `${i + 1}. ${x.title || 'Tanpa judul'} — ${(x.snippet || '').slice(0, 300)} (${x.url})\n`;
+        });
+        return ctx;
+    } catch (e) {
+        return null;
+    }
 }
 
 function parseReminder(text) {
@@ -595,10 +751,15 @@ async function sendToSenka() {
     isStreaming = true;
 
     try {
+        const context = await getWebContext(text);
+        const payloadMessages = context
+            ? [...memoryList, { role: 'system', content: context }]
+            : memoryList;
+
         const response = await fetch('/api/chat/stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages: memoryList, modelKey, panggilan })
+            body: JSON.stringify({ messages: payloadMessages, modelKey, panggilan })
         });
 
         if (!response.ok) {
