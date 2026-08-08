@@ -22,7 +22,7 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 img { -webkit-user-drag: none; user-drag: none; pointer-events: none; }
 img.chat-img { pointer-events: auto; }
 
-#sakura-canvas { position: fixed; inset: 0; z-index: 2; pointer-events: none; }
+#sakura-canvas { position: fixed; inset: 0; z-index: 50; pointer-events: none; }
 
 .main-wrapper { display: flex; height: 100vh; height: 100dvh; width: 100vw; position: relative; z-index: 3; }
 
