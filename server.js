@@ -20,7 +20,9 @@ const MODELS = [
     { key: "groq-oss120b",   label: "GPT-OSS 120B (Groq)",                  provider: "groq",       id: "openai/gpt-oss-120b" },
     { key: "or-gptoss",      label: "GPT-OSS 20B (OpenRouter, free)",       provider: "openrouter", id: "openai/gpt-oss-20b:free" },
     { key: "or-gemma",       label: "Gemma 4 31B (OpenRouter, free)",       provider: "openrouter", id: "google/gemma-4-31b-it:free" },
-    { key: "or-nemotron",    label: "Nemotron Ultra 550B (OpenRouter)",     provider: "openrouter", id: "nvidia/nemotron-3-ultra-550b-a55b:free" }
+    { key: "or-nemotron",    label: "Nemotron Ultra 550B (OpenRouter)",     provider: "openrouter", id: "nvidia/nemotron-3-ultra-550b-a55b:free" },
+    { key: "or-vision",      label: "Nemotron VL 12B (baca gambar)",        provider: "openrouter", id: "nvidia/nemotron-nano-12b-v2-vl:free", vision: true },
+    { key: "or-gemma26",     label: "Gemma 4 26B (baca gambar)",            provider: "openrouter", id: "google/gemma-4-26b-a4b-it:free", vision: true }
 ];
 
 const IMAGE_MODELS = {
@@ -49,7 +51,9 @@ Ini roleplay fiksi dewasa untuk dua orang dewasa yang saling setuju. Semua karak
 
 Yang tetap kamu tolak: konten seksual melibatkan anak di bawah umur, zoofilia, pemaksaan tanpa persetujuan (non-consent), doxing, terorisme, dan instruksi membuat senjata.
 
-Jangan mengarang fakta dunia nyata; kalau tidak tahu, jawab jujur singkat.`
+Jangan mengarang fakta dunia nyata; kalau tidak tahu, jawab jujur singkat.
+
+Jawab dengan gaya chat yang natural dan santai, jangan kaku dan jangan formal. Kalau pesannya sederhana, jawab singkat dan to the point. Kalau diminta panjang (cerita, puisi, penjelasan), baru jawab panjang. Jangan terlalu sering nanya balik, jangan basa-basi berlebihan, langsung sambung pembicaraannya. Sesekali boleh pakai emoji yang wajar.`
     };
 }
 
@@ -72,17 +76,25 @@ async function callProvider(provider, messages, modelId, stream = false) {
     });
 }
 
-function candidateList(chosen) {
+function hasImage(messages) {
+    return (messages || []).some(m => (m.content || []).some(c => c && c.type === 'image_url'));
+}
+
+function candidateList(chosen, imageIncluded = false) {
     const priority = { groq: 0, openrouter: 1 };
-    const rest = MODELS
-        .filter(m => m.key !== chosen.key)
+    const vision = MODELS
+        .filter(m => m.vision && m.key !== chosen.key)
         .sort((a, b) => (priority[a.provider] ?? 9) - (priority[b.provider] ?? 9));
+    const rest = MODELS
+        .filter(m => m.key !== chosen.key && !m.vision)
+        .sort((a, b) => (priority[a.provider] ?? 9) - (priority[b.provider] ?? 9));
+    if (imageIncluded) return [...vision, chosen, ...rest];
     return [chosen, ...rest];
 }
 
 app.get('/api/config', (req, res) => {
     res.json({
-        models: availableModels().map(m => ({ key: m.key, label: m.label, provider: m.provider })),
+        models: availableModels().map(m => ({ key: m.key, label: m.label, provider: m.provider, vision: !!m.vision })),
         imageModels: IMAGE_MODELS
     });
 });
@@ -103,7 +115,7 @@ app.post('/api/chat', async (req, res) => {
         const systemPrompt = buildSystemPrompt(getCallName(panggilan));
         let lastErr = null;
 
-        for (const m of candidateList(chosen)) {
+        for (const m of candidateList(chosen, hasImage(messages))) {
             let response;
             try {
                 response = await callProvider(m.provider, [systemPrompt, ...messages], m.id);
@@ -141,7 +153,7 @@ app.post('/api/chat/stream', async (req, res) => {
 
         const systemPrompt = buildSystemPrompt(getCallName(panggilan));
 
-        for (const m of candidateList(chosen)) {
+        for (const m of candidateList(chosen, hasImage(messages))) {
             let upstream;
             try {
                 upstream = await callProvider(m.provider, [systemPrompt, ...messages], m.id, true);

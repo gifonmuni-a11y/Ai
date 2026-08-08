@@ -3,25 +3,41 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ai by hw | Senka</title>
+    <title>Senka AI</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
+    <canvas id="sakura-canvas"></canvas>
+
     <div class="main-wrapper">
         <div class="senka-section">
-            <img id="senka-model" src="assets/senka_idle.png" alt="Senka" onerror="this.style.display='none';document.getElementById('senka-fallback').style.display='flex';">
+            <div class="senka-glow"></div>
+            <img id="senka-model" src="assets/avatar.webp" alt="Senka" onerror="this.style.display='none';document.getElementById('senka-fallback').style.display='flex';">
             <div id="senka-fallback" class="senka-fallback"><i class="fa-solid fa-robot"></i></div>
+            <div class="senka-name-plate">🌸 Senka — Sahabat Virtualmu</div>
         </div>
+
         <div class="chat-section">
             <div class="glass-panel">
                 <div class="chat-header">
-                    <h2><i class="fa-solid fa-microchip"></i> ai by hw</h2>
+                    <div class="header-left">
+                        <img class="avatar" src="assets/avatar.webp" alt="Senka" onerror="this.style.display='none'">
+                        <div class="title-wrap">
+                            <h2>Senka</h2>
+                            <span class="status"><span class="status-dot"></span> Online</span>
+                        </div>
+                    </div>
                     <div class="header-actions">
-                        <span class="status">Senka Online</span>
-                        <i class="fa-solid fa-gear gear-btn" onclick="openSettings()" title="Pengaturan"></i>
+                        <button class="icon-btn session-btn" onclick="openSessions()" title="Sesi chat">
+                            <i class="fa-solid fa-layer-group"></i><span id="session-name">Sesi 1</span>
+                        </button>
+                        <button class="icon-btn" onclick="newSession()" title="Sesi baru"><i class="fa-solid fa-plus"></i></button>
+                        <button class="icon-btn" onclick="openExport()" title="Simpan chat (PDF/Word)"><i class="fa-solid fa-file-export"></i></button>
+                        <button class="icon-btn gear-btn" onclick="openSettings()" title="Pengaturan"><i class="fa-solid fa-gear"></i></button>
                     </div>
                 </div>
+
                 <div id="chat-history" class="chat-history"></div>
 
                 <div id="preview-container" class="preview-container">
@@ -30,12 +46,15 @@
                 </div>
 
                 <div class="input-area">
-                    <label for="image-upload" class="upload-btn"><i class="fa-solid fa-paperclip"></i></label>
+                    <button class="tool-btn" onclick="openImageModal()" title="Bikin gambar AI"><i class="fa-solid fa-wand-magic-sparkles"></i></button>
+                    <label for="image-upload" class="tool-btn upload-btn"><i class="fa-solid fa-paperclip"></i></label>
                     <input type="file" id="image-upload" accept="image/*" hidden>
-                    <input type="text" id="message-input" placeholder="Ketik ke Senka..." autocomplete="off">
+                    <input type="text" id="message-input" placeholder="Tulis pesan untuk Senka..." autocomplete="off">
                     <button id="send-btn" onclick="sendToSenka()"><i class="fa-solid fa-paper-plane"></i></button>
                 </div>
-                <div class="input-hint">Perintah: /gambar &lt;deskripsi&gt; untuk bikin gambar AI</div>
+                <div class="input-hint">
+                    <span>🎨 bikin gambar</span> · <span>📎 kirim foto (AI bisa baca)</span> · <span>🔊 suara</span>
+                </div>
             </div>
         </div>
     </div>
@@ -48,13 +67,47 @@
             </div>
             <label class="modal-label" for="panggilan-input">Senka memanggilmu sebagai</label>
             <input type="text" id="panggilan-input" class="modal-input" placeholder="pengguna" maxlength="30">
-            <label class="modal-label" for="model-select">Model AI</label>
-            <select id="model-select" class="modal-input"></select>
-            <p class="modal-hint">Tanpa memilih model, chat tidak bisa dikirim.</p>
+            <label class="modal-label">Pilih model AI</label>
+            <div id="model-picker" class="model-picker"></div>
+            <p class="modal-hint">Model bertanda 👁️ bisa baca gambar — dipakai otomatis saat kamu kirim foto.</p>
             <button class="modal-btn" onclick="saveSettings()"><i class="fa-solid fa-check"></i> Simpan</button>
         </div>
     </div>
 
+    <div id="image-modal" class="modal-overlay" style="display:none;">
+        <div class="modal">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-wand-magic-sparkles"></i> Bikin Gambar AI</h3>
+                <i class="fa-solid fa-xmark modal-close" onclick="closeImageModal()"></i>
+            </div>
+            <textarea id="image-prompt" class="modal-input" rows="3" placeholder="Deskripsi gambarnya, misal: gadis anime rambut merah di bawah pohon sakura saat senja..."></textarea>
+            <button class="modal-btn" onclick="generateImage()"><i class="fa-solid fa-sparkles"></i> Bikin Gambar</button>
+        </div>
+    </div>
+
+    <div id="sessions-modal" class="modal-overlay" style="display:none;">
+        <div class="modal wide-modal">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-layer-group"></i> Sesi Chat</h3>
+                <i class="fa-solid fa-xmark modal-close" onclick="closeSessions()"></i>
+            </div>
+            <div id="session-list" class="session-list"></div>
+            <button class="modal-btn" onclick="newSession()"><i class="fa-solid fa-plus"></i> Sesi Baru</button>
+        </div>
+    </div>
+
+    <div id="export-modal" class="modal-overlay" style="display:none;">
+        <div class="modal">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-file-export"></i> Simpan Chat</h3>
+                <i class="fa-solid fa-xmark modal-close" onclick="closeExport()"></i>
+            </div>
+            <button class="modal-btn" onclick="exportPDF()"><i class="fa-solid fa-file-pdf"></i> Simpan sebagai PDF</button>
+            <button class="modal-btn btn-secondary" onclick="exportDOC()"><i class="fa-solid fa-file-word"></i> Simpan sebagai Word (.doc)</button>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="script.js"></script>
 </body>
 </html>
