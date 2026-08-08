@@ -18,7 +18,7 @@ const MODELS = {
     euryale31: { id: "sao10k/l3.1-euryale-70b",                                    label: "Euryale 70B v3.1 (berbayar)" }
 };
 
-const FALLBACK = MODELS.gemma;
+const FALLBACK_CHAIN = [MODELS.gemma, MODELS.gptoss, MODELS.nemotron];
 
 async function callOpenRouter(messages, modelId) {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -36,6 +36,18 @@ async function callOpenRouter(messages, modelId) {
     });
     const data = await response.json();
     return { ok: response.ok, status: response.status, data };
+}
+
+async function tryModels(messages, chosen) {
+    const candidates = [chosen, ...FALLBACK_CHAIN.filter(m => m.id !== chosen.id)];
+    let lastError = null;
+    for (const m of candidates) {
+        const result = await callOpenRouter(messages, m.id);
+        if (result.ok) return { data: result.data, model: m };
+        lastError = result;
+        console.error(`Model ${m.id} gagal:`, result.data?.error?.message || result.status);
+    }
+    return { lastError };
 }
 
 app.post('/api/chat', async (req, res) => {
@@ -61,23 +73,17 @@ Jangan mengarang fakta; kalau tidak tahu, jawab jujur "nggak tahu".
 Tetap gunakan persona 2D-mu dengan hangat dan menyenangkan.`
         };
 
-        let result = await callOpenRouter([systemPrompt, ...messages], model.id);
+        let result = await tryModels([systemPrompt, ...messages], model);
 
-        if (!result.ok && model.id !== FALLBACK.id) {
-            const fb = await callOpenRouter([systemPrompt, ...messages], FALLBACK.id);
-            if (fb.ok) {
-                return res.json({ ...fb.data, model_used: FALLBACK.label });
-            }
-        }
-
-        if (!result.ok) {
-            console.error("OpenRouter error:", result.data?.error?.message || result.status);
-            return res.status(result.status).json({
-                error: result.data?.error?.message || `API error (${result.status})`
+        if (!result.data) {
+            const err = result.lastError;
+            console.error("Semua model gagal:", err?.data?.error?.message || err?.status);
+            return res.status(err?.status || 502).json({
+                error: err?.data?.error?.message || "Semua model lagi penuh. Coba lagi sebentar lagi ya."
             });
         }
 
-        res.json({ ...result.data, model_used: model.label });
+        res.json({ ...result.data, model_used: result.model.label });
     } catch (error) {
         console.error("Error API:", error);
         res.status(500).json({ error: "Waduh, koneksi bermasalah. Coba lagi ya." });
