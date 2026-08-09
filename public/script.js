@@ -64,18 +64,36 @@ window.onload = async () => {
     renderChat();
 };
 
+function cleanupOldImages(msgs) {
+    let kept = 0;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+        const m = msgs[i];
+        const hasImg = (m.content || []).some(c => c && c.type === 'image_url' && c.image_url && typeof c.image_url.url === 'string' && c.image_url.url.startsWith('data:'));
+        if (hasImg) {
+            if (kept < 3) {
+                kept++;
+            } else {
+                m.content = (m.content || []).map(c => c && c.type === 'image_url' ? { type: 'text', text: '[gambar]' } : c);
+            }
+        }
+    }
+    return msgs;
+}
+
 function loadSessions() {
     try { sessions = JSON.parse(localStorage.getItem('senka_sessions')) || []; } catch (e) { sessions = []; }
     if (!sessions.length) sessions = [{ id: 's' + Date.now(), name: 'Sesi 1', messages: [] }];
     activeId = localStorage.getItem('senka_active');
     if (!sessions.find(s => s.id === activeId)) activeId = sessions[0].id;
     const active = sessions.find(s => s.id === activeId);
+    if (active) active.messages = cleanupOldImages(active.messages);
     memoryList = active ? active.messages : [];
+    saveSessions();
 }
 
 function saveSessions() {
     const active = sessions.find(s => s.id === activeId);
-    if (active) active.messages = memoryList;
+    if (active) active.messages = cleanupOldImages(memoryList);
     localStorage.setItem('senka_sessions', JSON.stringify(sessions));
     localStorage.setItem('senka_active', activeId);
     renderSessionName();
@@ -373,7 +391,8 @@ function renderChat() {
             appendMessage('senka', 'Sebelum ngobrol, pilih dulu model AI-nya lewat tombol pengaturan di atas.');
         }
     } else {
-        memoryList.forEach(m => {
+        const STEP = 80;
+        const renderMsg = (m) => {
             const bubble = document.createElement('div');
             bubble.classList.add('message', m.role === 'user' ? 'msg-user' : 'msg-senka');
             (m.content || []).forEach(c => {
@@ -383,15 +402,36 @@ function renderChat() {
                     p.innerHTML = formatReply(c.text);
                     bubble.appendChild(p);
                 } else if (c.type === 'image_url') {
-                    const img = document.createElement('img');
-                    img.src = c.image_url.url;
-                    img.classList.add('chat-img');
-                    bubble.appendChild(img);
+                    if (typeof c.image_url.url === 'string' && c.image_url.url.startsWith('data:')) {
+                        const p = document.createElement('div');
+                        p.innerText = '[gambar]';
+                        bubble.appendChild(p);
+                    } else {
+                        const img = document.createElement('img');
+                        img.src = c.image_url.url;
+                        img.classList.add('chat-img');
+                        bubble.appendChild(img);
+                    }
                 }
             });
             addMsgActions(bubble, m.role === 'user' ? 'user' : 'senka');
             chatHistoryDOM.appendChild(bubble);
-        });
+        };
+        if (memoryList.length > STEP) {
+            const hidden = memoryList.length - STEP;
+            const btn = document.createElement('button');
+            btn.className = 'load-more';
+            btn.innerText = 'Muat chat lama (' + hidden + ' pesan)';
+            btn.onclick = () => {
+                chatHistoryDOM.innerHTML = '';
+                memoryList.forEach(renderMsg);
+                scrollToBottom(true);
+            };
+            chatHistoryDOM.appendChild(btn);
+            memoryList.slice(-STEP).forEach(renderMsg);
+        } else {
+            memoryList.forEach(renderMsg);
+        }
     }
     scrollToBottom(true);
 }
