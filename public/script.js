@@ -42,7 +42,6 @@ document.addEventListener('pointerdown', e => {
 
 window.onload = async () => {
     initSakura();
-    if (window.SenkaGif) SenkaGif.init();
     loadSessions();
     renderSessionName();
     document.getElementById('panggilan-input').value = panggilan;
