@@ -334,17 +334,44 @@ app.get('/api/search', async (req, res) => {
 
 const LTX_SPACE = 'https://lightricks-ltx-video-distilled.hf.space';
 
+async function translateToEnglish(prompt) {
+    const key = process.env.GROQ_API_KEY;
+    if (!key) return prompt;
+    try {
+        const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: 'llama-3.1-8b-instant',
+                messages: [
+                    { role: 'system', content: 'Translate the user text to English. Reply with ONLY the English translation, no quotes, no explanations.' },
+                    { role: 'user', content: prompt }
+                ],
+                max_tokens: 300,
+                temperature: 0.1
+            })
+        });
+        const data = await r.json();
+        const t = data?.choices?.[0]?.message?.content?.trim();
+        return t && t.length > 0 ? t : prompt;
+    } catch (e) {
+        console.error('Translate error:', e.message);
+        return prompt;
+    }
+}
+
 app.post('/api/video', async (req, res) => {
     try {
         const { prompt } = req.body;
         if (!prompt || !prompt.trim()) {
             return res.status(400).json({ error: "Deskripsi videonya kosong." });
         }
+        const enPrompt = await translateToEnglish(prompt.trim());
         const sub = await fetch(`${LTX_SPACE}/gradio_api/call/text_to_video`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                data: [prompt.trim(), "worst quality, inconsistent motion, blurry, jittery, distorted", null, null, 512, 704, "text-to-video", 4, 9, 42, true, 1, true]
+                data: [enPrompt, "worst quality, inconsistent motion, blurry, jittery, distorted", null, null, 512, 704, "text-to-video", 4, 9, 42, true, 1, true]
             })
         });
         const data = await sub.json().catch(() => ({}));

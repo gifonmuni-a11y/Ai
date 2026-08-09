@@ -565,7 +565,8 @@ function generateVideo() {
 
 async function generateVideoWithPrompt(prompt) {
     appendMessage('user', prompt);
-    const loading = appendMessage('senka', 'Lagi render video, biasanya 1-3 menit ya…');
+    const loading = appendMessage('senka', '');
+    loading.innerHTML = 'Senka lagi bikin videomu<span class="tind"><i></i><i></i><i></i></span>';
     scrollToBottom(true);
     try {
         const resp = await fetch('/api/video', {
