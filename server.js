@@ -332,56 +332,105 @@ app.get('/api/search', async (req, res) => {
     }
 });
 
+const LTX_SPACE = 'https://lightricks-ltx-video-distilled.hf.space';
+
 app.post('/api/video', async (req, res) => {
     try {
         const { prompt } = req.body;
         if (!prompt || !prompt.trim()) {
             return res.status(400).json({ error: "Deskripsi videonya kosong." });
         }
-        const key = process.env.FAL_KEY;
-        if (!key) {
-            return res.status(400).json({ error: "Bikin video butuh akun gratis fal.ai (ada kredit cuma-cuma). Daftar di https://fal.ai lalu kasih tau saya FAL_KEY-nya." });
-        }
-        const sub = await fetch('https://queue.fal.run/fal-ai/wan/v2.1/text-to-video', {
+        const sub = await fetch(`${LTX_SPACE}/gradio_api/call/text_to_video`, {
             method: 'POST',
-            headers: { 'Authorization': 'Key ' + key, 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                prompt: prompt.trim(),
-                video_size: '512x512',
-                num_frames: 33,
-                num_inference_steps: 30
+                data: [prompt.trim(), "worst quality, inconsistent motion, blurry, jittery, distorted", null, null, 512, 704, "text-to-video", 4, 9, 42, true, 1, true]
             })
         });
         const data = await sub.json().catch(() => ({}));
-        if (!sub.ok) {
-            return res.status(502).json({ error: data.detail || data.error?.message || `API video gagal (${sub.status})` });
+        if (!sub.ok || !data.event_id) {
+            return res.status(502).json({ error: data.error || data.detail || `Space video gagal (${sub.status})` });
         }
-        res.json({ jobId: data.request_id, statusUrl: data.status_url });
+        res.json({ jobId: data.event_id, statusUrl: `${LTX_SPACE}/gradio_api/call/text_to_video/${data.event_id}` });
     } catch (error) {
         console.error('Error video submit:', error);
         res.status(500).json({ error: "Gagal mulai render video. Coba lagi." });
     }
 });
 
+function parseSseComplete(text) {
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        if (lines[i].trim() !== 'event: complete') continue;
+        for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
+            const l = lines[j].trim();
+            if (!l.startsWith('data:')) continue;
+            try {
+                const arr = JSON.parse(l.slice(5).trim());
+                const a = Array.isArray(arr) ? arr[0] : arr;
+                const url = a?.video?.url || a?.video?.path || a?.url || a?.path;
+                if (typeof url === 'string' && url) return url;
+                if (Array.isArray(arr[0]) && arr[0][0]) {
+                    const b = arr[0][0];
+                    const u2 = b?.video?.url || b?.video?.path || b?.url || b?.path;
+                    if (typeof u2 === 'string' && u2) return u2;
+                }
+            } catch (e) { }
+        }
+    }
+    return null;
+}
+
 app.get('/api/video/status', async (req, res) => {
     try {
         const url = (req.query.url || '').toString();
         if (!url) return res.status(400).json({ error: "URL status kosong." });
-        const r = await fetch(url, { headers: { 'Authorization': 'Key ' + (process.env.FAL_KEY || '') } });
-        const data = await r.json().catch(() => ({}));
-        if (data.status === 'COMPLETED') {
-            const rr = await fetch(data.response_url, { headers: { 'Authorization': 'Key ' + (process.env.FAL_KEY || '') } });
-            const out = await rr.json().catch(() => ({}));
-            const videoUrl = out.video?.url || out.output?.[0]?.url || out.video_url;
-            return res.json({ status: 'COMPLETED', videoUrl });
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 45000);
+        let text = '';
+        try {
+            const r = await fetch(url, { signal: ctrl.signal });
+            text = await r.text();
+        } catch (e) {
+            return res.json({ status: 'IN_PROGRESS' });
+        } finally {
+            clearTimeout(timer);
         }
-        if (data.status === 'IN_QUEUE' || data.status === 'IN_PROGRESS') {
-            return res.json({ status: data.status });
+        if (text.includes('"complete"') || /event:\s*complete/.test(text)) {
+            const filePath = parseSseComplete(text);
+            if (filePath) {
+                return res.json({ status: 'COMPLETED', videoUrl: '/api/video/file?u=' + encodeURIComponent(filePath) });
+            }
+            return res.json({ status: 'COMPLETED', videoUrl: null });
         }
-        res.json({ status: data.status || 'ERROR', error: data.error || data.detail || 'Gagal render video.' });
+        if (/event:\s*error/.test(text)) {
+            const m = text.match(/data:\s*"([^"]+)"/s) || text.match(/data:\s*(\{.*\})/s);
+            let msg = 'Gagal render video.';
+            if (m) { try { msg = JSON.parse(m[1]).error || msg; } catch (e) { msg = m[1].replace(/\\"/g, '"'); } }
+            return res.json({ status: 'ERROR', error: msg });
+        }
+        res.json({ status: 'IN_PROGRESS' });
     } catch (error) {
         console.error('Error video status:', error);
         res.status(500).json({ error: "Gagal cek status video." });
+    }
+});
+
+app.get('/api/video/file', async (req, res) => {
+    try {
+        const u = (req.query.u || '').toString();
+        if (!u) return res.status(400).json({ error: "URL file kosong." });
+        const target = u.startsWith('/tmp/gradio/') ? `${LTX_SPACE}/gradio_api/file=${encodeURIComponent(u)}` : u;
+        const r = await fetch(target);
+        if (!r.ok) return res.status(502).json({ error: 'Video sudah tidak tersedia. Generate ulang ya.' });
+        res.setHeader('Content-Type', 'video/mp4');
+        res.setHeader('Cache-Control', 'public, max-age=3600');
+        res.setHeader('Content-Length', r.headers.get('content-length') || '');
+        const buf = Buffer.from(await r.arrayBuffer());
+        res.send(buf);
+    } catch (error) {
+        console.error('Error video file:', error);
+        res.status(502).json({ error: 'Gagal ambil video.' });
     }
 });
 
