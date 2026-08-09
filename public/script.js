@@ -15,6 +15,7 @@ let lastUserText = '';
 let lastUserImage = null;
 let isStreaming = false;
 let autospeak = localStorage.getItem('senka_autospeak') === '1';
+let visionAuto = localStorage.getItem('senka_visionauto') !== '0';
 let recognition = null;
 let listening = false;
 
@@ -225,6 +226,7 @@ function jumpToMessage(idx) {
 function openSettings() {
     document.getElementById('panggilan-input').value = panggilan;
     document.getElementById('autospeak-input').checked = autospeak;
+    document.getElementById('visionauto-input').checked = visionAuto;
     renderModelPicker();
     document.getElementById('settings-modal').style.display = 'flex';
 }
@@ -270,6 +272,8 @@ function saveSettings() {
     }
     autospeak = document.getElementById('autospeak-input').checked;
     localStorage.setItem('senka_autospeak', autospeak ? '1' : '0');
+    visionAuto = document.getElementById('visionauto-input').checked;
+    localStorage.setItem('senka_visionauto', visionAuto ? '1' : '0');
     if (modelKey) {
         localStorage.setItem('senka_model', modelKey);
     }
@@ -402,31 +406,50 @@ function formatReply(raw) {
     if (!raw) return '';
     const name = panggilan.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const re = new RegExp(
-        '(\\*\\*[^*]+\\*\\*)' +
+        '(?:"([^"\\n]*)"|\\u201C([^\\u201D\\n]*)\\u201D)' +
+        '|(\\*\\*[^*\\n]+\\*\\*)' +
         '|(\\b(?:' + IMPORTANT_WORDS + ')\\b)' +
         '|(\\b' + name + '\\b)' +
         '|(\\b[Ss]enka\\b)' +
         '|([0-9]+)' +
-        '|(["\'\u201c\u201d\u2018\u2019.,?!\u2014]+)' +
+        '|([.,?!:\u2014])' +
         '|([\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af\u0400-\u04ff\u0600-\u06ff\u0e00-\u0e7f\u0900-\u097f\u3000-\u303f]+)' +
         '|([*_`~#])',
         'gi'
     );
+    const innerRe = new RegExp(
+        '(\\*\\*[^*\\n]+\\*\\*)|(\\b(?:' + IMPORTANT_WORDS + ')\\b)',
+        'gi'
+    );
+    const fmtInner = (inner) => {
+        let o = '', last = 0, mm;
+        while ((mm = innerRe.exec(inner)) !== null) {
+            o += escapeHtml(inner.slice(last, mm.index)).replace(/[*_`~#]/g, '');
+            if (mm[1]) o += '<span class="em">' + escapeHtml(mm[1].slice(2, -2)) + '</span>';
+            else if (mm[2]) o += '<span class="em">' + escapeHtml(mm[2]) + '</span>';
+            last = mm.index + mm[0].length;
+        }
+        o += escapeHtml(inner.slice(last)).replace(/[*_`~#]/g, '');
+        return o;
+    };
+    const strip = (s) => s.replace(/[*_`~#]/g, '');
     let out = '';
     let last = 0;
     let m;
     while ((m = re.exec(raw)) !== null) {
-        out += escapeHtml(raw.slice(last, m.index));
-        if (m[1]) out += '<span class="em">' + escapeHtml(m[1].slice(2, -2)) + '</span>';
-        else if (m[2]) out += '<span class="em">' + escapeHtml(m[2]) + '</span>';
-        else if (m[3]) out += '<span class="who-user">' + escapeHtml(m[3]) + '</span>';
-        else if (m[4]) out += '<span class="who-senka">' + escapeHtml(m[4]) + '</span>';
-        else if (m[5]) out += '<span class="num">' + escapeHtml(m[5]) + '</span>';
-        else if (m[6]) out += '<span class="punct">' + escapeHtml(m[6]) + '</span>';
-        else if (m[7]) out += '<span class="jp">' + escapeHtml(m[7]) + '</span>';
+        out += strip(escapeHtml(raw.slice(last, m.index)));
+        if (m[1] !== undefined) out += '<span class="q">"' + fmtInner(m[1]) + '"</span>';
+        else if (m[2] !== undefined) out += '<span class="q">\u201C' + fmtInner(m[2]) + '\u201D</span>';
+        else if (m[3]) out += '<span class="em">' + escapeHtml(m[3].slice(2, -2)) + '</span>';
+        else if (m[4]) out += '<span class="em">' + escapeHtml(m[4]) + '</span>';
+        else if (m[5]) out += '<span class="who-user">' + escapeHtml(m[5]) + '</span>';
+        else if (m[6]) out += '<span class="who-senka">' + escapeHtml(m[6]) + '</span>';
+        else if (m[7]) out += '<span class="num">' + escapeHtml(m[7]) + '</span>';
+        else if (m[8]) out += '<span class="punct">' + escapeHtml(m[8]) + '</span>';
+        else if (m[9]) out += '<span class="jp">' + escapeHtml(m[9]) + '</span>';
         last = m.index + m[0].length;
     }
-    out += escapeHtml(raw.slice(last));
+    out += strip(escapeHtml(raw.slice(last)));
     return out;
 }
 
@@ -736,7 +759,7 @@ async function sendToSenka() {
         const response = await fetch('/api/chat/stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages: payloadMessages, modelKey, panggilan })
+            body: JSON.stringify({ messages: payloadMessages, modelKey, panggilan, useVision: visionAuto })
         });
 
         if (!response.ok) {

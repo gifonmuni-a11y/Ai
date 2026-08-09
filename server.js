@@ -100,10 +100,14 @@ async function callProvider(provider, messages, modelId, stream = false) {
 }
 
 function hasImage(messages) {
-    return (messages || []).some(m => (m.content || []).some(c => c && c.type === 'image_url'));
+    return (messages || []).some(m => {
+        const c = m && m.content;
+        if (!c || typeof c === 'string') return false;
+        return c.some(x => x && x.type === 'image_url');
+    });
 }
 
-function candidateList(chosen, imageIncluded = false) {
+function candidateList(chosen, imageIncluded = false, useVision = true) {
     const priority = { groq: 0, openrouter: 1 };
     const vision = MODELS
         .filter(m => m.vision && m.key !== chosen.key)
@@ -111,7 +115,7 @@ function candidateList(chosen, imageIncluded = false) {
     const rest = MODELS
         .filter(m => m.key !== chosen.key && !m.vision)
         .sort((a, b) => (priority[a.provider] ?? 9) - (priority[b.provider] ?? 9));
-    if (imageIncluded) return [...vision, chosen, ...rest];
+    if (imageIncluded && useVision) return [...vision, chosen, ...rest];
     return [chosen, ...rest];
 }
 
@@ -124,7 +128,7 @@ app.get('/api/config', (req, res) => {
 
 app.post('/api/chat', async (req, res) => {
     try {
-        const { messages, modelKey, panggilan } = req.body;
+        const { messages, modelKey, panggilan, useVision } = req.body;
 
         if (!Array.isArray(messages) || messages.length === 0) {
             return res.status(400).json({ error: "Pesan harus diisi dulu." });
@@ -138,7 +142,7 @@ app.post('/api/chat', async (req, res) => {
         const systemPrompt = buildSystemPrompt(getCallName(panggilan));
         let lastErr = null;
 
-        for (const m of candidateList(chosen, hasImage(messages))) {
+        for (const m of candidateList(chosen, hasImage(messages), useVision !== false)) {
             let response;
             try {
                 response = await callProvider(m.provider, [systemPrompt, ...messages], m.id);
@@ -163,7 +167,7 @@ app.post('/api/chat', async (req, res) => {
 
 app.post('/api/chat/stream', async (req, res) => {
     try {
-        const { messages, modelKey, panggilan } = req.body;
+        const { messages, modelKey, panggilan, useVision } = req.body;
 
         if (!Array.isArray(messages) || messages.length === 0) {
             return res.status(400).json({ error: "Pesan harus diisi dulu." });
@@ -176,7 +180,7 @@ app.post('/api/chat/stream', async (req, res) => {
 
         const systemPrompt = buildSystemPrompt(getCallName(panggilan));
 
-        for (const m of candidateList(chosen, hasImage(messages))) {
+        for (const m of candidateList(chosen, hasImage(messages), useVision !== false)) {
             let upstream;
             try {
                 upstream = await callProvider(m.provider, [systemPrompt, ...messages], m.id, true);

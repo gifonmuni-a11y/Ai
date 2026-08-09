@@ -22,7 +22,10 @@
             <div class="glass-panel">
                 <div class="chat-header">
                     <div class="header-left">
-                        <img class="avatar" src="assets/avatar.webp" alt="Senka" onerror="this.style.display='none'">
+                        <div class="avatar-wrap">
+                            <img class="avatar" src="assets/avatarsenka.gif" alt="Senka" onerror="this.style.display='none'">
+                            <img class="avatar-border" src="assets/bordersenka.gif" alt="" aria-hidden="true">
+                        </div>
                         <div class="title-wrap">
                             <h2>Senka</h2>
                             <span class="status"><span class="status-dot"></span> Online</span>
@@ -74,12 +77,22 @@
             <input type="text" id="panggilan-input" class="modal-input" placeholder="pengguna" maxlength="30">
             <label class="modal-label">Pilih model AI</label>
             <div id="model-picker" class="model-picker"></div>
-            <label class="modal-label">Senka membacakan jawaban otomatis</label>
-            <label class="switch">
-                <input type="checkbox" id="autospeak-input">
-                <span class="slider"></span>
-            </label>
-            <p class="modal-hint">Model "bisa baca gambar" dipakai otomatis saat kamu kirim foto.</p>
+            <div class="settings-block">
+                <label class="modal-label" for="autospeak-input">Senka membacakan jawaban otomatis</label>
+                <label class="switch">
+                    <input type="checkbox" id="autospeak-input">
+                    <span class="slider"></span>
+                </label>
+                <p class="modal-hint">Kalau ON, semua balasan teks dari Senka otomatis dibacakan pakai suara. Kalau OFF, tidak ada suara sama sekali.</p>
+            </div>
+            <div class="settings-block">
+                <label class="modal-label" for="visionauto-input">Baca gambar otomatis</label>
+                <label class="switch">
+                    <input type="checkbox" id="visionauto-input">
+                    <span class="slider"></span>
+                </label>
+                <p class="modal-hint">Model "bisa baca gambar" dipakai otomatis saat kamu kirim foto.</p>
+            </div>
             <div class="modal-actions">
                 <button class="modal-btn" onclick="saveSettings()"><i class="fa-solid fa-check"></i> Simpan</button>
             </div>
