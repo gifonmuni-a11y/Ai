@@ -42,6 +42,7 @@ document.addEventListener('pointerdown', e => {
 
 window.onload = async () => {
     initSakura();
+    if (window.SenkaGif) SenkaGif.init();
     loadSessions();
     renderSessionName();
     document.getElementById('panggilan-input').value = panggilan;
@@ -1126,7 +1127,7 @@ function initSakura() {
         ctx.rotate(p.rot);
         ctx.scale(1 + 0.06 * Math.sin(p.sway * 1.7), 1);
         ctx.globalAlpha = p.alpha;
-        const g = ctx.createLinearGradient(0, -s * 1.1, 0, s * 0.3);
+        const g = p.grad || (p.grad = ctx.createLinearGradient(0, -s * 1.1, 0, s * 0.3));
         g.addColorStop(0, p.color);
         g.addColorStop(1, '#ffffff');
         ctx.beginPath();

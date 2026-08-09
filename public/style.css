@@ -24,7 +24,7 @@ img.chat-img { pointer-events: auto; }
 button { position: relative; overflow: hidden; }
 button:focus, button:focus-visible, a:focus, a:focus-visible, [tabindex]:focus-visible { outline: none; }
 
-#sakura-canvas { position: fixed; inset: 0; z-index: 50; pointer-events: none; will-change: transform; }
+#sakura-canvas { position: fixed; inset: 0; z-index: 50; pointer-events: none; }
 
 .ripple {
     position: absolute; border-radius: 50%; pointer-events: none;
@@ -46,7 +46,6 @@ button:focus, button:focus-visible, a:focus, a:focus-visible, [tabindex]:focus-v
 .chat-section { width: 62%; padding: 14px 20px; display: flex; flex-direction: column; justify-content: center; }
 .glass-panel {
     background: rgba(8, 12, 26, 0.15);
-    backdrop-filter: blur(1px); -webkit-backdrop-filter: blur(1px);
     border: 1px solid rgba(96, 165, 250, 0.22);
     border-radius: 22px; height: 100%;
     display: flex; flex-direction: column;
