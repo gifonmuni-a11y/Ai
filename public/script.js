@@ -152,7 +152,7 @@ async function newSessionCloud() {
         });
     } catch (e) { }
     closeAllModals();
-    renderChat();
+    await loadRemoteChat();
 }
 
 async function switchSessionCloud(id) {
@@ -162,7 +162,6 @@ async function switchSessionCloud(id) {
     localStorage.setItem('senka_sid_' + cloudUid, id);
     memoryList = [];
     closeSessions();
-    renderChat();
     await loadRemoteChat();
 }
 
@@ -179,7 +178,6 @@ async function deleteSessionCloud(id) {
         cloudSid = cloudSessions[0].id;
         localStorage.setItem('senka_sid_' + cloudUid, cloudSid);
         memoryList = [];
-        renderChat();
         await loadRemoteChat();
     }
 }
@@ -337,6 +335,36 @@ function makeRemoteBtn() {
     return btn;
 }
 
+function isGreetingText(t) {
+    return /^(Selamat (pagi|siang|sore|malam|beristirahat)|Bangun dan waktunya bersinar|Belom tidur)/.test(t);
+}
+
+function cleanupDuplicateGreetings() {
+    let blockStart = -1;
+    for (let i = 0; i < memoryList.length; i++) {
+        const m = memoryList[i];
+        const t = m.content && m.content[0] && m.content[0].type === 'text' ? m.content[0].text : '';
+        if (m.role === 'assistant' && t && isGreetingText(t)) {
+            if (blockStart === -1) blockStart = i;
+        } else {
+            blockStart = -1;
+        }
+    }
+    if (blockStart === -1) return false;
+    const block = memoryList.slice(blockStart);
+    if (block.length < 2) return false;
+    const keep = block[block.length - 1];
+    const dupCids = block.slice(0, -1).map(x => x.cid).filter(Boolean);
+    memoryList = memoryList.filter(x => x !== keep || block.indexOf(x) === block.length - 1);
+    memoryList = memoryList.slice(0, blockStart + 1).concat([keep]);
+    dupCids.forEach(cid => {
+        authHeaders().then(headers => {
+            fetch('/api/chats/' + cid, { method: 'DELETE', headers }).catch(() => { });
+        });
+    });
+    return true;
+}
+
 async function loadRemoteChat() {
     try {
         const q = new URLSearchParams({ limit: '25' });
@@ -345,6 +373,7 @@ async function loadRemoteChat() {
         const d = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(d.error || 'Gagal ambil chat.');
         memoryList = (d.messages || []).map(remoteToLocal);
+        cleanupDuplicateGreetings();
         remoteHasMore = !!d.hasMore;
         if (!memoryList.length) {
             const greeting = getGreeting();
@@ -740,6 +769,11 @@ function buildMsgEl(m) {
 function renderChat() {
     chatHistoryDOM.innerHTML = '';
     if (!memoryList.length) {
+        if (supabaseEnabled) {
+            chatHistoryDOM.appendChild(document.createElement('div'));
+            scrollToBottom(true);
+            return;
+        }
         const lastVisit = parseInt(localStorage.getItem('senka_last_visit') || '0', 10);
         localStorage.setItem('senka_last_visit', String(Date.now()));
         const away = lastVisit > 0 && (Date.now() - lastVisit) > 5 * 60 * 60 * 1000;
@@ -883,13 +917,42 @@ function speak(text) {
     speechSynthesis.speak(u);
 }
 
-function toggleVoice() {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) {
-        appendMessage('senka', 'Browser kamu tidak mendukung voice input. Coba Chrome di HP atau laptop.');
-        scrollToBottom(true);
-        return;
+async function getMicStatus() {
+    if (!navigator.permissions || !navigator.permissions.query) return 'prompt';
+    try {
+        const st = await navigator.permissions.query({ name: 'microphone' });
+        if (st.state === 'granted') return 'granted';
+        if (st.state === 'denied') return 'denied';
+        return 'prompt';
+    } catch (e) {
+        return 'prompt';
     }
+}
+
+function openMicModal() {
+    const name = document.getElementById('mic-modal-name');
+    if (name) name.innerText = panggilan;
+    document.getElementById('mic-permission-modal').style.display = 'flex';
+}
+
+function closeMicModal() {
+    document.getElementById('mic-permission-modal').style.display = 'none';
+}
+
+async function allowMicFromModal() {
+    try {
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+        closeMicModal();
+        startVoiceInput();
+    } catch (e) {
+        closeMicModal();
+        showToast('Akses mic ditolak, kamu masih bisa chat text seperti biasa');
+    }
+}
+
+function startVoiceInput() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return;
     if (listening) { recognition.stop(); return; }
     if (!recognition) {
         recognition = new SR();
@@ -917,6 +980,37 @@ function toggleVoice() {
         recognition.start();
         setMic(true);
     } catch (e) { }
+}
+
+let toastTimer = null;
+function showToast(msg) {
+    const t = document.getElementById('toast');
+    if (!t) return;
+    t.innerText = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 3200);
+}
+
+function toggleVoice() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+        appendMessage('senka', 'Browser kamu tidak mendukung voice input. Coba Chrome di HP atau laptop.');
+        scrollToBottom(true);
+        return;
+    }
+    if (listening) { recognition.stop(); return; }
+    getMicStatus().then(status => {
+        if (status === 'prompt') {
+            openMicModal();
+            return;
+        }
+        if (status === 'denied') {
+            showToast('Akses mic ditolak, kamu masih bisa chat text seperti biasa');
+            return;
+        }
+        startVoiceInput();
+    });
 }
 
 function setMic(on) {

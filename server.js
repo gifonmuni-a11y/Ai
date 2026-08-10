@@ -642,6 +642,24 @@ app.post('/api/chats', async (req, res) => {
     }
 });
 
+app.delete('/api/chats/:id', async (req, res) => {
+    try {
+        if (!supabase) return res.status(503).json({ error: 'Supabase belum dikonfigurasi.' });
+        const tok = decodeToken(req);
+        if (!tok || !tok.uid) return res.status(401).json({ error: 'Belum login.' });
+        const { error } = await clientFor(req)
+            .from('senka_chats')
+            .delete()
+            .eq('id', req.params.id)
+            .eq('user_id', tok.uid);
+        if (error) return res.status(500).json({ error: error.message });
+        res.json({ ok: true });
+    } catch (error) {
+        console.error('Error chats DELETE:', error);
+        res.status(500).json({ error: error.message || 'Gagal hapus pesan.' });
+    }
+});
+
 app.post('/api/upload', upload.single('file'), async (req, res) => {
     try {
         if (!supabase) return res.status(503).json({ error: 'Supabase belum dikonfigurasi.' });
