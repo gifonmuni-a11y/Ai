@@ -93,6 +93,10 @@
                 </label>
                 <p class="modal-hint">Model "bisa baca gambar" dipakai otomatis saat kamu kirim foto.</p>
             </div>
+            <div class="settings-block" id="signout-block" style="display:none;">
+                <button class="modal-btn btn-danger" onclick="signOut()"><i class="fa-solid fa-right-from-bracket"></i> Keluar dari akun</button>
+                <p class="modal-hint">Kamu akan kembali ke layar masuk. Chat di cloud tetap aman.</p>
+            </div>
             <div class="modal-actions">
                 <button class="modal-btn" onclick="saveSettings()"><i class="fa-solid fa-check"></i> Simpan</button>
             </div>
@@ -168,7 +172,19 @@
         </div>
     </div>
 
+    <div id="login-modal" class="login-overlay" style="display:none;">
+        <div class="login-card">
+            <div class="login-avatar"><i class="fa-solid fa-heart"></i></div>
+            <h2>Masuk ke Senka</h2>
+            <p class="login-desc">Login biar chat kamu tersimpan di cloud dan bisa dipakai di perangkat lain.</p>
+            <button class="login-btn" id="btn-login-google"><i class="fa-brands fa-google"></i> Masuk dengan Google</button>
+            <button class="login-btn btn-guest" id="btn-login-guest"><i class="fa-solid fa-user-secret"></i> Lanjut sebagai Tamu</button>
+            <p class="login-hint">Mode Tamu menyimpan chat di akun tamu perangkat ini.</p>
+        </div>
+    </div>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="script.js"></script>
 </body>

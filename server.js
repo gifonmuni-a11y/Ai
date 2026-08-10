@@ -20,6 +20,29 @@ const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY)
 const MEDIA_BUCKET = 'senka-media';
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
+function decodeToken(req) {
+    const auth = req.headers.authorization || '';
+    const m = auth.match(/^Bearer\s+(.+)$/);
+    if (!m) return null;
+    try {
+        const payload = JSON.parse(Buffer.from(m[1].split('.')[1], 'base64url').toString('utf8'));
+        const provider = payload?.app_metadata?.provider || null;
+        return {
+            uid: payload?.sub || null,
+            provider: provider === 'google' ? 'google' : (provider || 'anonymous')
+        };
+    } catch (e) { return null; }
+}
+
+function clientFor(req) {
+    if (!supabase) return null;
+    const auth = req.headers.authorization || '';
+    return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        auth: { persistSession: false },
+        global: { headers: auth ? { Authorization: auth } : {} }
+    });
+}
+
 const PROVIDERS = {
     openrouter: { base: "https://openrouter.ai/api/v1", env: "OPENROUTER_API_KEY" },
     groq:       { base: "https://api.groq.com/openai/v1", env: "GROQ_API_KEY" }
@@ -436,13 +459,14 @@ app.get('/api/video/status', async (req, res) => {
         if (text.includes('"complete"') || /event:\s*complete/.test(text)) {
             const filePath = parseSseComplete(text);
             if (filePath) {
-                if (supabase) {
+                const tok = decodeToken(req);
+                if (supabase && tok && tok.uid) {
                     try {
                         const target = filePath.startsWith('/tmp/gradio/') ? `${LTX_SPACE}/gradio_api/file=${encodeURIComponent(filePath)}` : filePath;
                         const fr = await fetch(target);
                         if (fr.ok) {
                             const buf = Buffer.from(await fr.arrayBuffer());
-                            const saved = await supabaseUpload(buf, 'video/mp4', 'mp4');
+                            const saved = await supabaseUpload(clientFor(req), buf, 'video/mp4', 'mp4', tok.uid);
                             return res.json({ status: 'COMPLETED', videoUrl: saved.url });
                         }
                     } catch (e) {
@@ -484,35 +508,92 @@ app.get('/api/video/file', async (req, res) => {
     }
 });
 
-function supabaseUpload(buffer, contentType, ext) {
+async function supabaseUpload(client, buffer, contentType, ext, uid) {
     const safeExt = (ext || 'bin').toString().toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin';
-    const path = `u-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${safeExt}`;
-    return supabase.storage.from(MEDIA_BUCKET).upload(path, buffer, {
+    const path = `${uid || 'root'}/u-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${safeExt}`;
+    const { data, error } = await client.storage.from(MEDIA_BUCKET).upload(path, buffer, {
         contentType: contentType || 'application/octet-stream',
         cacheControl: '3600'
-    }).then(({ data, error }) => {
-        if (error) throw new Error(error.message);
-        return { path, url: supabase.storage.from(MEDIA_BUCKET).getPublicUrl(path).data.publicUrl };
     });
+    if (error) throw new Error(error.message);
+    return { path, url: client.storage.from(MEDIA_BUCKET).getPublicUrl(path).data.publicUrl };
 }
 
 app.get('/api/supabase-status', (req, res) => {
-    res.json({ enabled: !!supabase });
+    res.json({ enabled: !!supabase, url: SUPABASE_URL || null, anonKey: SUPABASE_ANON_KEY || null });
+});
+
+app.get('/api/sessions', async (req, res) => {
+    try {
+        if (!supabase) return res.status(503).json({ error: 'Supabase belum dikonfigurasi.' });
+        const tok = decodeToken(req);
+        if (!tok || !tok.uid) return res.status(401).json({ error: 'Belum login.' });
+        const client = clientFor(req);
+        const { data, error } = await client
+            .from('senka_sessions')
+            .select('id,nama,waktu_update')
+            .eq('user_id', tok.uid)
+            .order('waktu_update', { ascending: false });
+        if (error) return res.status(500).json({ error: error.message });
+        res.json({ sessions: data || [] });
+    } catch (error) {
+        console.error('Error sessions GET:', error);
+        res.status(500).json({ error: error.message || 'Gagal ambil sesi.' });
+    }
+});
+
+app.post('/api/sessions', async (req, res) => {
+    try {
+        if (!supabase) return res.status(503).json({ error: 'Supabase belum dikonfigurasi.' });
+        const tok = decodeToken(req);
+        if (!tok || !tok.uid) return res.status(401).json({ error: 'Belum login.' });
+        const { sesiId, nama } = req.body || {};
+        if (!sesiId) return res.status(400).json({ error: 'sesiId wajib.' });
+        const client = clientFor(req);
+        const { error } = await client
+            .from('senka_sessions')
+            .upsert({ id: String(sesiId), user_id: tok.uid, nama: String(nama || 'Sesi').slice(0, 40) }, { onConflict: 'id' })
+            .eq('user_id', tok.uid);
+        if (error) return res.status(500).json({ error: error.message });
+        res.json({ ok: true });
+    } catch (error) {
+        console.error('Error sessions POST:', error);
+        res.status(500).json({ error: error.message || 'Gagal simpan sesi.' });
+    }
+});
+
+app.delete('/api/sessions/:id', async (req, res) => {
+    try {
+        if (!supabase) return res.status(503).json({ error: 'Supabase belum dikonfigurasi.' });
+        const tok = decodeToken(req);
+        if (!tok || !tok.uid) return res.status(401).json({ error: 'Belum login.' });
+        const client = clientFor(req);
+        const { error: err1 } = await client.from('senka_sessions').delete().eq('id', req.params.id).eq('user_id', tok.uid);
+        if (err1) return res.status(500).json({ error: err1.message });
+        const { error: err2 } = await client.from('senka_chats').delete().eq('sesi_id', req.params.id).eq('user_id', tok.uid);
+        if (err2) return res.status(500).json({ error: err2.message });
+        res.json({ ok: true });
+    } catch (error) {
+        console.error('Error sessions DELETE:', error);
+        res.status(500).json({ error: error.message || 'Gagal hapus sesi.' });
+    }
 });
 
 app.get('/api/chats', async (req, res) => {
     try {
         if (!supabase) return res.status(503).json({ error: 'Supabase belum dikonfigurasi.' });
-        const userId = (req.query.userId || '').toString();
-        if (!userId) return res.status(400).json({ error: 'user_id wajib.' });
+        const tok = decodeToken(req);
+        if (!tok || !tok.uid) return res.status(401).json({ error: 'Belum login.' });
+        const sesiId = (req.query.sesiId || '').toString();
         const before = (req.query.before || '').toString();
         const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 50);
-        let q = supabase
+        let q = clientFor(req)
             .from('senka_chats')
             .select('id,user_id,tipe_user,tipe_pesan,isi_pesan,pengirim,waktu_kirim')
-            .eq('user_id', userId)
+            .eq('user_id', tok.uid)
             .order('id', { ascending: false })
             .limit(limit);
+        if (sesiId) q = q.eq('sesi_id', sesiId);
         if (before) q = q.lt('id', before);
         const { data, error } = await q;
         if (error) return res.status(500).json({ error: error.message });
@@ -527,22 +608,33 @@ app.get('/api/chats', async (req, res) => {
 app.post('/api/chats', async (req, res) => {
     try {
         if (!supabase) return res.status(503).json({ error: 'Supabase belum dikonfigurasi.' });
-        const { userId, tipePesan, isiPesan, pengirim } = req.body || {};
-        if (!userId) return res.status(400).json({ error: 'user_id wajib.' });
+        const tok = decodeToken(req);
+        if (!tok || !tok.uid) return res.status(401).json({ error: 'Belum login.' });
+        const { sesiId, tipePesan, isiPesan, pengirim } = req.body || {};
         if (!pengirim) return res.status(400).json({ error: 'pengirim wajib.' });
         const tipe = ['text', 'image', 'video', 'voice'].includes(tipePesan) ? tipePesan : 'text';
-        const { data, error } = await supabase
+        const client = clientFor(req);
+        const { data, error } = await client
             .from('senka_chats')
             .insert({
-                user_id: userId,
-                tipe_user: 'anonymous',
+                user_id: tok.uid,
+                tipe_user: tok.provider,
                 tipe_pesan: tipe,
                 isi_pesan: String(isiPesan ?? ''),
-                pengirim: String(pengirim)
+                pengirim: String(pengirim),
+                sesi_id: String(sesiId || '')
             })
             .select('id,user_id,tipe_pesan,isi_pesan,pengirim,waktu_kirim')
             .single();
         if (error) return res.status(500).json({ error: error.message });
+        if (sesiId) {
+            await client.from('senka_sessions').upsert(
+                { id: String(sesiId), user_id: tok.uid, nama: null, waktu_update: new Date().toISOString() },
+                { onConflict: 'id', ignoreDuplicates: false }
+            ).eq('user_id', tok.uid).then(({ error: upErr }) => {
+                if (upErr) console.error('Sesi touch error:', upErr.message);
+            });
+        }
         res.json(data);
     } catch (error) {
         console.error('Error chats POST:', error);
@@ -553,10 +645,12 @@ app.post('/api/chats', async (req, res) => {
 app.post('/api/upload', upload.single('file'), async (req, res) => {
     try {
         if (!supabase) return res.status(503).json({ error: 'Supabase belum dikonfigurasi.' });
+        const tok = decodeToken(req);
+        if (!tok || !tok.uid) return res.status(401).json({ error: 'Belum login.' });
         if (!req.file) return res.status(400).json({ error: 'File kosong.' });
         const original = req.file.originalname || '';
         const ext = original.includes('.') ? original.split('.').pop() : 'bin';
-        const { url } = await supabaseUpload(req.file.buffer, req.file.mimetype, ext);
+        const { url } = await supabaseUpload(clientFor(req), req.file.buffer, req.file.mimetype, ext, tok.uid);
         res.json({ url });
     } catch (error) {
         console.error('Error upload:', error);
@@ -567,6 +661,8 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 app.post('/api/upload-json', async (req, res) => {
     try {
         if (!supabase) return res.status(503).json({ error: 'Supabase belum dikonfigurasi.' });
+        const tok = decodeToken(req);
+        if (!tok || !tok.uid) return res.status(401).json({ error: 'Belum login.' });
         const { dataUrl, ext } = req.body || {};
         if (typeof dataUrl !== 'string' || !/^data:[^;]+;base64,/.test(dataUrl)) {
             return res.status(400).json({ error: 'Data URL tidak valid.' });
@@ -574,7 +670,7 @@ app.post('/api/upload-json', async (req, res) => {
         const mime = dataUrl.slice(5, dataUrl.indexOf(';')) || 'application/octet-stream';
         const buf = Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64');
         if (buf.length > 25 * 1024 * 1024) return res.status(413).json({ error: 'File terlalu besar.' });
-        const { url } = await supabaseUpload(buf, mime, ext || 'bin');
+        const { url } = await supabaseUpload(clientFor(req), buf, mime, ext || 'bin', tok.uid);
         res.json({ url });
     } catch (error) {
         console.error('Error upload-json:', error);

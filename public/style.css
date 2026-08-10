@@ -303,7 +303,71 @@ textarea.modal-input { resize: none; font-family: inherit; }
     .chat-history { padding: 14px 12px; }
 }
 
-body.cloud .session-btn { display: none; }
-body.cloud #btn-new-session { display: none; }
-
 .chat-audio { max-width: 100%; margin-top: 8px; display: block; border-radius: 12px; }
+
+.login-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(20, 10, 30, 0.92);
+    backdrop-filter: blur(8px);
+    padding: 20px;
+}
+.login-card {
+    width: min(380px, 100%);
+    background: linear-gradient(160deg, rgba(30, 20, 45, 0.97), rgba(20, 12, 32, 0.97));
+    border: 1px solid rgba(186, 85, 211, 0.35);
+    border-radius: 20px;
+    padding: 30px 24px;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+.login-avatar {
+    width: 64px;
+    height: 64px;
+    margin: 0 auto 14px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #d946ef, #8b5cf6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    color: #fff;
+    box-shadow: 0 0 30px rgba(217, 70, 239, 0.5);
+}
+.login-card h2 { color: #fff; margin: 0 0 8px; font-size: 1.3rem; }
+.login-desc { color: #b9a8d0; font-size: 0.82rem; margin: 0 0 20px; line-height: 1.5; }
+.login-btn {
+    width: 100%;
+    padding: 13px;
+    margin-bottom: 10px;
+    border-radius: 12px;
+    border: none;
+    cursor: pointer;
+    font-size: 0.92rem;
+    font-weight: 600;
+    font-family: inherit;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    background: linear-gradient(135deg, #4f8ef7, #3b6fe0);
+    color: #fff;
+    transition: transform 0.15s;
+}
+.login-btn:hover { transform: translateY(-2px); }
+.login-btn.btn-guest {
+    background: rgba(139, 92, 246, 0.18);
+    border: 1px solid rgba(139, 92, 246, 0.5);
+    color: #c4b5fd;
+}
+.login-hint { color: #7d6b96; font-size: 0.72rem; margin: 12px 0 0; }
+.btn-danger {
+    background: rgba(248, 113, 113, 0.15) !important;
+    color: #fca5a5 !important;
+    border: 1px solid rgba(248, 113, 113, 0.4) !important;
+    width: 100%;
+}

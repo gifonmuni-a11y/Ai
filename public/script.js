@@ -22,6 +22,11 @@ let supabaseEnabled = false;
 let remoteHasMore = false;
 let remoteLoading = false;
 let deviceUserId = '';
+let sbAuth = null;
+let cloudUid = '';
+let cloudTipe = 'anonymous';
+let cloudSessions = [];
+let cloudSid = '';
 
 document.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('touchstart', e => {
@@ -66,11 +71,16 @@ window.onload = async () => {
     try {
         const sr = await fetch('/api/supabase-status');
         const sd = await sr.json().catch(() => ({}));
-        if (sd.enabled) {
-            supabaseEnabled = true;
-            document.body.classList.add('cloud');
-            renderSessionName();
-            await loadRemoteChat();
+        if (sd.enabled && window.supabase && sd.url && sd.anonKey) {
+            sbAuth = window.supabase.createClient(sd.url, sd.anonKey, {
+                auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+            });
+            const { data: sessData } = await sbAuth.auth.getSession();
+            if (sessData.session) {
+                await startCloud(sessData.session.user);
+                return;
+            }
+            document.getElementById('login-modal').style.display = 'flex';
             return;
         }
     } catch (e) { }
@@ -79,6 +89,121 @@ window.onload = async () => {
     renderSessionName();
     renderChat();
 };
+
+async function authHeaders() {
+    const h = { 'Content-Type': 'application/json' };
+    if (sbAuth) {
+        const { data } = await sbAuth.auth.getSession();
+        if (data.session) h['Authorization'] = 'Bearer ' + data.session.access_token;
+    }
+    return h;
+}
+
+async function startCloud(user) {
+    cloudUid = user.id;
+    cloudTipe = user.is_anonymous ? 'anonymous' : (user.app_metadata?.provider || 'google');
+    supabaseEnabled = true;
+    document.body.classList.add('cloud');
+    document.getElementById('login-modal').style.display = 'none';
+    document.getElementById('signout-block').style.display = 'block';
+    renderSessionName();
+    await loadCloudSessions();
+}
+
+async function loadCloudSessions() {
+    try {
+        const resp = await fetch('/api/sessions', { headers: await authHeaders() });
+        const d = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(d.error || 'Gagal ambil sesi.');
+        cloudSessions = d.sessions || [];
+        cloudSid = localStorage.getItem('senka_sid_' + cloudUid) || '';
+        if (!cloudSessions.find(s => s.id === cloudSid)) cloudSid = cloudSessions[0]?.id || '';
+        if (!cloudSid) {
+            await newSessionCloud();
+            return;
+        }
+        localStorage.setItem('senka_sid_' + cloudUid, cloudSid);
+        await loadRemoteChat();
+    } catch (e) {
+        fallbackToLocal();
+    }
+}
+
+function fallbackToLocal() {
+    supabaseEnabled = false;
+    document.body.classList.remove('cloud');
+    document.getElementById('login-modal').style.display = 'none';
+    loadSessions();
+    renderChat();
+}
+
+async function newSessionCloud() {
+    const id = 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const nama = 'Sesi ' + (cloudSessions.length + 1);
+    cloudSessions.push({ id, nama });
+    cloudSid = id;
+    localStorage.setItem('senka_sid_' + cloudUid, id);
+    memoryList = [];
+    try {
+        await fetch('/api/sessions', {
+            method: 'POST',
+            headers: await authHeaders(),
+            body: JSON.stringify({ sesiId: id, nama })
+        });
+    } catch (e) { }
+    closeAllModals();
+    renderChat();
+}
+
+async function switchSessionCloud(id) {
+    const target = cloudSessions.find(s => s.id === id);
+    if (!target) return;
+    cloudSid = id;
+    localStorage.setItem('senka_sid_' + cloudUid, id);
+    memoryList = [];
+    closeSessions();
+    renderChat();
+    await loadRemoteChat();
+}
+
+async function deleteSessionCloud(id) {
+    try {
+        await fetch('/api/sessions/' + encodeURIComponent(id), { method: 'DELETE', headers: await authHeaders() });
+    } catch (e) { }
+    cloudSessions = cloudSessions.filter(s => s.id !== id);
+    if (!cloudSessions.length) {
+        await newSessionCloud();
+        return;
+    }
+    if (cloudSid === id) {
+        cloudSid = cloudSessions[0].id;
+        localStorage.setItem('senka_sid_' + cloudUid, cloudSid);
+        memoryList = [];
+        renderChat();
+        await loadRemoteChat();
+    }
+}
+
+async function renameSessionCloud(id, nama) {
+    const s = cloudSessions.find(x => x.id === id);
+    if (!s) return;
+    s.nama = nama || s.nama;
+    renderSessionName();
+    try {
+        await fetch('/api/sessions', {
+            method: 'POST',
+            headers: await authHeaders(),
+            body: JSON.stringify({ sesiId: id, nama: s.nama })
+        });
+    } catch (e) { }
+}
+
+async function signOut() {
+    if (!sbAuth) return;
+    closeSettings();
+    try { await sbAuth.auth.signOut(); } catch (e) { }
+    location.reload();
+}
 
 function cleanupOldImages(msgs) {
     let kept = 0;
@@ -105,8 +230,13 @@ function getDeviceUserId() {
     return deviceUserId;
 }
 
+function getUserId() {
+    if (supabaseEnabled) return cloudUid;
+    return getDeviceUserId();
+}
+
 function encKey() {
-    return CryptoJS.SHA256('senka:' + getDeviceUserId()).toString();
+    return CryptoJS.SHA256('senka:' + getUserId()).toString();
 }
 
 function encryptText(s) {
@@ -142,22 +272,24 @@ function remoteToLocal(m) {
 
 function remoteSave(pengirim, tipePesan, isi, memItem) {
     if (!supabaseEnabled) return;
-    fetch('/api/chats', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: getDeviceUserId(), tipePesan, isiPesan: encryptText(isi), pengirim })
-    })
-        .then(r => r.ok ? r.json() : null)
-        .then(d => {
-            if (d && d.id && memItem && !memItem.cid) memItem.cid = d.id;
+    authHeaders().then(headers => {
+        fetch('/api/chats', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ sesiId: cloudSid, tipePesan, isiPesan: encryptText(isi), pengirim })
         })
-        .catch(() => { });
+            .then(r => r.ok ? r.json() : null)
+            .then(d => {
+                if (d && d.id && memItem && !memItem.cid) memItem.cid = d.id;
+            })
+            .catch(() => { });
+    });
 }
 
 async function uploadDataUrl(dataUrl, ext) {
     const r = await fetch('/api/upload-json', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders(),
         body: JSON.stringify({ dataUrl, ext: ext || 'jpg' })
     });
     const d = await r.json().catch(() => ({}));
@@ -176,7 +308,9 @@ function makeRemoteBtn() {
 
 async function loadRemoteChat() {
     try {
-        const r = await fetch('/api/chats?userId=' + encodeURIComponent(getDeviceUserId()) + '&limit=25');
+        const q = new URLSearchParams({ limit: '25' });
+        if (cloudSid) q.set('sesiId', cloudSid);
+        const r = await fetch('/api/chats?' + q.toString(), { headers: await authHeaders() });
         const d = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(d.error || 'Gagal ambil chat.');
         memoryList = (d.messages || []).map(remoteToLocal);
@@ -189,10 +323,7 @@ async function loadRemoteChat() {
         }
         renderChat();
     } catch (e) {
-        supabaseEnabled = false;
-        document.body.classList.remove('cloud');
-        loadSessions();
-        renderChat();
+        fallbackToLocal();
     }
 }
 
@@ -203,9 +334,10 @@ async function loadOlderRemote() {
     if (btn) btn.innerText = 'Memuat...';
     try {
         const oldest = memoryList.find(x => x.cid);
-        let url = '/api/chats?userId=' + encodeURIComponent(getDeviceUserId()) + '&limit=25';
-        if (oldest) url += '&before=' + oldest.cid;
-        const r = await fetch(url);
+        const q = new URLSearchParams({ limit: '25' });
+        if (cloudSid) q.set('sesiId', cloudSid);
+        if (oldest) q.set('before', oldest.cid);
+        const r = await fetch('/api/chats?' + q.toString(), { headers: await authHeaders() });
         const d = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(d.error || 'Gagal memuat.');
         const local = (d.messages || []).map(remoteToLocal);
@@ -250,11 +382,17 @@ function saveSessions() {
 }
 
 function renderSessionName() {
+    if (supabaseEnabled) {
+        const s = cloudSessions.find(x => x.id === cloudSid);
+        document.getElementById('session-name').innerText = s ? s.nama : 'Sesi';
+        return;
+    }
     const active = sessions.find(s => s.id === activeId);
     document.getElementById('session-name').innerText = active ? active.name : 'Sesi';
 }
 
 function newSession() {
+    if (supabaseEnabled) { newSessionCloud(); return; }
     const n = sessions.length + 1;
     const id = 's' + Date.now();
     sessions.push({ id, name: 'Sesi ' + n, messages: [] });
@@ -281,6 +419,7 @@ function confirmDeleteSession() {
     const id = sessionToDelete;
     closeDeleteConfirm();
     if (!id) return;
+    if (supabaseEnabled) { deleteSessionCloud(id); return; }
     sessions = sessions.filter(s => s.id !== id);
     if (!sessions.length) sessions = [{ id: 's' + Date.now(), name: 'Sesi 1', messages: [] }];
     if (activeId === id) {
@@ -294,6 +433,7 @@ function confirmDeleteSession() {
 }
 
 function switchSession(id) {
+    if (supabaseEnabled) { switchSessionCloud(id); return; }
     const active = sessions.find(s => s.id === activeId);
     if (active) active.messages = memoryList;
     activeId = id;
@@ -310,29 +450,31 @@ function closeSessions() { document.getElementById('sessions-modal').style.displ
 function renderSessionList() {
     const list = document.getElementById('session-list');
     list.innerHTML = '';
-    sessions.forEach(s => {
+    const items = supabaseEnabled ? cloudSessions : sessions;
+    items.forEach(s => {
+        const isActive = supabaseEnabled ? s.id === cloudSid : s.id === activeId;
         const item = document.createElement('div');
-        item.className = 'session-item' + (s.id === activeId ? ' active' : '');
-        const count = (s.messages || []).length;
-        item.innerHTML = `<div class="si-left"><div class="si-name"></div><div class="si-meta">${count} pesan</div></div>
+        item.className = 'session-item' + (isActive ? ' active' : '');
+        item.innerHTML = `<div class="si-left"><div class="si-name"></div><div class="si-meta">${supabaseEnabled ? 'Cloud' : (s.messages || []).length + ' pesan'}</div></div>
                           <div class="si-actions">
                               <button class="si-act si-ren" title="Ganti nama"><i class="fa-solid fa-pen"></i></button>
                               <button class="si-act si-del" title="Hapus"><i class="fa-solid fa-trash"></i></button>
                           </div>`;
-        item.querySelector('.si-name').innerText = s.name;
+        item.querySelector('.si-name').innerText = s.nama || s.name;
         item.onclick = () => switchSession(s.id);
         item.querySelector('.si-ren').onclick = (e) => {
             e.stopPropagation();
             const nm = item.querySelector('.si-name');
             const inp = document.createElement('input');
             inp.className = 'modal-input si-input';
-            inp.value = s.name;
+            inp.value = s.nama || s.name;
             nm.replaceWith(inp);
             inp.focus();
             inp.select();
             const commit = () => {
-                s.name = inp.value.trim() || s.name;
-                saveSessions();
+                const val = inp.value.trim() || (s.nama || s.name);
+                if (supabaseEnabled) renameSessionCloud(s.id, val);
+                else { s.name = val; saveSessions(); }
                 renderSessionList();
             };
             inp.onkeydown = (ev) => {
@@ -395,6 +537,7 @@ function openSettings() {
     document.getElementById('panggilan-input').value = panggilan;
     document.getElementById('autospeak-input').checked = autospeak;
     document.getElementById('visionauto-input').checked = visionAuto;
+    document.getElementById('signout-block').style.display = supabaseEnabled ? 'block' : 'none';
     renderModelPicker();
     document.getElementById('settings-modal').style.display = 'flex';
 }
@@ -573,7 +716,9 @@ function renderChat() {
         if (away) greeting = `Selamat kembali ${panggilan}!`;
         else greeting = getGreeting();
         memoryList.push({ role: 'assistant', content: [{ type: 'text', text: greeting }] });
+        const gItem = memoryList[memoryList.length - 1];
         if (!supabaseEnabled) saveSessions();
+        else remoteSave('senka', 'text', greeting, gItem);
         const gEl = appendMessage('senka', greeting);
         gEl.innerHTML = formatReply(greeting);
         gEl.dataset.greeting = '1';
@@ -799,7 +944,7 @@ async function generateVideoWithPrompt(prompt) {
         if (!data.statusUrl) throw new Error('Server tidak kasih status URL.');
         for (let i = 0; i < 45; i++) {
             await new Promise(r => setTimeout(r, 8000));
-            const sr = await fetch('/api/video/status?url=' + encodeURIComponent(data.statusUrl));
+            const sr = await fetch('/api/video/status?url=' + encodeURIComponent(data.statusUrl), { headers: await authHeaders() });
             const sd = await sr.json().catch(() => ({}));
             if (sd.status === 'COMPLETED' && sd.videoUrl) {
                 loading.innerHTML = '';
