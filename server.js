@@ -185,9 +185,9 @@ ${SENKA_STICKERS.map(n => `- ${n} : ${STICKER_BASE}/Senka/${n}`).join('\n')}`
 }
 
 async function prepareMessagesForAI(messages, isVision) {
-    if (!isVision) return messages;
-    const msgs = (messages || []).map(m => ({ ...m }));
-    const last = msgs[msgs.length - 1];
+    const clean = (messages || []).map(m => ({ role: m.role, content: m.content }));
+    if (!isVision) return clean;
+    const last = clean[clean.length - 1];
     if (!last || last.role !== 'user') return msgs;
     if (typeof last.content === 'string') {
         last.content = await translateToEnglish(last.content);
@@ -197,7 +197,7 @@ async function prepareMessagesForAI(messages, isVision) {
             return c;
         }));
     }
-    return msgs;
+    return clean;
 }
 
 async function callProvider(provider, messages, modelId, stream = false) {
@@ -261,7 +261,7 @@ app.get('/api/config', (req, res) => {
 
 app.post('/api/chat', async (req, res) => {
     try {
-        const { messages, modelKey, panggilan, useVision } = req.body;
+        const { messages, modelKey, panggilan, useVision, call } = req.body;
 
         if (!Array.isArray(messages) || messages.length === 0) {
             return res.status(400).json({ error: "Pesan harus diisi dulu." });
@@ -273,9 +273,10 @@ app.post('/api/chat', async (req, res) => {
         }
 
         const isVision = hasImage(messages);
-        const systemPrompt = isVision
+        let systemPrompt = isVision
             ? buildVisionSystemPrompt(getCallName(panggilan))
             : buildChatSystemPrompt(getCallName(panggilan));
+        if (call) systemPrompt = withCallMode(systemPrompt);
         const finalMessages = await prepareMessagesForAI(messages, isVision);
         let lastErr = null;
 
@@ -305,7 +306,7 @@ app.post('/api/chat', async (req, res) => {
 
 app.post('/api/chat/stream', async (req, res) => {
     try {
-        const { messages, modelKey, panggilan, useVision } = req.body;
+        const { messages, modelKey, panggilan, useVision, call } = req.body;
 
         if (!Array.isArray(messages) || messages.length === 0) {
             return res.status(400).json({ error: "Pesan harus diisi dulu." });
@@ -317,9 +318,10 @@ app.post('/api/chat/stream', async (req, res) => {
         }
 
         const isVision = hasImage(messages);
-        const systemPrompt = isVision
+        let systemPrompt = isVision
             ? buildVisionSystemPrompt(getCallName(panggilan))
             : buildChatSystemPrompt(getCallName(panggilan));
+        if (call) systemPrompt = withCallMode(systemPrompt);
         const finalMessages = await prepareMessagesForAI(messages, isVision);
 
         for (const m of candidateList(chosen, isVision, useVision !== false)) {
@@ -397,6 +399,80 @@ async function openRouterImage(prompt) {
     if (!imgUrl) return { error: "Gambar gagal dihasilkan, coba lagi.", status: 502 };
     return { url: imgUrl };
 }
+
+function withCallMode(systemPrompt) {
+    return {
+        ...systemPrompt,
+        content: systemPrompt.content + `
+CALL MODE (ACTIVE NOW - STRICTLY ENFORCED):
+- The user is calling you on a voice call right now. Reply SHORT: 1-3 sentences, maximum 50 words.
+- Output ONLY your spoken dialogue. NO narration, NO actions, NO asterisks, NO character prefixes, NO stickers, NO file blocks, NO markdown, NO bullet lists.
+- Mirror the user's language (default Indonesian). Warm, natural, like a real voice call.
+- Never mention you are an AI, a bot, or that this is a text chat.`
+    };
+}
+
+const TTS_MODELS = {
+    ind: { id: 'facebook/mms-tts-ind', label: 'Meta VITS (ID)', expected: 'audio/flac' },
+    eng: { id: 'facebook/mms-tts-eng', label: 'Meta VITS (EN)', expected: 'audio/flac' },
+    jpn: { id: 'facebook/mms-tts-jpn', label: 'Meta VITS (JA)', expected: 'audio/flac' }
+};
+const ttsCache = new Map();
+const TTS_ORDER_BY_LANG = { ind: ['ind', 'eng', 'jpn'], eng: ['eng', 'ind', 'jpn'], jpn: ['jpn', 'eng', 'ind'] };
+const EN_WORDS = /\b(the|you|your|i|and|to|of|a|is|it|we|they|me|my|hello|hi|hey|thanks|thank|sorry|love|okay|ok|yes|no|please|really|right|well|so|but|what|how|why|don't|im|i'm|be|are|was|were|have|has|with|for|that|this|do|did|not|can|just)\b/i;
+
+function detectTtsLang(text) {
+    if (/[\u3040-\u30ff\u4e00-\u9faf\uac00-\ud7af]/.test(text)) return 'jpn';
+    const enHits = (text.match(EN_WORDS) || []).length;
+    const latinWords = (text.match(/[A-Za-z]{3,}/g) || []).length;
+    if (latinWords > 4 && enHits >= Math.ceil(latinWords * 0.35)) return 'eng';
+    return 'ind';
+}
+
+app.post('/api/tts', async (req, res) => {
+    try {
+        const text = String(req.body?.text || '').trim().slice(0, 500);
+        if (!text) return res.status(400).json({ error: 'Teks kosong.' });
+
+        const lang = req.body?.lang || detectTtsLang(text);
+        const order = (TTS_ORDER_BY_LANG[lang] || TTS_ORDER_BY_LANG.ind).map(k => TTS_MODELS[k]);
+        const requested = req.body?.model;
+        const candidates = requested
+            ? [TTS_MODELS[requested]].filter(Boolean)
+            : order;
+
+        const cacheKey = (requested || lang) + '|' + text;
+        if (ttsCache.has(cacheKey)) return res.json(ttsCache.get(cacheKey));
+
+        let lastErr = null;
+        for (const m of candidates) {
+            try {
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), 55000);
+                const headers = { 'Content-Type': 'application/json' };
+                if (process.env.HF_TOKEN) headers.Authorization = `Bearer ${process.env.HF_TOKEN}`;
+                const r = await fetch(`https://router.huggingface.co/${m.id}?wait_for_model=true`, {
+                    method: 'POST', headers, signal: controller.signal,
+                    body: JSON.stringify({ inputs: text })
+                });
+                clearTimeout(timer);
+                if (!r.ok) { lastErr = `${m.label}: ${r.status === 401 ? 'butuh token Hugging Face' : 'HTTP ' + r.status}`; continue; }
+                const contentType = r.headers.get('content-type') || m.expected;
+                if (!contentType.startsWith('audio/')) { lastErr = `${m.label}: respons bukan audio`; continue; }
+                const buf = Buffer.from(await r.arrayBuffer());
+                if (buf.length < 1000) { lastErr = `${m.label}: audio kosong`; continue; }
+                const out = { audioBase64: buf.toString('base64'), contentType, model: m.id, label: m.label, lang };
+                ttsCache.set(cacheKey, out);
+                return res.json(out);
+            } catch (e) {
+                lastErr = `${m.label}: ${e.name === 'AbortError' ? 'timeout 55s' : (e.message || 'error')}`;
+            }
+        }
+        res.status(502).json({ error: lastErr || 'Semua model TTS gagal. Coba lagi.' });
+    } catch (e) {
+        res.status(500).json({ error: 'TTS error: ' + (e.message || e) });
+    }
+});
 
 app.post('/api/image', async (req, res) => {
     try {

@@ -57,6 +57,12 @@
                     <i class="fa-solid fa-xmark remove-btn" onclick="removeImage()"></i>
                 </div>
 
+                <div id="call-banner" class="call-banner" style="display:none;">
+                    <span class="call-pulse"></span>
+                    <span id="call-status">Menghubungi Senka...</span>
+                    <i class="fa-solid fa-xmark call-end" onclick="endCall()" title="Akhiri panggilan"></i>
+                </div>
+
                 <div class="input-area">
                     <div class="plus-wrap">
                         <button class="tool-btn" id="plus-btn" onclick="togglePlusMenu()" title="Menu"><i class="fa-solid fa-plus"></i></button>
@@ -70,6 +76,7 @@
                     </div>
                     <input type="file" id="image-upload" accept="image/*" hidden>
                     <input type="text" id="message-input" placeholder="Tulis pesan untuk Senka..." autocomplete="off">
+                    <button class="tool-btn call-btn" id="call-btn" onclick="toggleCall()" title="Panggilan suara (Sleep Call)"><i class="fa-solid fa-phone"></i></button>
                     <button id="send-btn" onclick="sendToSenka()"><i class="fa-solid fa-paper-plane"></i></button>
                 </div>
             </div>

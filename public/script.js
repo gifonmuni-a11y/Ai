@@ -1037,6 +1037,7 @@ async function allowMicFromModal() {
     try {
         await navigator.mediaDevices.getUserMedia({ audio: true });
         closeMicModal();
+        if (pendingMicAction === 'call') { startCall(); return; }
         startVoiceInput();
     } catch (e) {
         closeMicModal();
@@ -1105,6 +1106,206 @@ function toggleVoice() {
         }
         startVoiceInput();
     });
+}
+
+/* ===== Sleep Call Mode ===== */
+let callActive = false;
+let callSpeaking = false;
+let callAudio = null;
+let callRecog = null;
+let pendingMicAction = null;
+let callCtx = null;
+
+function unlockAudio() {
+    try {
+        if (!callCtx) callCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (callCtx.state === 'suspended') callCtx.resume();
+    } catch (e) { }
+}
+
+function setCallUI(on, label) {
+    const btn = document.getElementById('call-btn');
+    const banner = document.getElementById('call-banner');
+    if (!btn || !banner) return;
+    btn.classList.toggle('active', on);
+    btn.innerHTML = on ? '<i class="fa-solid fa-phone-flip"></i>' : '<i class="fa-solid fa-phone"></i>';
+    banner.style.display = on ? 'flex' : 'none';
+    if (label) document.getElementById('call-status').innerText = label;
+}
+
+async function toggleCall() {
+    if (callActive) { endCall(); return; }
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+        appendMessage('senka', 'Browser kamu belum mendukung panggilan suara. Coba pakai Chrome ya.');
+        scrollToBottom(true);
+        return;
+    }
+    if (!modelKey) {
+        openSettings();
+        appendMessage('senka', `Pilih dulu model AI-nya ya ${panggilan}, baru bisa mulai panggilan.`);
+        scrollToBottom(true);
+        return;
+    }
+    const status = await getMicStatus();
+    if (status === 'denied') {
+        showToast('Akses mic ditolak, izinkan mic di pengaturan browser dulu ya');
+        return;
+    }
+    if (status === 'prompt') { pendingMicAction = 'call'; openMicModal(); return; }
+    startCall();
+}
+
+function startCall() {
+    pendingMicAction = null;
+    callActive = true;
+    unlockAudio();
+    setCallUI(true, 'Menghubungi Senka...');
+    appendMessage('senka', '📞 *Panggilan dimulai* — ngomong aja, aku dengerin.');
+    scrollToBottom(true);
+    startCallRecognition();
+}
+
+function startCallRecognition() {
+    if (!callActive || callSpeaking) return;
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return;
+    setCallUI(true, 'Mendengarkan...');
+    if (!callRecog) {
+        callRecog = new SR();
+        callRecog.lang = 'id-ID';
+        callRecog.interimResults = false;
+        callRecog.maxAlternatives = 1;
+        callRecog.onresult = (e) => {
+            let final = '';
+            for (let i = e.resultIndex; i < e.results.length; i++) {
+                if (e.results[i].isFinal) final += e.results[i][0].transcript;
+            }
+            if (final.trim()) handleCallSpeech(final.trim());
+        };
+        callRecog.onerror = (e) => {
+            if (!callActive) return;
+            if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+                endCall();
+                showToast('Mic tidak diizinkan, panggilan diakhiri');
+                return;
+            }
+        };
+        callRecog.onend = () => {
+            if (callActive && !callSpeaking) setTimeout(startCallRecognition, 350);
+        };
+    }
+    try { callRecog.start(); } catch (e) { }
+}
+
+function handleCallSpeech(text) {
+    if (!callActive) return;
+    setCallUI(true, 'Senka mikir...');
+    const bubble = appendMessage('user', text);
+    memoryList.push({ role: 'user', content: [{ type: 'text', text }] });
+    const userItem = memoryList[memoryList.length - 1];
+    if (!supabaseEnabled) saveSessions();
+    else remoteSave('user', 'text', text, userItem);
+    scrollToBottom(true);
+    sendCallMessage(text, bubble);
+}
+
+async function sendCallMessage(text) {
+    try {
+        const response = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ messages: [...memoryList], modelKey, panggilan, call: true })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+        const raw = data.choices?.[0]?.message?.content || '';
+        const clean = cleanCallText(raw);
+        if (!clean) { afterCallSpeech(); return; }
+        const sb = appendMessage('senka', clean);
+        memoryList.push({ role: 'assistant', content: [{ type: 'text', text: clean }] });
+        const aiItem = memoryList[memoryList.length - 1];
+        if (!supabaseEnabled) saveSessions();
+        else remoteSave('senka', 'text', clean, aiItem);
+        scrollToBottom(true);
+        await speakCallText(clean);
+    } catch (e) {
+        appendMessage('senka', `Waduh error: ${String(e.message || e).replace(/</g, '&lt;')}`);
+        scrollToBottom(true);
+        afterCallSpeech();
+    }
+}
+
+function cleanCallText(raw) {
+    return String(raw || '')
+        .replace(STICKER_TAG_RE, '')
+        .replace(STICKER_URL_RE, '')
+        .replace(/\[ STIKER SENKA \]\s*/g, '')
+        .replace(/###SENKA_FILE###[\s\S]*?###END###/g, '')
+        .replace(/\*+[^*]*\*+/g, '')
+        .replace(/^Senka\s*:\s*/i, '')
+        .replace(/["“”]/g, '')
+        .trim();
+}
+
+async function speakCallText(text) {
+    callSpeaking = true;
+    setCallUI(true, 'Senka bicara...');
+    try {
+        const r = await fetch('/api/tts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text })
+        });
+        const d = await r.json();
+        if (!r.ok || !d.audioBase64) throw new Error(d.error || 'TTS gagal');
+        const blob = base64ToBlob(d.audioBase64, d.contentType);
+        await playCallBlob(blob);
+    } catch (e) {
+        showToast(`Suara Senka gagal diputar: ${String(e.message || e).slice(0, 40)} — teksnya udah tampil di chat`);
+    } finally {
+        callSpeaking = false;
+        if (callActive) setTimeout(startCallRecognition, 400);
+    }
+}
+
+function afterCallSpeech() {
+    callSpeaking = false;
+    if (callActive) setTimeout(startCallRecognition, 400);
+}
+
+function playCallBlob(blob) {
+    return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        callAudio = audio;
+        audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
+        audio.onerror = () => { URL.revokeObjectURL(url); reject(new Error('audio rusak')); };
+        audio.play().catch(err => {
+            unlockAudio();
+            audio.play().catch(e2 => { URL.revokeObjectURL(url); reject(e2); });
+        });
+    });
+}
+
+function base64ToBlob(b64, type) {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new Blob([bytes], { type });
+}
+
+function endCall() {
+    callActive = false;
+    callSpeaking = false;
+    if (callRecog) { try { callRecog.stop(); } catch (e) { } }
+    if (callAudio) {
+        try { callAudio.pause(); callAudio.src = ''; } catch (e) { }
+        callAudio = null;
+    }
+    setCallUI(false);
+    appendMessage('senka', '📞 *Panggilan diakhiri* — kabari lagi kalau mau ngobrol ya.');
+    scrollToBottom(true);
 }
 
 function setMic(on) {
