@@ -205,6 +205,37 @@ async function signOut() {
     location.reload();
 }
 
+document.getElementById('btn-login-google').onclick = async () => {
+    if (!sbAuth) return;
+    const btn = document.getElementById('btn-login-google');
+    btn.disabled = true;
+    try {
+        const { error } = await sbAuth.auth.signInWithOAuth({
+            provider: 'google',
+            options: { redirectTo: location.origin + location.pathname }
+        });
+        if (error) alert('Gagal buka login Google: ' + error.message);
+    } catch (e) {
+        alert('Gagal buka login Google: ' + e.message);
+    }
+    btn.disabled = false;
+};
+
+document.getElementById('btn-login-guest').onclick = async () => {
+    if (!sbAuth) return;
+    const btn = document.getElementById('btn-login-guest');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Membuat akun tamu...';
+    const { data, error } = await sbAuth.auth.signInAnonymously();
+    if (error) {
+        alert('Gagal masuk sebagai tamu: ' + error.message);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-user-secret"></i> Lanjut sebagai Tamu';
+        return;
+    }
+    await startCloud(data.user);
+};
+
 function cleanupOldImages(msgs) {
     let kept = 0;
     for (let i = msgs.length - 1; i >= 0; i--) {
