@@ -419,7 +419,8 @@ const TTS_MODELS = {
 };
 const ttsCache = new Map();
 const TTS_ORDER_BY_LANG = { ind: ['ind', 'eng', 'jpn'], eng: ['eng', 'ind', 'jpn'], jpn: ['jpn', 'eng', 'ind'] };
-const EN_WORDS = /\b(the|you|your|i|and|to|of|a|is|it|we|they|me|my|hello|hi|hey|thanks|thank|sorry|love|okay|ok|yes|no|please|really|right|well|so|but|what|how|why|don't|im|i'm|be|are|was|were|have|has|with|for|that|this|do|did|not|can|just)\b/i;
+const EN_WORDS = /\b(the|you|your|i|and|to|of|a|is|it|we|they|me|my|hello|hi|hey|thanks|thank|sorry|love|okay|ok|yes|no|please|really|right|well|so|but|what|how|why|don't|im|i'm|be|are|was|were|have|has|with|for|that|this|do|did|not|can|just)\b/gi;
+const TTS_TL = { ind: 'id', eng: 'en', jpn: 'ja' };
 
 function detectTtsLang(text) {
     if (/[\u3040-\u30ff\u4e00-\u9faf\uac00-\ud7af]/.test(text)) return 'jpn';
@@ -429,46 +430,82 @@ function detectTtsLang(text) {
     return 'ind';
 }
 
+function chunkTtsText(text, max = 185) {
+    const segs = [];
+    let rest = String(text).replace(/\s+/g, ' ').trim();
+    while (rest.length > max) {
+        let cut = rest.lastIndexOf(' ', max);
+        if (cut < max * 0.4) cut = max;
+        segs.push(rest.slice(0, cut));
+        rest = rest.slice(cut).trim();
+    }
+    if (rest) segs.push(rest);
+    return segs;
+}
+
+async function hfTts(text, lang) {
+    if (!process.env.HF_TOKEN || !process.env.HF_TTS_MODEL) return null;
+    const m = TTS_MODELS[lang] || TTS_MODELS.ind;
+    try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 50000);
+        const r = await fetch(`https://router.huggingface.co/hf-inference/models/${m.id}/pipeline/text-to-speech`, {
+            method: 'POST', signal: controller.signal,
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${process.env.HF_TOKEN}`
+            },
+            body: JSON.stringify({ inputs: text })
+        });
+        clearTimeout(timer);
+        if (!r.ok) return null;
+        const contentType = r.headers.get('content-type') || 'audio/flac';
+        if (!contentType.startsWith('audio/')) return null;
+        const buf = Buffer.from(await r.arrayBuffer());
+        if (buf.length < 1000) return null;
+        return { segments: [{ audioBase64: buf.toString('base64') }], contentType, provider: 'hf', label: 'Hugging Face VITS', lang };
+    } catch (e) {
+        return null;
+    }
+}
+
+async function googleTts(text, lang) {
+    const tl = TTS_TL[lang] || 'id';
+    const chunks = chunkTtsText(text);
+    const segments = [];
+    for (const c of chunks) {
+        try {
+            const r = await fetch(`https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=${tl}&q=${encodeURIComponent(c)}`, {
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+            });
+            if (!r.ok) return null;
+            const buf = Buffer.from(await r.arrayBuffer());
+            if (buf.length < 1000) return null;
+            segments.push({ audioBase64: buf.toString('base64') });
+        } catch (e) {
+            return null;
+        }
+    }
+    if (segments.length === 0) return null;
+    return { segments, contentType: 'audio/mpeg', provider: 'google', label: 'Google TTS', lang };
+}
+
 app.post('/api/tts', async (req, res) => {
     try {
         const text = String(req.body?.text || '').trim().slice(0, 500);
         if (!text) return res.status(400).json({ error: 'Teks kosong.' });
 
         const lang = req.body?.lang || detectTtsLang(text);
-        const order = (TTS_ORDER_BY_LANG[lang] || TTS_ORDER_BY_LANG.ind).map(k => TTS_MODELS[k]);
-        const requested = req.body?.model;
-        const candidates = requested
-            ? [TTS_MODELS[requested]].filter(Boolean)
-            : order;
-
-        const cacheKey = (requested || lang) + '|' + text;
+        const cacheKey = 'v2|' + lang + '|' + text;
         if (ttsCache.has(cacheKey)) return res.json(ttsCache.get(cacheKey));
 
-        let lastErr = null;
-        for (const m of candidates) {
-            try {
-                const controller = new AbortController();
-                const timer = setTimeout(() => controller.abort(), 55000);
-                const headers = { 'Content-Type': 'application/json' };
-                if (process.env.HF_TOKEN) headers.Authorization = `Bearer ${process.env.HF_TOKEN}`;
-                const r = await fetch(`https://router.huggingface.co/${m.id}?wait_for_model=true`, {
-                    method: 'POST', headers, signal: controller.signal,
-                    body: JSON.stringify({ inputs: text })
-                });
-                clearTimeout(timer);
-                if (!r.ok) { lastErr = `${m.label}: ${r.status === 401 ? 'butuh token Hugging Face' : 'HTTP ' + r.status}`; continue; }
-                const contentType = r.headers.get('content-type') || m.expected;
-                if (!contentType.startsWith('audio/')) { lastErr = `${m.label}: respons bukan audio`; continue; }
-                const buf = Buffer.from(await r.arrayBuffer());
-                if (buf.length < 1000) { lastErr = `${m.label}: audio kosong`; continue; }
-                const out = { audioBase64: buf.toString('base64'), contentType, model: m.id, label: m.label, lang };
-                ttsCache.set(cacheKey, out);
-                return res.json(out);
-            } catch (e) {
-                lastErr = `${m.label}: ${e.name === 'AbortError' ? 'timeout 55s' : (e.message || 'error')}`;
-            }
-        }
-        res.status(502).json({ error: lastErr || 'Semua model TTS gagal. Coba lagi.' });
+        let out = await hfTts(text, lang);
+        if (!out) out = await googleTts(text, lang);
+        if (!out) return res.status(502).json({ error: 'Semua model TTS gagal. Coba lagi ya.' });
+
+        const payload = { ...out, segments: out.segments, audioBase64: out.segments[0].audioBase64 };
+        ttsCache.set(cacheKey, payload);
+        return res.json(payload);
     } catch (e) {
         res.status(500).json({ error: 'TTS error: ' + (e.message || e) });
     }

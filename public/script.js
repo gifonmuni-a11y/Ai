@@ -1258,9 +1258,12 @@ async function speakCallText(text) {
             body: JSON.stringify({ text })
         });
         const d = await r.json();
-        if (!r.ok || !d.audioBase64) throw new Error(d.error || 'TTS gagal');
-        const blob = base64ToBlob(d.audioBase64, d.contentType);
-        await playCallBlob(blob);
+        if (!r.ok || !d.segments || d.segments.length === 0) throw new Error(d.error || 'TTS gagal');
+        for (const seg of d.segments) {
+            if (!callActive) break;
+            const blob = base64ToBlob(seg.audioBase64, d.contentType || 'audio/mpeg');
+            await playCallBlob(blob);
+        }
     } catch (e) {
         showToast(`Suara Senka gagal diputar: ${String(e.message || e).slice(0, 40)} — teksnya udah tampil di chat`);
     } finally {
