@@ -416,3 +416,23 @@ textarea.modal-input { resize: none; font-family: inherit; }
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+.st-pos { color: #4ADE80; font-weight: 700; }
+.st-neg { color: #F87171; font-weight: 700; }
+.st-plus { color: #4ADE80; font-weight: 700; }
+.src-chip { white-space: nowrap; }
+.src-ico { width: 14px; height: 14px; vertical-align: -2px; margin: 0 4px 0 6px; border-radius: 3px; }
+.sumber-shimmer {
+    font-weight: bold;
+    background: linear-gradient(90deg, #2DD4BF 0%, #38BDF8 50%, #2DD4BF 100%);
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+    animation: shimmerMove 3s linear infinite;
+}
+@keyframes shimmerMove {
+    0% { background-position: 200% center; }
+    100% { background-position: -200% center; }
+}

@@ -832,8 +832,40 @@ function escapeHtml(s) {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function formatReply(raw) {
-    if (!raw) return '';
+const sourceDomains = { 'BPS': 'bps.go.id', 'Bank Indonesia': 'bi.go.id', 'Bloomberg': 'bloomberg.com', 'Reuters': 'reuters.com', 'CNBC Indonesia': 'cnbcindonesia.com' };
+
+function formatSumberLine(line) {
+    const inner = line.replace(/^(?:Sumber|Source)\s*:\s*/i, '');
+    const chips = inner.split(',').map(n => n.trim()).filter(Boolean).map(n => {
+        const esc = escapeHtml(n);
+        const dom = sourceDomains[n];
+        if (dom) return '<span class="src-chip">' + esc + '<img class="src-ico" src="https://www.google.com/s2/favicons?sz=32&domain=' + dom + '" onerror="this.style.display=\'none\'" alt="" /></span>';
+        return esc;
+    });
+    return '<div class="sumber-shimmer">Sumber: ' + chips.join(', ') + '</div>';
+}
+
+function parseSegs(line) {
+    const TAG = /\{\{(pos|neg)\}\}([\s\S]*?)\{\{\/\1\}\}/g;
+    let out = '', last = 0, mm;
+    while ((mm = TAG.exec(line)) !== null) {
+        out += formatPlain(line.slice(last, mm.index));
+        out += '<span class="st-' + mm[1] + '">' + escapeHtml(mm[2]) + '</span>';
+        last = mm.index + mm[0].length;
+    }
+    out += formatPlain(line.slice(last));
+    return out;
+}
+
+function formatLine(line) {
+    if (/^(?:Sumber|Source)\s*:/i.test(line)) return formatSumberLine(line);
+    const b = /^(-\s+)/.exec(line);
+    if (b) return '<span class="em">-</span> ' + parseSegs(line.slice(b[0].length));
+    return parseSegs(line);
+}
+
+function formatPlain(s) {
+    s = s.replace(/-{2,}/g, '-');
     const name = panggilan.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const re = new RegExp(
         '(?:"([^"\\n]*)"|\\u201C([^\\u201D\\n]*)\\u201D)' +
@@ -844,6 +876,8 @@ function formatReply(raw) {
         '|([0-9]+)' +
         '|([.,?!:\u2014])' +
         '|([\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af\u0400-\u04ff\u0600-\u06ff\u0e00-\u0e7f\u0900-\u097f\u3000-\u303f]+)' +
+        '|([;&])' +
+        '|([+](?=[0-9]))' +
         '|([*_`~#])',
         'gi'
     );
@@ -862,12 +896,12 @@ function formatReply(raw) {
         o += escapeHtml(inner.slice(last)).replace(/[*_`~#]/g, '');
         return o;
     };
-    const strip = (s) => s.replace(/[*_`~#]/g, '');
+    const strip = (s2) => s2.replace(/[*_`~#]/g, '');
     let out = '';
     let last = 0;
     let m;
-    while ((m = re.exec(raw)) !== null) {
-        out += strip(escapeHtml(raw.slice(last, m.index)));
+    while ((m = re.exec(s)) !== null) {
+        out += strip(escapeHtml(s.slice(last, m.index)));
         if (m[1] !== undefined) out += '<span class="q">"' + fmtInner(m[1]) + '"</span>';
         else if (m[2] !== undefined) out += '<span class="q">\u201C' + fmtInner(m[2]) + '\u201D</span>';
         else if (m[3]) out += '<span class="em">' + escapeHtml(m[3].slice(2, -2)) + '</span>';
@@ -877,10 +911,18 @@ function formatReply(raw) {
         else if (m[7]) out += '<span class="num">' + escapeHtml(m[7]) + '</span>';
         else if (m[8]) out += '<span class="punct">' + escapeHtml(m[8]) + '</span>';
         else if (m[9]) out += '<span class="jp">' + escapeHtml(m[9]) + '</span>';
+        else if (m[10]) out += '<span class="em">' + escapeHtml(m[10]) + '</span>';
+        else if (m[11]) out += '<span class="st-plus">' + escapeHtml(m[11]) + '</span>';
         last = m.index + m[0].length;
     }
-    out += strip(escapeHtml(raw.slice(last)));
+    out += strip(escapeHtml(s.slice(last)));
     return out;
+}
+
+function formatReply(raw) {
+    if (!raw) return '';
+    let s = String(raw).replace(/([0-9])[\uFE0F\u20D0-\u20FF]+\s*/g, '$1. ');
+    return s.split('\n').map(formatLine).join('\n').replace(/\{\{pos\}\}|\{\{neg\}\}|\{\{\/pos\}\}|\{\{\/neg\}\}/g, '');
 }
 
 function getGreeting() {
