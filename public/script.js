@@ -31,7 +31,8 @@ let cloudSid = '';
 document.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('touchstart', e => {
     if (e.target.closest('input, textarea')) return;
-    if (e.target.closest('img') && !e.target.classList.contains('chat-img')) e.preventDefault();
+    const img = e.target.closest('img');
+    if (img && !img.classList.contains('chat-img') && !img.classList.contains('sticker-item')) e.preventDefault();
 }, { passive: false });
 
 document.addEventListener('pointerdown', e => {
