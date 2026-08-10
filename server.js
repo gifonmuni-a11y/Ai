@@ -78,14 +78,14 @@ const SENKA_STICKERS = [
     'adaapa.webp', 'akumembencikamu.webp', 'akusenangkamujujur.webp', 'blush,malu.webp',
     'duhketahuan,gugup.webp', 'halo,hai.webp', 'hayo,lucunya.webp', 'hehe,ahaha.webp',
     'hmph,ohgitu.webp', 'iloveyou,suka,senang.webp', 'lucubanget.webp', 'maaf.webp',
-    'marah.webp', 'sayang..sayang.webp', 'semangat,janganmenyerah.webp', 'sinideketsamaaku.webp',
+    'marah.webp', 'sayang...sayang.webp', 'semangat,janganmenyerah.webp', 'sinidekatsamaaku.webp',
     'wah,bagussekali,hebat.webp'
 ];
 
 const USER_STICKERS = [
     'aduh-duh-duh,malu.webp', 'apa.webp', 'apaiya.webp', 'hah....,.webp',
-    'hahaha,wwww,.webp', 'halo,hai.webp', 'heee.webp', 'hmmokebiasa.webp',
-    'lagibaca,membaca.webp', 'mencurigakan.webp', 'minum,minumkopi.webp', 'ngantuk.webp',
+    'hahaha,wkwwkw,.webp', 'halo,hai.webp', 'heee.webp', 'hmmokebiasa.webp',
+    'lagibaca,membaca.webp', 'mencurigakan.webp', 'minum,minumkopi.webp', 'tidur,ngantukparah.webp',
     'sakit.webp', 'tidakfaham,hah,apa.webp', 'tidakpeduli.webp', 'tidur.webp'
 ];
 

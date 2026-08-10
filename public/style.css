@@ -439,5 +439,6 @@ textarea.modal-input { resize: none; font-family: inherit; }
 
 .chat-sticker { max-width: 150px; border-radius: 14px; display: block; margin: 2px 0; }
 .sticker-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 6px 0 4px; max-height: 46vh; overflow-y: auto; }
-.sticker-item { width: 100%; border-radius: 12px; cursor: pointer; transition: transform 0.15s ease; background: rgba(255,255,255,0.04); }
+.sticker-item { width: 100%; border-radius: 12px; cursor: pointer; transition: transform 0.15s ease; background: rgba(255,255,255,0.04); pointer-events: auto; }
 .sticker-item:hover { transform: scale(1.08); }
+.chat-sticker { pointer-events: auto; }

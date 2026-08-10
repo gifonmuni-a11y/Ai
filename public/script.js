@@ -922,7 +922,7 @@ function formatPlain(s) {
     return out;
 }
 
-const USER_STICKER_FILES = ['aduh-duh-duh,malu.webp', 'apa.webp', 'apaiya.webp', 'hah....,.webp', 'hahaha,wwww,.webp', 'halo,hai.webp', 'heee.webp', 'hmmokebiasa.webp', 'lagibaca,membaca.webp', 'mencurigakan.webp', 'minum,minumkopi.webp', 'ngantuk.webp', 'sakit.webp', 'tidakfaham,hah,apa.webp', 'tidakpeduli.webp', 'tidur.webp'];
+const USER_STICKER_FILES = ['aduh-duh-duh,malu.webp', 'apa.webp', 'apaiya.webp', 'hah....,.webp', 'hahaha,wkwwkw,.webp', 'halo,hai.webp', 'heee.webp', 'hmmokebiasa.webp', 'lagibaca,membaca.webp', 'mencurigakan.webp', 'minum,minumkopi.webp', 'tidur,ngantukparah.webp', 'sakit.webp', 'tidakfaham,hah,apa.webp', 'tidakpeduli.webp', 'tidur.webp'];
 const STICKER_BASE = 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker';
 const STICKER_TAG_RE = /\[ STIKER SENKA \]\s*\((https?:\/\/[^\s)]+)\)/;
 const STICKER_URL_RE = /https?:\/\/[^\s)]+\/Stiker\/[^\s)]+\.webp/;
