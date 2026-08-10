@@ -436,6 +436,19 @@ app.get('/api/video/status', async (req, res) => {
         if (text.includes('"complete"') || /event:\s*complete/.test(text)) {
             const filePath = parseSseComplete(text);
             if (filePath) {
+                if (supabase) {
+                    try {
+                        const target = filePath.startsWith('/tmp/gradio/') ? `${LTX_SPACE}/gradio_api/file=${encodeURIComponent(filePath)}` : filePath;
+                        const fr = await fetch(target);
+                        if (fr.ok) {
+                            const buf = Buffer.from(await fr.arrayBuffer());
+                            const saved = await supabaseUpload(buf, 'video/mp4', 'mp4');
+                            return res.json({ status: 'COMPLETED', videoUrl: saved.url });
+                        }
+                    } catch (e) {
+                        console.error('Video save to bucket error:', e.message);
+                    }
+                }
                 return res.json({ status: 'COMPLETED', videoUrl: '/api/video/file?u=' + encodeURIComponent(filePath) });
             }
             return res.json({ status: 'COMPLETED', videoUrl: null });
