@@ -719,8 +719,11 @@ function buildMsgEl(m) {
     (m.content || []).forEach(c => {
         if (!c) return;
         if (c.type === 'text') {
+            const stk = extractSticker(c.text);
             const p = document.createElement('div');
-            p.innerHTML = formatReply(c.text);
+            const cleanText = stk ? stripStickerTag(c.text) : c.text;
+            if (cleanText) p.innerHTML = formatReply(cleanText);
+            if (stk) appendStickerImg(p, stk);
             bubble.appendChild(p);
         } else if (c.type === 'image_url') {
             if (typeof c.image_url.url === 'string' && c.image_url.url.startsWith('data:')) {
@@ -917,6 +920,54 @@ function formatPlain(s) {
     }
     out += strip(escapeHtml(s.slice(last)));
     return out;
+}
+
+const USER_STICKER_FILES = ['aduh-duh-duh,malu.webp', 'apa.webp', 'apaiya.webp', 'hah....,.webp', 'hahaha,wwww,.webp', 'halo,hai.webp', 'heee.webp', 'hmmokebiasa.webp', 'lagibaca,membaca.webp', 'mencurigakan.webp', 'minum,minumkopi.webp', 'ngantuk.webp', 'sakit.webp', 'tidakfaham,hah,apa.webp', 'tidakpeduli.webp', 'tidur.webp'];
+const STICKER_BASE = 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker';
+const STICKER_TAG_RE = /\[ STIKER SENKA \]\s*\((https?:\/\/[^\s)]+)\)/;
+const STICKER_URL_RE = /https?:\/\/[^\s)]+\/Stiker\/[^\s)]+\.webp/;
+
+function extractSticker(text) {
+    const m = STICKER_TAG_RE.exec(text);
+    if (m) return m[1];
+    const m2 = STICKER_URL_RE.exec(text);
+    return m2 ? m2[0] : null;
+}
+
+function stripStickerTag(text) {
+    return String(text).replace(STICKER_TAG_RE, '').replace(/\[ STIKER SENKA \]\s*/g, '').replace(STICKER_URL_RE, '').trim();
+}
+
+function appendStickerImg(el, url) {
+    const img = document.createElement('img');
+    img.src = url;
+    img.classList.add('chat-sticker');
+    el.appendChild(img);
+}
+
+function openStickerModal() {
+    const grid = document.getElementById('sticker-grid');
+    grid.innerHTML = '';
+    USER_STICKER_FILES.forEach(f => {
+        const img = document.createElement('img');
+        img.src = STICKER_BASE + '/Pengguna/' + f;
+        img.className = 'sticker-item';
+        img.loading = 'lazy';
+        img.title = f;
+        img.onclick = () => sendSticker(STICKER_BASE + '/Pengguna/' + f);
+        grid.appendChild(img);
+    });
+    document.getElementById('sticker-modal').style.display = 'flex';
+}
+
+function closeStickerModal() {
+    document.getElementById('sticker-modal').style.display = 'none';
+}
+
+function sendSticker(url) {
+    closeStickerModal();
+    messageInput.value = url;
+    sendToSenka();
 }
 
 function formatReply(raw) {
@@ -1275,6 +1326,10 @@ async function sendToSenka() {
     if (base64Image) userMessageContent.push({ type: "image_url", image_url: { url: userImgUrl || base64Image } });
 
     const bubble = appendMessage('user', text || '');
+    if (extractSticker(text)) {
+        bubble.innerHTML = '';
+        appendStickerImg(bubble, extractSticker(text));
+    }
     if (base64Image) {
         const img = document.createElement('img');
         img.src = userImgUrl || base64Image;
@@ -1357,13 +1412,16 @@ async function sendToSenka() {
         if (!started) throw new Error('empty');
 
         const fullReply = streamBuf;
+        const stk = extractSticker(fullReply);
         const fileReq = parseFileRequest(fullReply);
         let displayText = fileReq ? fileReq.displayText.trim() : fullReply;
         if (!fileReq && displayText.includes('###SENKA_FILE###')) {
             displayText = displayText.split('###SENKA_FILE###')[0].trim();
         }
+        const renderText = stk ? stripStickerTag(displayText) : displayText;
 
-        msgDiv.innerHTML = formatReply(displayText);
+        msgDiv.innerHTML = formatReply(renderText);
+        if (stk) appendStickerImg(msgDiv, stk);
         if (fileReq) msgDiv.appendChild(makeFileCard(fileReq.meta));
         addMsgActions(msgDiv, 'senka');
 

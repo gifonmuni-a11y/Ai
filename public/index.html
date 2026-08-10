@@ -65,6 +65,7 @@
                             <button class="pm-item" onclick="closePlusMenu();openImageModal()"><i class="fa-solid fa-wand-magic-sparkles"></i> Gambar</button>
                             <button class="pm-item" onclick="closePlusMenu();openVideoModal()"><i class="fa-solid fa-clapperboard"></i> Video</button>
                             <button class="pm-item" onclick="closePlusMenu();document.getElementById('image-upload').click()"><i class="fa-solid fa-paperclip"></i> Foto</button>
+                            <button class="pm-item" onclick="closePlusMenu();openStickerModal()"><i class="fa-solid fa-face-smile"></i> Stiker</button>
                         </div>
                     </div>
                     <input type="file" id="image-upload" accept="image/*" hidden>
@@ -188,6 +189,16 @@
             <button class="login-btn" id="btn-login-google"><i class="fa-brands fa-google"></i> Masuk dengan Google</button>
             <button class="login-btn btn-guest" id="btn-login-guest"><i class="fa-solid fa-user-secret"></i> Lanjut sebagai Tamu</button>
             <p class="login-hint">Mode Tamu menyimpan chat di akun tamu perangkat ini.</p>
+        </div>
+    </div>
+
+    <div id="sticker-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeStickerModal()">
+        <div class="modal">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-face-smile"></i> Pilih Stiker</h3>
+                <i class="fa-solid fa-xmark modal-close" onclick="closeStickerModal()"></i>
+            </div>
+            <div id="sticker-grid" class="sticker-grid"></div>
         </div>
     </div>
 
