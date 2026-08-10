@@ -302,3 +302,8 @@ textarea.modal-input { resize: none; font-family: inherit; }
     .session-btn { padding: 6px 10px; }
     .chat-history { padding: 14px 12px; }
 }
+
+body.cloud .session-btn { display: none; }
+body.cloud #btn-new-session { display: none; }
+
+.chat-audio { max-width: 100%; margin-top: 8px; display: block; border-radius: 12px; }

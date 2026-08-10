@@ -18,6 +18,10 @@ let autospeak = localStorage.getItem('senka_autospeak') === '1';
 let visionAuto = localStorage.getItem('senka_visionauto') !== '0';
 let recognition = null;
 let listening = false;
+let supabaseEnabled = false;
+let remoteHasMore = false;
+let remoteLoading = false;
+let deviceUserId = '';
 
 document.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('touchstart', e => {
@@ -42,8 +46,6 @@ document.addEventListener('pointerdown', e => {
 
 window.onload = async () => {
     initSakura();
-    loadSessions();
-    renderSessionName();
     document.getElementById('panggilan-input').value = panggilan;
     document.getElementById('autospeak-input').checked = autospeak;
 
@@ -61,6 +63,20 @@ window.onload = async () => {
     }
     renderModelPicker();
 
+    try {
+        const sr = await fetch('/api/supabase-status');
+        const sd = await sr.json().catch(() => ({}));
+        if (sd.enabled) {
+            supabaseEnabled = true;
+            document.body.classList.add('cloud');
+            renderSessionName();
+            await loadRemoteChat();
+            return;
+        }
+    } catch (e) { }
+
+    loadSessions();
+    renderSessionName();
     renderChat();
 };
 
@@ -78,6 +94,140 @@ function cleanupOldImages(msgs) {
         }
     }
     return msgs;
+}
+
+function getDeviceUserId() {
+    if (!deviceUserId) {
+        deviceUserId = localStorage.getItem('senka_device_id')
+            || ('dev-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10));
+        localStorage.setItem('senka_device_id', deviceUserId);
+    }
+    return deviceUserId;
+}
+
+function encKey() {
+    return CryptoJS.SHA256('senka:' + getDeviceUserId()).toString();
+}
+
+function encryptText(s) {
+    if (typeof CryptoJS === 'undefined' || s === null || s === undefined || s === '') return s;
+    try { return CryptoJS.AES.encrypt(String(s), encKey()).toString(); } catch (e) { return s; }
+}
+
+function decryptText(s) {
+    if (typeof CryptoJS === 'undefined' || !s) return s;
+    try {
+        const t = CryptoJS.AES.decrypt(String(s), encKey()).toString(CryptoJS.enc.Utf8);
+        return t || null;
+    } catch (e) { return null; }
+}
+
+function remoteToLocal(m) {
+    const content = [];
+    if (m.tipe_pesan === 'image') {
+        const u = decryptText(m.isi_pesan);
+        content.push({ type: 'image_url', image_url: { url: u || '' } });
+    } else if (m.tipe_pesan === 'video') {
+        const u = decryptText(m.isi_pesan);
+        content.push({ type: 'video_url', url: u || '' });
+    } else if (m.tipe_pesan === 'voice') {
+        const u = decryptText(m.isi_pesan);
+        content.push({ type: 'audio_url', url: u || '' });
+    } else {
+        const t = decryptText(m.isi_pesan);
+        content.push({ type: 'text', text: (t === null || t === '') ? '[pesan terenkripsi]' : t });
+    }
+    return { role: m.pengirim === 'user' ? 'user' : 'assistant', cid: m.id, content };
+}
+
+function remoteSave(pengirim, tipePesan, isi, memItem) {
+    if (!supabaseEnabled) return;
+    fetch('/api/chats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: getDeviceUserId(), tipePesan, isiPesan: encryptText(isi), pengirim })
+    })
+        .then(r => r.ok ? r.json() : null)
+        .then(d => {
+            if (d && d.id && memItem && !memItem.cid) memItem.cid = d.id;
+        })
+        .catch(() => { });
+}
+
+async function uploadDataUrl(dataUrl, ext) {
+    const r = await fetch('/api/upload-json', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dataUrl, ext: ext || 'jpg' })
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || 'Upload gagal.');
+    return d.url;
+}
+
+function makeRemoteBtn() {
+    const btn = document.createElement('button');
+    btn.className = 'load-more';
+    btn.id = 'remote-load-more';
+    btn.innerText = 'Muat Pesan Lama';
+    btn.onclick = loadOlderRemote;
+    return btn;
+}
+
+async function loadRemoteChat() {
+    try {
+        const r = await fetch('/api/chats?userId=' + encodeURIComponent(getDeviceUserId()) + '&limit=25');
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || 'Gagal ambil chat.');
+        memoryList = (d.messages || []).map(remoteToLocal);
+        remoteHasMore = !!d.hasMore;
+        if (!memoryList.length) {
+            const greeting = getGreeting();
+            const item = { role: 'assistant', content: [{ type: 'text', text: greeting }] };
+            memoryList.push(item);
+            remoteSave('senka', 'text', greeting, item);
+        }
+        renderChat();
+    } catch (e) {
+        supabaseEnabled = false;
+        document.body.classList.remove('cloud');
+        loadSessions();
+        renderChat();
+    }
+}
+
+async function loadOlderRemote() {
+    if (!supabaseEnabled || remoteLoading) return;
+    remoteLoading = true;
+    const btn = document.getElementById('remote-load-more');
+    if (btn) btn.innerText = 'Memuat...';
+    try {
+        const oldest = memoryList.find(x => x.cid);
+        let url = '/api/chats?userId=' + encodeURIComponent(getDeviceUserId()) + '&limit=25';
+        if (oldest) url += '&before=' + oldest.cid;
+        const r = await fetch(url);
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || 'Gagal memuat.');
+        const local = (d.messages || []).map(remoteToLocal);
+        if (!local.length) { remoteHasMore = false; }
+        else {
+            remoteHasMore = !!d.hasMore;
+            const prevScrollTop = chatHistoryDOM.scrollTop;
+            const prevHeight = chatHistoryDOM.scrollHeight;
+            memoryList = [...local, ...memoryList];
+            const frag = document.createDocumentFragment();
+            local.forEach(l => frag.appendChild(buildMsgEl(l)));
+            if (btn) btn.remove();
+            if (remoteHasMore) chatHistoryDOM.insertBefore(makeRemoteBtn(), chatHistoryDOM.firstChild);
+            const first = chatHistoryDOM.querySelector('.message');
+            if (first) chatHistoryDOM.insertBefore(frag, first);
+            else chatHistoryDOM.appendChild(frag);
+            chatHistoryDOM.scrollTop = prevScrollTop + (chatHistoryDOM.scrollHeight - prevHeight);
+        }
+    } catch (e) {
+        if (btn) btn.innerText = 'Muat Pesan Lama';
+    }
+    remoteLoading = false;
 }
 
 function loadSessions() {
@@ -360,6 +510,59 @@ function shrinkMemoryImages() {
     });
 }
 
+function buildMsgEl(m) {
+    const bubble = document.createElement('div');
+    bubble.classList.add('message', m.role === 'user' ? 'msg-user' : 'msg-senka');
+    (m.content || []).forEach(c => {
+        if (!c) return;
+        if (c.type === 'text') {
+            const p = document.createElement('div');
+            p.innerHTML = formatReply(c.text);
+            bubble.appendChild(p);
+        } else if (c.type === 'image_url') {
+            if (typeof c.image_url.url === 'string' && c.image_url.url.startsWith('data:')) {
+                const p = document.createElement('div');
+                p.innerText = '[gambar]';
+                bubble.appendChild(p);
+            } else {
+                const img = document.createElement('img');
+                img.src = c.image_url.url;
+                img.classList.add('chat-img');
+                img.onerror = () => { img.remove(); const p = document.createElement('div'); p.innerText = '[gambar tidak tersedia]'; bubble.appendChild(p); };
+                bubble.appendChild(img);
+            }
+        } else if (c.type === 'video_url') {
+            if (c.url) {
+                const v = document.createElement('video');
+                v.src = c.url;
+                v.controls = true;
+                v.preload = 'metadata';
+                v.classList.add('chat-video');
+                v.onerror = () => { v.remove(); const p = document.createElement('div'); p.innerText = '[video tidak tersedia]'; bubble.appendChild(p); };
+                bubble.appendChild(v);
+            } else {
+                const p = document.createElement('div');
+                p.innerText = '[video]';
+                bubble.appendChild(p);
+            }
+        } else if (c.type === 'audio_url') {
+            if (c.url) {
+                const a = document.createElement('audio');
+                a.src = c.url;
+                a.controls = true;
+                a.classList.add('chat-audio');
+                bubble.appendChild(a);
+            } else {
+                const p = document.createElement('div');
+                p.innerText = '[suara]';
+                bubble.appendChild(p);
+            }
+        }
+    });
+    addMsgActions(bubble, m.role === 'user' ? 'user' : 'senka');
+    return bubble;
+}
+
 function renderChat() {
     chatHistoryDOM.innerHTML = '';
     if (!memoryList.length) {
@@ -370,7 +573,7 @@ function renderChat() {
         if (away) greeting = `Selamat kembali ${panggilan}!`;
         else greeting = getGreeting();
         memoryList.push({ role: 'assistant', content: [{ type: 'text', text: greeting }] });
-        saveSessions();
+        if (!supabaseEnabled) saveSessions();
         const gEl = appendMessage('senka', greeting);
         gEl.innerHTML = formatReply(greeting);
         gEl.dataset.greeting = '1';
@@ -383,7 +586,7 @@ function renderChat() {
                 const idx = memoryList.findIndex(x => x.role === 'assistant' && x.content && x.content[0] && x.content[0].text === greeting);
                 if (idx !== -1) {
                     memoryList[idx].content[0].text = newG;
-                    saveSessions();
+                    if (!supabaseEnabled) saveSessions();
                 }
             }, 60000);
         }
@@ -392,45 +595,22 @@ function renderChat() {
         }
     } else {
         const STEP = 80;
-        const renderMsg = (m) => {
-            const bubble = document.createElement('div');
-            bubble.classList.add('message', m.role === 'user' ? 'msg-user' : 'msg-senka');
-            (m.content || []).forEach(c => {
-                if (!c) return;
-                if (c.type === 'text') {
-                    const p = document.createElement('div');
-                    p.innerHTML = formatReply(c.text);
-                    bubble.appendChild(p);
-                } else if (c.type === 'image_url') {
-                    if (typeof c.image_url.url === 'string' && c.image_url.url.startsWith('data:')) {
-                        const p = document.createElement('div');
-                        p.innerText = '[gambar]';
-                        bubble.appendChild(p);
-                    } else {
-                        const img = document.createElement('img');
-                        img.src = c.image_url.url;
-                        img.classList.add('chat-img');
-                        bubble.appendChild(img);
-                    }
-                }
-            });
-            addMsgActions(bubble, m.role === 'user' ? 'user' : 'senka');
-            chatHistoryDOM.appendChild(bubble);
-        };
-        if (memoryList.length > STEP) {
+        if (supabaseEnabled && remoteHasMore) {
+            chatHistoryDOM.appendChild(makeRemoteBtn());
+        } else if (memoryList.length > STEP) {
             const hidden = memoryList.length - STEP;
             const btn = document.createElement('button');
             btn.className = 'load-more';
             btn.innerText = 'Muat chat lama (' + hidden + ' pesan)';
             btn.onclick = () => {
                 chatHistoryDOM.innerHTML = '';
-                memoryList.forEach(renderMsg);
+                memoryList.forEach(m => chatHistoryDOM.appendChild(buildMsgEl(m)));
                 scrollToBottom(true);
             };
             chatHistoryDOM.appendChild(btn);
-            memoryList.slice(-STEP).forEach(renderMsg);
+            memoryList.slice(-STEP).forEach(m => chatHistoryDOM.appendChild(buildMsgEl(m)));
         } else {
-            memoryList.forEach(renderMsg);
+            memoryList.forEach(m => chatHistoryDOM.appendChild(buildMsgEl(m)));
         }
     }
     scrollToBottom(true);
@@ -641,6 +821,7 @@ async function generateVideoWithPrompt(prompt) {
                 dl.onclick = () => downloadImage(sd.videoUrl, 'senka-video-' + Date.now() + '.mp4');
                 actions.appendChild(dl);
                 loading.appendChild(actions);
+                remoteSave('senka', 'video', sd.videoUrl);
                 scrollToBottom(true);
                 return;
             }
@@ -709,13 +890,17 @@ function scheduleReminder(text) {
     const delay = r.fireAt.getTime() - Date.now();
     const timeStr = r.fireAt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
     memoryList.push({ role: 'user', content: [{ type: 'text', text: text }] });
-    saveSessions();
+    const userItem = memoryList[memoryList.length - 1];
+    if (!supabaseEnabled) saveSessions();
+    else remoteSave('user', 'text', text, userItem);
     appendMessage('user', text);
     const confirmMsg = `Oke, saya ingatkan jam ${timeStr}: ${r.what}.`;
     const conf = appendMessage('senka', confirmMsg);
     addMsgActions(conf, 'senka');
     memoryList.push({ role: 'assistant', content: [{ type: 'text', text: confirmMsg }] });
-    saveSessions();
+    const confItem = memoryList[memoryList.length - 1];
+    if (!supabaseEnabled) saveSessions();
+    else remoteSave('senka', 'text', confirmMsg, confItem);
     scrollToBottom(true);
 
     if ('Notification' in window) {
@@ -731,7 +916,9 @@ function scheduleReminder(text) {
             const b = appendMessage('senka', msg);
             addMsgActions(b, 'senka');
             memoryList.push({ role: 'assistant', content: [{ type: 'text', text: msg }] });
-            saveSessions();
+            const remItem = memoryList[memoryList.length - 1];
+            if (!supabaseEnabled) saveSessions();
+            else remoteSave('senka', 'text', msg, remItem);
             scrollToBottom(true);
         }
     }, delay);
@@ -766,19 +953,29 @@ async function sendToSenka() {
     lastUserText = text;
     lastUserImage = base64Image;
 
+    let userImgUrl = null;
+    if (base64Image && supabaseEnabled) {
+        try { userImgUrl = await uploadDataUrl(base64Image, 'jpg'); } catch (e) { userImgUrl = null; }
+    }
+
     const userMessageContent = [];
     if (text) userMessageContent.push({ type: "text", text: text });
-    if (base64Image) userMessageContent.push({ type: "image_url", image_url: { url: base64Image } });
+    if (base64Image) userMessageContent.push({ type: "image_url", image_url: { url: userImgUrl || base64Image } });
 
     const bubble = appendMessage('user', text || '');
     if (base64Image) {
         const img = document.createElement('img');
-        img.src = base64Image;
+        img.src = userImgUrl || base64Image;
         img.classList.add('chat-img');
         bubble.appendChild(img);
     }
     memoryList.push({ role: 'user', content: userMessageContent });
-    saveSessions();
+    const userItem = memoryList[memoryList.length - 1];
+    if (!supabaseEnabled) saveSessions();
+    else {
+        remoteSave('user', 'text', text || '[foto]', userItem);
+        if (userImgUrl) remoteSave('user', 'image', userImgUrl);
+    }
 
     messageInput.value = '';
     removeImage();
@@ -859,7 +1056,9 @@ async function sendToSenka() {
         addMsgActions(msgDiv, 'senka');
 
         memoryList.push({ role: 'assistant', content: [{ type: "text", text: displayText }] });
-        saveSessions();
+        const aiItem = memoryList[memoryList.length - 1];
+        if (!supabaseEnabled) saveSessions();
+        else remoteSave('senka', 'text', displayText, aiItem);
         shrinkMemoryImages();
         if (autospeak && !fileReq) speak(displayText);
     } catch (error) {
@@ -1017,21 +1216,32 @@ function generateImageWithPrompt(prompt) {
             tag.innerText = data.model || 'Gambar AI';
             loading.innerHTML = '';
             loading.appendChild(tag);
-            const img = document.createElement('img');
-            img.src = data.url;
-            img.classList.add('chat-img');
-            img.alt = prompt;
-            img.onerror = () => { loading.innerText = 'Gagal memuat gambar. Coba lagi.'; };
-            loading.appendChild(img);
-            const actions = document.createElement('div');
-            actions.className = 'msg-actions';
-            const dl = document.createElement('button');
-            dl.className = 'msg-action';
-            dl.innerHTML = '<i class="fa-solid fa-download"></i> Download';
-            dl.onclick = () => downloadImage(data.url, 'senka-' + prompt.slice(0, 25).replace(/[^a-zA-Z0-9]+/g, '_') + '.jpg');
-            actions.appendChild(dl);
-            loading.appendChild(actions);
-            scrollToBottom(true);
+            let imgSrc = data.url;
+            const finishImage = () => {
+                const img = document.createElement('img');
+                img.src = imgSrc;
+                img.classList.add('chat-img');
+                img.alt = prompt;
+                img.onerror = () => { loading.innerText = 'Gagal memuat gambar. Coba lagi.'; };
+                loading.appendChild(img);
+                const actions = document.createElement('div');
+                actions.className = 'msg-actions';
+                const dl = document.createElement('button');
+                dl.className = 'msg-action';
+                dl.innerHTML = '<i class="fa-solid fa-download"></i> Download';
+                dl.onclick = () => downloadImage(imgSrc, 'senka-' + prompt.slice(0, 25).replace(/[^a-zA-Z0-9]+/g, '_') + '.jpg');
+                actions.appendChild(dl);
+                loading.appendChild(actions);
+                scrollToBottom(true);
+            };
+            if (supabaseEnabled && typeof data.url === 'string' && data.url.startsWith('data:')) {
+                uploadDataUrl(data.url, 'png')
+                    .then(u => { imgSrc = u; remoteSave('senka', 'image', u); finishImage(); })
+                    .catch(() => finishImage());
+            } else {
+                if (supabaseEnabled && typeof data.url === 'string') remoteSave('senka', 'image', data.url);
+                finishImage();
+            }
         })
         .catch((e) => {
             loading.innerText = 'Gagal: ' + e.message;

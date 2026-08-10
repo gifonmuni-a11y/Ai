@@ -35,7 +35,7 @@
                         <button class="icon-btn session-btn" onclick="openSessions()" title="Sesi chat">
                             <i class="fa-solid fa-layer-group"></i><span id="session-name">Sesi 1</span>
                         </button>
-                        <button class="icon-btn" onclick="newSession()" title="Sesi baru"><i class="fa-solid fa-plus"></i></button>
+                        <button class="icon-btn" id="btn-new-session" onclick="newSession()" title="Sesi baru"><i class="fa-solid fa-plus"></i></button>
                         <button class="icon-btn" onclick="openSearch()" title="Cari di chat"><i class="fa-solid fa-magnifying-glass"></i></button>
                         <button class="icon-btn" onclick="openExport()" title="Simpan chat (PDF/Word)"><i class="fa-solid fa-file-export"></i></button>
                         <button class="icon-btn gear-btn" onclick="openSettings()" title="Pengaturan"><i class="fa-solid fa-gear"></i></button>
@@ -168,6 +168,7 @@
         </div>
     </div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="script.js"></script>
 </body>

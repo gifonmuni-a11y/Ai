@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { createClient } from '@supabase/supabase-js';
+import multer from 'multer';
 
 dotenv.config();
 const app = express();
@@ -9,6 +11,14 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.static('public'));
+
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY)
+    ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: false } })
+    : null;
+const MEDIA_BUCKET = 'senka-media';
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
 const PROVIDERS = {
     openrouter: { base: "https://openrouter.ai/api/v1", env: "OPENROUTER_API_KEY" },
@@ -458,6 +468,104 @@ app.get('/api/video/file', async (req, res) => {
     } catch (error) {
         console.error('Error video file:', error);
         res.status(502).json({ error: 'Gagal ambil video.' });
+    }
+});
+
+function supabaseUpload(buffer, contentType, ext) {
+    const safeExt = (ext || 'bin').toString().toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin';
+    const path = `u-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${safeExt}`;
+    return supabase.storage.from(MEDIA_BUCKET).upload(path, buffer, {
+        contentType: contentType || 'application/octet-stream',
+        cacheControl: '3600'
+    }).then(({ data, error }) => {
+        if (error) throw new Error(error.message);
+        return { path, url: supabase.storage.from(MEDIA_BUCKET).getPublicUrl(path).data.publicUrl };
+    });
+}
+
+app.get('/api/supabase-status', (req, res) => {
+    res.json({ enabled: !!supabase });
+});
+
+app.get('/api/chats', async (req, res) => {
+    try {
+        if (!supabase) return res.status(503).json({ error: 'Supabase belum dikonfigurasi.' });
+        const userId = (req.query.userId || '').toString();
+        if (!userId) return res.status(400).json({ error: 'user_id wajib.' });
+        const before = (req.query.before || '').toString();
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 50);
+        let q = supabase
+            .from('senka_chats')
+            .select('id,user_id,tipe_user,tipe_pesan,isi_pesan,pengirim,waktu_kirim')
+            .eq('user_id', userId)
+            .order('id', { ascending: false })
+            .limit(limit);
+        if (before) q = q.lt('id', before);
+        const { data, error } = await q;
+        if (error) return res.status(500).json({ error: error.message });
+        data.reverse();
+        res.json({ messages: data, hasMore: data.length === limit });
+    } catch (error) {
+        console.error('Error chats GET:', error);
+        res.status(500).json({ error: error.message || 'Gagal ambil chat.' });
+    }
+});
+
+app.post('/api/chats', async (req, res) => {
+    try {
+        if (!supabase) return res.status(503).json({ error: 'Supabase belum dikonfigurasi.' });
+        const { userId, tipePesan, isiPesan, pengirim } = req.body || {};
+        if (!userId) return res.status(400).json({ error: 'user_id wajib.' });
+        if (!pengirim) return res.status(400).json({ error: 'pengirim wajib.' });
+        const tipe = ['text', 'image', 'video', 'voice'].includes(tipePesan) ? tipePesan : 'text';
+        const { data, error } = await supabase
+            .from('senka_chats')
+            .insert({
+                user_id: userId,
+                tipe_user: 'anonymous',
+                tipe_pesan: tipe,
+                isi_pesan: String(isiPesan ?? ''),
+                pengirim: String(pengirim)
+            })
+            .select('id,user_id,tipe_pesan,isi_pesan,pengirim,waktu_kirim')
+            .single();
+        if (error) return res.status(500).json({ error: error.message });
+        res.json(data);
+    } catch (error) {
+        console.error('Error chats POST:', error);
+        res.status(500).json({ error: error.message || 'Gagal simpan chat.' });
+    }
+});
+
+app.post('/api/upload', upload.single('file'), async (req, res) => {
+    try {
+        if (!supabase) return res.status(503).json({ error: 'Supabase belum dikonfigurasi.' });
+        if (!req.file) return res.status(400).json({ error: 'File kosong.' });
+        const original = req.file.originalname || '';
+        const ext = original.includes('.') ? original.split('.').pop() : 'bin';
+        const { url } = await supabaseUpload(req.file.buffer, req.file.mimetype, ext);
+        res.json({ url });
+    } catch (error) {
+        console.error('Error upload:', error);
+        res.status(500).json({ error: error.message || 'Gagal upload file.' });
+    }
+});
+
+app.post('/api/upload-json', async (req, res) => {
+    try {
+        if (!supabase) return res.status(503).json({ error: 'Supabase belum dikonfigurasi.' });
+        const { dataUrl, ext } = req.body || {};
+        if (typeof dataUrl !== 'string' || !/^data:[^;]+;base64,/.test(dataUrl)) {
+            return res.status(400).json({ error: 'Data URL tidak valid.' });
+        }
+        const mime = dataUrl.slice(5, dataUrl.indexOf(';')) || 'application/octet-stream';
+        const buf = Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64');
+        if (buf.length > 25 * 1024 * 1024) return res.status(413).json({ error: 'File terlalu besar.' });
+        const { url } = await supabaseUpload(buf, mime, ext || 'bin');
+        res.json({ url });
+    } catch (error) {
+        console.error('Error upload-json:', error);
+        res.status(500).json({ error: error.message || 'Gagal upload media.' });
     }
 });
 
