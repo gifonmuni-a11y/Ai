@@ -416,7 +416,8 @@ const ttsCache = new Map();
 const EN_WORDS = /\b(the|you|your|i|and|to|of|a|is|it|we|they|me|my|hello|hi|hey|thanks|thank|sorry|love|okay|ok|yes|no|please|really|right|well|so|but|what|how|why|don't|im|i'm|be|are|was|were|have|has|with|for|that|this|do|did|not|can|just)\b/gi;
 const TTS_TL = { ind: 'id', eng: 'en', jpn: 'ja' };
 
-const TIKTOK_TTS_URL = process.env.TIKTOK_TTS_URL || 'https://api16-normal-c-useast1a.tiktokv.com/media/api/text/speech/invoke/';
+const TIKTOK_TTS_URL = process.env.TIKTOK_TTS_URL || 'https://tiktok-tts.weilnet.workers.dev/api/generation';
+const TIKTOK_TTS_URL_OFFICIAL = process.env.TIKTOK_TTS_URL_OFFICIAL || 'https://api16-normal-c-useast1a.tiktokv.com/media/api/text/speech/invoke/';
 const TIKTOK_TTS_VOICE = process.env.TIKTOK_TTS_VOICE || 'jp_006';
 const TIKTOK_TTS_TIMEOUT = Number(process.env.TIKTOK_TTS_TIMEOUT) || 8000;
 
@@ -441,11 +442,46 @@ function chunkTtsText(text, max = 185) {
     return segs;
 }
 
+async function tiktokSpeakJson(text) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TIKTOK_TTS_TIMEOUT);
+    try {
+        const r = await fetch(TIKTOK_TTS_URL, {
+            method: 'POST',
+            redirect: 'follow',
+            signal: controller.signal,
+            headers: {
+                'Content-Type': 'application/json',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
+            },
+            body: JSON.stringify({ text, voice: TIKTOK_TTS_VOICE })
+        });
+        if (!r.ok) {
+            console.error('[tts:tiktok:mirror] HTTP', r.status, r.statusText);
+            return null;
+        }
+        const data = await r.json();
+        if (data.success !== true || !data.data) {
+            console.error('[tts:tiktok:mirror] gagal:', JSON.stringify(data).slice(0, 120));
+            return null;
+        }
+        const b64 = String(data.data).replace(/^data:audio\/mp3;base64,/, '');
+        const buf = Buffer.from(b64, 'base64');
+        if (buf.length < 1000) return null;
+        return buf.toString('base64');
+    } catch (e) {
+        console.error('[tts:tiktok:mirror] error:', e.name, e.message.slice(0, 80));
+        return null;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 async function tiktokSpeak(text) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIKTOK_TTS_TIMEOUT);
     try {
-        const url = TIKTOK_TTS_URL + '?text_speaker=' + encodeURIComponent(TIKTOK_TTS_VOICE) +
+        const url = TIKTOK_TTS_URL_OFFICIAL + '?text_speaker=' + encodeURIComponent(TIKTOK_TTS_VOICE) +
             '&req_text=' + encodeURIComponent(text) + '&speaker_map_type=0&aid=1988';
         const r = await fetch(url, {
             method: 'POST',
@@ -482,7 +518,9 @@ async function tiktokTts(text, lang) {
     if (chunks.length === 0) return null;
     const segments = [];
     for (const c of chunks) {
-        const b64 = await tiktokSpeak(c);
+        let b64 = await tiktokSpeakJson(c);
+        if (!b64) b64 = await tiktokSpeakJson(c);
+        if (!b64) b64 = await tiktokSpeak(c);
         if (!b64) return null;
         segments.push({ audioBase64: b64 });
     }
