@@ -47,11 +47,19 @@ function clientFor(req) {
 
 const PROVIDERS = {
     openrouter: { base: "https://openrouter.ai/api/v1", env: "OPENROUTER_API_KEY" },
-    groq:       { base: "https://api.groq.com/openai/v1", env: "GROQ_API_KEY" }
+    groq:       { base: "https://api.groq.com/openai/v1", env: "GROQ_API_KEY" },
+    janitor:    { base: process.env.JANITOR_BASE || "https://api.janitorai.com/unlimited/v1", env: "JANITOR_API_KEY", always: true },
+    spicy:      { base: process.env.SPICY_BASE || "https://api.spicychat.ai/v1", env: "SPICY_API_KEY", always: true },
+    chub:       { base: process.env.CHUB_BASE || "https://venus.chub.ai/v1", env: "CHUB_API_KEY", always: true },
+    perchance:  { custom: "perchance", always: true }
 };
 
 const MODELS = [
     { key: "groq-llama33",   label: "Llama 3.3 70B (Groq, cepat)",          provider: "groq",       id: "llama-3.3-70b-versatile" },
+    { key: "janitor-llm",    label: "Janitor AI",                           provider: "janitor",    id: process.env.JANITOR_MODEL || "janitorllm" },
+    { key: "spicy-ai",       label: "SpicyChat AI",                         provider: "spicy",      id: process.env.SPICY_MODEL || "spicy-1.5" },
+    { key: "chub-ai",        label: "Chub AI",                              provider: "chub",       id: process.env.CHUB_MODEL || "openai/gpt-4o-mini" },
+    { key: "perchance-ai",   label: "Perchance AI Character Chat",          provider: "perchance",  id: process.env.PERCHANCE_MODEL || "ai-character-chat" },
     { key: "groq-oss120b",   label: "GPT-OSS 120B (Groq)",                  provider: "groq",       id: "openai/gpt-oss-120b" },
     { key: "or-gptoss",      label: "GPT-OSS 20B (OpenRouter)",              provider: "openrouter", id: "openai/gpt-oss-20b:free" },
     { key: "or-gemma",       label: "Gemma 4 31B (OpenRouter)",              provider: "openrouter", id: "google/gemma-4-31b-it:free" },
@@ -68,7 +76,7 @@ const IMAGE_MODELS = {
 function availableModels() {
     return MODELS.filter(m => {
         const p = PROVIDERS[m.provider];
-        return p && process.env[p.env];
+        return p && (p.always || process.env[p.env]);
     });
 }
 
@@ -263,9 +271,58 @@ async function prepareMessagesForAI(messages, isVision) {
     return clean;
 }
 
+async function callPerchance(messages, modelId, temperature) {
+    const system = messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n').slice(0, 6000);
+    const rest = messages.filter(m => m.role !== 'system');
+    const last = rest[rest.length - 1] || { role: 'user', content: '' };
+    const history = rest.slice(0, -1);
+    const toText = (c) => {
+        if (typeof c === 'string') return c;
+        return (c || []).filter(x => x.type === 'text').map(x => x.text).join(' ').trim();
+    };
+    const body = {
+        scenario: system,
+        character: '',
+        model: modelId || 'ai-character-chat',
+        text: toText(last.content),
+        history: history.map(m => toText(m.content)).filter(Boolean)
+    };
+    const r = await fetch('https://ai-character-chat.perchance.org/api/generate', {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+    });
+    if (!r.ok) {
+        return {
+            ok: false,
+            status: r.status,
+            json: async () => ({ error: { message: 'Perchance menolak (HTTP ' + r.status + ')' } })
+        };
+    }
+    const data = await r.json().catch(() => ({}));
+    const msgs = Array.isArray(data?.messages) ? data.messages : null;
+    let content = '';
+    if (msgs && msgs.length) {
+        const lastMsg = msgs[msgs.length - 1];
+        content = typeof lastMsg === 'string' ? lastMsg : (lastMsg?.content || '');
+        if (typeof content === 'object' && content?.text) content = content.text;
+    }
+    if (!content && typeof data?.text === 'string') content = data.text;
+    if (!content && typeof data?.html === 'string') content = data.html.replace(/<[^>]+>/g, '').trim();
+    return {
+        ok: !!content,
+        status: content ? 200 : 502,
+        json: async () => content
+            ? { choices: [{ message: { role: 'assistant', content } }] }
+            : { error: { message: 'Perchance balas kosong atau format berubah.' } }
+    };
+}
+
 async function callProvider(provider, messages, modelId, stream = false, temperature = 0.88) {
     const p = PROVIDERS[provider];
-    if (!p || !process.env[p.env]) return null;
+    if (!p) return null;
+    if (p.custom) return callPerchance(messages, modelId, temperature);
+    if (!process.env[p.env]) return null;
     return await fetch(`${p.base}/chat/completions`, {
         method: "POST",
         headers: {
@@ -410,6 +467,22 @@ app.post('/api/chat/stream', async (req, res) => {
             res.setHeader('Connection', 'keep-alive');
             res.flushHeaders();
             res.write(`event: model\ndata: ${JSON.stringify({ model_used: m.label })}\n\n`);
+
+            if (!upstream.body || typeof upstream.body.getReader !== 'function') {
+                const jd = await upstream.json().catch(() => ({}));
+                const content = jd?.choices?.[0]?.message?.content || null;
+                if (!content) {
+                    res.write(`data: ${JSON.stringify({ error: { message: jd?.error?.message || 'Provider balas kosong.' } })}\n\n`);
+                } else {
+                    const chunk = 120;
+                    for (let i = 0; i < content.length; i += chunk) {
+                        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: content.slice(i, i + chunk) } }] })}\n\n`);
+                    }
+                }
+                res.write(`data: [DONE]\n\n`);
+                res.end();
+                return;
+            }
 
             const reader = upstream.body.getReader();
             const decoder = new TextDecoder();
