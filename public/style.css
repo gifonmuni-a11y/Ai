@@ -467,7 +467,7 @@ textarea.modal-input { resize: none; font-family: inherit; }
 .sticker-item { width: 100%; border-radius: 12px; cursor: pointer; transition: transform 0.15s ease; background: rgba(255,255,255,0.04); pointer-events: auto; }
 .sticker-item:hover { transform: scale(1.08); }
 .chat-sticker { pointer-events: auto; }
-em { font-style: italic; color: #FF80AB; text-shadow: 0 1px 8px rgba(255, 128, 171, 0.35); }
+em { font-style: italic; color: #FFC8D2; font-weight: 400; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }
 
 
 .mode-badge { font-size: 0.68rem; color: #ffb3c7; background: rgba(255,128,171,0.14); border: 1px solid rgba(255,128,171,0.4); padding: 3px 10px; border-radius: 999px; margin-right: 6px; white-space: nowrap; align-self: center; }
