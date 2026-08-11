@@ -882,13 +882,13 @@ function renderChat() {
             btn.innerText = 'Muat chat lama (' + hidden + ' pesan)';
             btn.onclick = () => {
                 chatHistoryDOM.innerHTML = '';
-                memoryList.forEach(m => chatHistoryDOM.appendChild(buildMsgEl(m)));
+                memoryList.filter(m => !m.hidden).forEach(m => chatHistoryDOM.appendChild(buildMsgEl(m)));
                 scrollToBottom(true);
             };
             chatHistoryDOM.appendChild(btn);
-            memoryList.slice(-STEP).forEach(m => chatHistoryDOM.appendChild(buildMsgEl(m)));
+            memoryList.slice(-STEP).filter(m => !m.hidden).forEach(m => chatHistoryDOM.appendChild(buildMsgEl(m)));
         } else {
-            memoryList.forEach(m => chatHistoryDOM.appendChild(buildMsgEl(m)));
+            memoryList.filter(m => !m.hidden).forEach(m => chatHistoryDOM.appendChild(buildMsgEl(m)));
         }
     }
     scrollToBottom(true);
@@ -951,7 +951,7 @@ function formatPlain(s) {
         'gi'
     );
     const innerRe = new RegExp(
-        '(\\*\\*[^*\\n]+\\*\\*)|(\\b(?:' + IMPORTANT_WORDS + ')\\b)',
+        '(\\*\\*[^*\\n]+\\*\\*)|(\\"([^\\"\\n]*)\\"|\\u201C([^\\u201D\\n]*)\\u201D)|(\\b(?:' + IMPORTANT_WORDS + ')\\b)',
         'gi'
     );
     const fmtInner = (inner) => {
@@ -959,7 +959,8 @@ function formatPlain(s) {
         while ((mm = innerRe.exec(inner)) !== null) {
             o += escapeHtml(inner.slice(last, mm.index)).replace(/[*_`~#]/g, '');
             if (mm[1]) o += '<span class="em">' + escapeHtml(mm[1].slice(2, -2)) + '</span>';
-            else if (mm[2]) o += '<span class="em">' + escapeHtml(mm[2]) + '</span>';
+            else if (mm[2] !== undefined) o += '<span class="q">"' + escapeHtml(mm[3] !== undefined ? mm[3] : mm[4]) + '"</span>';
+            else if (mm[5]) o += '<span class="em">' + escapeHtml(mm[5]) + '</span>';
             last = mm.index + mm[0].length;
         }
         o += escapeHtml(inner.slice(last)).replace(/[*_`~#]/g, '');
@@ -1185,15 +1186,30 @@ function renderStoryGrid() {
             cc.appendChild(cn);
             castRow.appendChild(cc);
         });
-        const btn = document.createElement('button');
-        btn.className = 'modal-btn';
-        btn.innerText = 'Mulai Cerita';
-        btn.onclick = () => startStory(s.key);
+        const btnRow = document.createElement('div');
+        btnRow.className = 'story-action-row';
+        const hasProg = localStorage.getItem('senka_story_progress_' + s.key) === '1';
+        const main = document.createElement('button');
+        main.className = 'modal-btn';
+        if (hasProg) {
+            main.innerText = 'Lanjut Cerita';
+            main.onclick = () => startStory(s.key, { resume: true });
+            const restart = document.createElement('button');
+            restart.className = 'modal-btn ghost small';
+            restart.innerText = 'Ulangi dari Awal';
+            restart.onclick = () => startStory(s.key, { reset: true });
+            btnRow.appendChild(main);
+            btnRow.appendChild(restart);
+        } else {
+            main.innerText = 'Mulai Cerita';
+            main.onclick = () => startStory(s.key);
+            btnRow.appendChild(main);
+        }
         info.appendChild(h);
         info.appendChild(g);
         info.appendChild(t);
         info.appendChild(castRow);
-        info.appendChild(btn);
+        info.appendChild(btnRow);
         card.appendChild(img);
         card.appendChild(info);
         grid.appendChild(card);
@@ -1207,35 +1223,42 @@ function setModeBadge() {
     badge.innerText = storyMode === 'story' ? 'Cerita Bebas' : 'Cerita: ' + (activeStory ? activeStory.title.split('|')[0].trim() : 'All');
 }
 
-function startStory(key) {
+function startStory(key, opts) {
     const s = STORIES.find(x => x.key === key);
     if (!s) return;
+    const resume = !!(opts && opts.resume);
+    const reset = !!(opts && opts.reset);
     closeStoryModal();
-    newSession();
+    let fresh = false;
+    if (reset) newSession();
+    if (!resume || memoryList.length === 0) {
+        fresh = true;
+        if (!reset) newSession();
+        const first = { role: 'assistant', content: [{ type: "text", text: s.firstMessage }] };
+        memoryList.push(first);
+        renderChat();
+        if (supabaseEnabled) remoteSave('senka', 'text', s.firstMessage, first);
+        else saveSessions();
+
+        if (s.autoUser && s.autoReply) {
+            const usr = { role: 'user', content: [{ type: "text", text: s.autoUser }] };
+            memoryList.push(usr);
+            const ai = { role: 'assistant', content: [{ type: "text", text: s.autoReply }] };
+            memoryList.push(ai);
+            renderChat();
+            if (supabaseEnabled) {
+                remoteSave('user', 'text', s.autoUser, usr);
+                remoteSave('senka', 'text', s.autoReply, ai);
+            } else saveSessions();
+        }
+    }
     storyMode = 'storyall';
     activeStory = s;
     localStorage.setItem('senka_story', key);
+    localStorage.setItem('senka_story_progress_' + key, '1');
     setModeBadge();
-
-    const first = { role: 'assistant', content: [{ type: "text", text: s.firstMessage }] };
-    memoryList.push(first);
-    renderChat();
-    if (supabaseEnabled) remoteSave('senka', 'text', s.firstMessage, first);
-    else saveSessions();
-
-    if (s.autoUser && s.autoReply) {
-        const usr = { role: 'user', content: [{ type: "text", text: s.autoUser }] };
-        memoryList.push(usr);
-        const ai = { role: 'assistant', content: [{ type: "text", text: s.autoReply }] };
-        memoryList.push(ai);
-        renderChat();
-        if (supabaseEnabled) {
-            remoteSave('user', 'text', s.autoUser, usr);
-            remoteSave('senka', 'text', s.autoReply, ai);
-        } else saveSessions();
-    }
     scrollToBottom(true);
-    if (autospeak) speak(s.autoReply || s.firstMessage);
+    if (autospeak && fresh) speak(s.autoReply || s.firstMessage);
 }
 
 function startFreeform() {
@@ -1925,6 +1948,9 @@ async function sendToSenka() {
 
     lastUserText = text;
     lastUserImage = base64Image;
+    if (storyMode === 'storyall' && activeStory) {
+        localStorage.setItem('senka_story_progress_' + activeStory.key, '1');
+    }
 
     let userImgUrl = null;
     if (base64Image && supabaseEnabled) {
@@ -1959,6 +1985,32 @@ async function sendToSenka() {
     scrollToBottom(true);
 
     await streamAssistantReply(await getWebPayload(memoryList, text));
+}
+
+async function continueNarration() {
+    if (isStreaming) return;
+    if (!modelKey) {
+        openSettings();
+        appendMessage('senka', `Pilih dulu model AI-nya ya ${panggilan}, baru bisa lanjutin ceritanya.`);
+        scrollToBottom(true);
+        return;
+    }
+    const last = memoryList[memoryList.length - 1];
+    if (!last || last.role !== 'assistant') {
+        appendMessage('senka', 'Belum ada narasi yang bisa dilanjutkan, sayang.');
+        scrollToBottom(true);
+        return;
+    }
+    if (storyMode === 'storyall' && activeStory) {
+        localStorage.setItem('senka_story_progress_' + activeStory.key, '1');
+    }
+    const trigger = {
+        role: 'user',
+        hidden: true,
+        content: [{ type: "text", text: '[LANJUTKAN] Lanjutkan narasi/cerita dari titik terakhir tanpa menyapa user: teruskan alurnya, perpanjang dan dalami adegan serta suasananya, dan jangan mengulang kalimat sebelumnya.' }]
+    };
+    memoryList.push(trigger);
+    await streamAssistantReply(await getWebPayload(memoryList, null));
 }
 
 async function getWebPayload(baseMessages, lastText) {

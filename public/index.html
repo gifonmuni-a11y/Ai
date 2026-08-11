@@ -78,6 +78,7 @@
                     </div>
                     <input type="file" id="image-upload" accept="image/*" hidden>
                     <input type="text" id="message-input" placeholder="Tulis pesan untuk Senka..." autocomplete="off">
+                    <button class="tool-btn" id="continue-btn" onclick="continueNarration()" title="Lanjutkan (>>) — AI meneruskan narasi dari titik terakhir"><i class="fa-solid fa-forward"></i></button>
                     <button class="tool-btn call-btn" id="call-btn" onclick="toggleCall()" title="Panggilan suara (Sleep Call)"><i class="fa-solid fa-phone"></i></button>
                     <button id="send-btn" onclick="sendToSenka()"><i class="fa-solid fa-paper-plane"></i></button>
                 </div>
@@ -109,13 +110,13 @@
             <input type="text" id="panggilan-input" class="modal-input" placeholder="pengguna" maxlength="30">
             <label class="modal-label">Bermain Sebagai (Persona)</label>
             <input type="text" id="persona-name-input" class="modal-input" placeholder="Nama karakter (contoh: Rizky)" maxlength="40">
-            <select id="persona-gender-input" class="modal-input">
+            <select id="persona-gender-input" class="modal-select">
                 <option value="laki-laki">Laki-laki</option>
                 <option value="perempuan">Perempuan</option>
             </select>
             <textarea id="persona-desc-input" class="modal-input" rows="3" placeholder="Deskripsi persona (opsional): misal 'mahasiswa pemalu berambut panjang'"></textarea>
             <label class="modal-label">Panjang Balasan</label>
-            <select id="length-input" class="modal-input">
+            <select id="length-input" class="modal-select">
                 <option value="">Standar (3-6 paragraf ala novel visual)</option>
                 <option value="pendek">Pendek (1-3 paragraf ringkas)</option>
                 <option value="bebas">Bebas (menyesuaikan user)</option>
