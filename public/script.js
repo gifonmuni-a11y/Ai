@@ -922,6 +922,7 @@ function formatPlain(s) {
         '|([\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af\u0400-\u04ff\u0600-\u06ff\u0e00-\u0e7f\u0900-\u097f\u3000-\u303f]+)' +
         '|([;&])' +
         '|([+](?=[0-9]))' +
+        '|(\\*[^*\\n]+\\*)' +
         '|([*_`~#])',
         'gi'
     );
@@ -957,6 +958,7 @@ function formatPlain(s) {
         else if (m[9]) out += '<span class="jp">' + escapeHtml(m[9]) + '</span>';
         else if (m[10]) out += '<span class="em">' + escapeHtml(m[10]) + '</span>';
         else if (m[11]) out += '<span class="st-plus">' + escapeHtml(m[11]) + '</span>';
+        else if (m[12]) out += '<em>' + fmtInner(m[12].slice(1, -1)) + '</em>';
         last = m.index + m[0].length;
     }
     out += strip(escapeHtml(s.slice(last)));
