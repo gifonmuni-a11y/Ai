@@ -412,15 +412,13 @@ CALL MODE (ACTIVE NOW - STRICTLY ENFORCED):
     };
 }
 
-const TTS_MODELS = {
-    ind: { id: 'facebook/mms-tts-ind', label: 'Meta VITS (ID)', expected: 'audio/flac' },
-    eng: { id: 'facebook/mms-tts-eng', label: 'Meta VITS (EN)', expected: 'audio/flac' },
-    jpn: { id: 'facebook/mms-tts-jpn', label: 'Meta VITS (JA)', expected: 'audio/flac' }
-};
 const ttsCache = new Map();
-const TTS_ORDER_BY_LANG = { ind: ['ind', 'eng', 'jpn'], eng: ['eng', 'ind', 'jpn'], jpn: ['jpn', 'eng', 'ind'] };
 const EN_WORDS = /\b(the|you|your|i|and|to|of|a|is|it|we|they|me|my|hello|hi|hey|thanks|thank|sorry|love|okay|ok|yes|no|please|really|right|well|so|but|what|how|why|don't|im|i'm|be|are|was|were|have|has|with|for|that|this|do|did|not|can|just)\b/gi;
 const TTS_TL = { ind: 'id', eng: 'en', jpn: 'ja' };
+
+const TIKTOK_TTS_URL = process.env.TIKTOK_TTS_URL || 'https://api16-normal-c-useast1a.tiktokv.com/media/api/text/speech/invoke/';
+const TIKTOK_TTS_VOICE = process.env.TIKTOK_TTS_VOICE || 'jp_006';
+const TIKTOK_TTS_TIMEOUT = Number(process.env.TIKTOK_TTS_TIMEOUT) || 8000;
 
 function detectTtsLang(text) {
     if (/[\u3040-\u30ff\u4e00-\u9faf\uac00-\ud7af]/.test(text)) return 'jpn';
@@ -443,30 +441,52 @@ function chunkTtsText(text, max = 185) {
     return segs;
 }
 
-async function hfTts(text, lang) {
-    if (!process.env.HF_TOKEN || !process.env.HF_TTS_MODEL) return null;
-    const m = TTS_MODELS[lang] || TTS_MODELS.ind;
+async function tiktokSpeak(text) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TIKTOK_TTS_TIMEOUT);
     try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 50000);
-        const r = await fetch(`https://router.huggingface.co/hf-inference/models/${m.id}/pipeline/text-to-speech`, {
-            method: 'POST', signal: controller.signal,
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${process.env.HF_TOKEN}`
-            },
-            body: JSON.stringify({ inputs: text })
+        const url = TIKTOK_TTS_URL + '?text_speaker=' + encodeURIComponent(TIKTOK_TTS_VOICE) +
+            '&req_text=' + encodeURIComponent(text) + '&speaker_map_type=0&aid=1988';
+        const r = await fetch(url, {
+            method: 'POST',
+            signal: controller.signal,
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36' }
         });
-        clearTimeout(timer);
-        if (!r.ok) return null;
-        const contentType = r.headers.get('content-type') || 'audio/flac';
-        if (!contentType.startsWith('audio/')) return null;
-        const buf = Buffer.from(await r.arrayBuffer());
+        if (!r.ok) {
+            console.error('[tts:tiktok] HTTP', r.status, r.statusText);
+            return null;
+        }
+        const data = await r.json();
+        if (data.code !== 0 || data.message !== 'success' || !data.data?.v_str) {
+            console.error('[tts:tiktok] gagal:', data.code, data.status_msg || data.message || 'unknown', '| voice:', TIKTOK_TTS_VOICE);
+            return null;
+        }
+        const m = String(data.data.v_str).match(/^data:audio\/mp3;base64,(.+)$/);
+        if (!m) {
+            console.error('[tts:tiktok] format v_str tak dikenal');
+            return null;
+        }
+        const buf = Buffer.from(m[1], 'base64');
         if (buf.length < 1000) return null;
-        return { segments: [{ audioBase64: buf.toString('base64') }], contentType, provider: 'hf', label: 'Hugging Face VITS', lang };
+        return buf.toString('base64');
     } catch (e) {
+        console.error('[tts:tiktok] error:', e.name, e.message.slice(0, 80));
         return null;
+    } finally {
+        clearTimeout(timer);
     }
+}
+
+async function tiktokTts(text, lang) {
+    const chunks = chunkTtsText(text);
+    if (chunks.length === 0) return null;
+    const segments = [];
+    for (const c of chunks) {
+        const b64 = await tiktokSpeak(c);
+        if (!b64) return null;
+        segments.push({ audioBase64: b64 });
+    }
+    return { segments, contentType: 'audio/mpeg', provider: 'tiktok', label: 'TikTok TTS (Mieki Zawashiro)', lang, voice: TIKTOK_TTS_VOICE };
 }
 
 async function googleTts(text, lang) {
@@ -496,10 +516,10 @@ app.post('/api/tts', async (req, res) => {
         if (!text) return res.status(400).json({ error: 'Teks kosong.' });
 
         const lang = req.body?.lang || detectTtsLang(text);
-        const cacheKey = 'v2|' + lang + '|' + text;
+        const cacheKey = 'v4|' + lang + '|' + text;
         if (ttsCache.has(cacheKey)) return res.json(ttsCache.get(cacheKey));
 
-        let out = await hfTts(text, lang);
+        let out = await tiktokTts(text, lang);
         if (!out) out = await googleTts(text, lang);
         if (!out) return res.status(502).json({ error: 'Semua model TTS gagal. Coba lagi ya.' });
 
