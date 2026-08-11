@@ -422,7 +422,7 @@ const TTS_TL = { ind: 'id', eng: 'en', jpn: 'ja' };
 
 const TIKTOK_TTS_URL = process.env.TIKTOK_TTS_URL || 'https://tiktok-tts.weilnet.workers.dev/api/generation';
 const TIKTOK_TTS_URL_OFFICIAL = process.env.TIKTOK_TTS_URL_OFFICIAL || 'https://api16-normal-c-useast1a.tiktokv.com/media/api/text/speech/invoke/';
-const TIKTOK_TTS_VOICE = process.env.TIKTOK_TTS_VOICE || 'jp_006';
+const TIKTOK_TTS_VOICE = process.env.TIKTOK_TTS_VOICE || 'jp_001';
 const TIKTOK_TTS_TIMEOUT = Number(process.env.TIKTOK_TTS_TIMEOUT) || 8000;
 
 function detectTtsLang(text) {
@@ -558,7 +558,7 @@ async function tiktokTts(text, lang) {
         if (!b64) return null;
         segments.push({ audioBase64: b64 });
     }
-    return { segments, contentType: 'audio/mpeg', provider: 'tiktok', label: 'TikTok TTS (Mieki Zawashiro)', lang, voice: TIKTOK_TTS_VOICE };
+    return { segments, contentType: 'audio/mpeg', provider: 'tiktok', label: 'TikTok TTS (Miho jp_001)', lang, voice: TIKTOK_TTS_VOICE };
 }
 
 async function googleTts(text, lang) {
