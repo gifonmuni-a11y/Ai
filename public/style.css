@@ -467,4 +467,4 @@ textarea.modal-input { resize: none; font-family: inherit; }
 .sticker-item { width: 100%; border-radius: 12px; cursor: pointer; transition: transform 0.15s ease; background: rgba(255,255,255,0.04); pointer-events: auto; }
 .sticker-item:hover { transform: scale(1.08); }
 .chat-sticker { pointer-events: auto; }
-em { font-style: italic; color: #e2e8f0; }
+em { font-style: italic; color: #f87171; }
