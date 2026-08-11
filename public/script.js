@@ -15,6 +15,7 @@ let lastUserText = '';
 let lastUserImage = null;
 let isStreaming = false;
 let autospeak = localStorage.getItem('senka_autospeak') === '1';
+let speakMode = localStorage.getItem('senka_speakmode') === 'ind' ? 'ind' : 'jpn';
 let visionAuto = localStorage.getItem('senka_visionauto') !== '0';
 let recognition = null;
 let listening = false;
@@ -598,11 +599,27 @@ function openSettings() {
     document.getElementById('panggilan-input').value = panggilan;
     document.getElementById('autospeak-input').checked = autospeak;
     document.getElementById('visionauto-input').checked = visionAuto;
+    document.getElementById('speak-jp-input').checked = speakMode === 'jpn';
+    document.getElementById('speak-id-input').checked = speakMode === 'ind';
     document.getElementById('signout-block').style.display = supabaseEnabled ? 'block' : 'none';
     renderModelPicker();
     document.getElementById('settings-modal').style.display = 'flex';
 }
 function closeSettings() { document.getElementById('settings-modal').style.display = 'none'; }
+
+function setSpeakLang(wantJp) {
+    speakMode = wantJp ? 'jpn' : 'ind';
+    document.getElementById('speak-jp-input').checked = speakMode === 'jpn';
+    document.getElementById('speak-id-input').checked = speakMode === 'ind';
+    localStorage.setItem('senka_speakmode', speakMode);
+}
+function updateSpeakToggles() {
+    const jp = document.getElementById('speak-jp-input').checked;
+    const id = document.getElementById('speak-id-input').checked;
+    if (jp && !id) return setSpeakLang(true);
+    if (id && !jp) return setSpeakLang(false);
+    setSpeakLang(true);
+}
 function openImageModal() { document.getElementById('image-modal').style.display = 'flex'; setTimeout(() => document.getElementById('image-prompt').focus(), 100); }
 function closeImageModal() { document.getElementById('image-modal').style.display = 'none'; }
 function openExport() { document.getElementById('export-modal').style.display = 'flex'; }
@@ -646,6 +663,7 @@ function saveSettings() {
     localStorage.setItem('senka_autospeak', autospeak ? '1' : '0');
     visionAuto = document.getElementById('visionauto-input').checked;
     localStorage.setItem('senka_visionauto', visionAuto ? '1' : '0');
+    updateSpeakToggles();
     if (modelKey) {
         localStorage.setItem('senka_model', modelKey);
     }
@@ -999,16 +1017,33 @@ function addMsgActions(bubble, role) {
     return;
 }
 
-function speak(text) {
-    if (!('speechSynthesis' in window)) return;
-    speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text.replace(/[*_#`]/g, ''));
-    u.lang = 'id-ID';
-    const voices = speechSynthesis.getVoices();
-    const idv = voices.find(v => v.lang && v.lang.toLowerCase().startsWith('id'));
-    if (idv) u.voice = idv;
-    u.rate = 1.05;
-    speechSynthesis.speak(u);
+let senkaAudio = null;
+function stopSenkaAudio() { if (senkaAudio) { try { senkaAudio.pause(); } catch (e) { } senkaAudio = null; } }
+
+async function speak(text) {
+    if (senkaAudio) stopSenkaAudio();
+    try {
+        const r = await fetch('/api/tts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, mode: speakMode })
+        });
+        const d = await r.json();
+        if (!r.ok || !d.segments || d.segments.length === 0) return;
+        for (const seg of d.segments) {
+            const blob = base64ToBlob(seg.audioBase64, d.contentType || 'audio/mpeg');
+            const url = URL.createObjectURL(blob);
+            const audio = new Audio(url);
+            senkaAudio = audio;
+            await new Promise((res, rej) => {
+                audio.onended = () => { URL.revokeObjectURL(url); res(); };
+                audio.onerror = () => { URL.revokeObjectURL(url); rej(new Error('audio rusak')); };
+                audio.play().catch(() => { URL.revokeObjectURL(url); rej(new Error('play gagal')); });
+            });
+        }
+    } catch (e) {
+        // teks tetap tampil di chat; suara hanyalah bonus
+    }
 }
 
 async function getMicStatus() {
@@ -1255,7 +1290,7 @@ async function speakCallText(text) {
         const r = await fetch('/api/tts', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text })
+            body: JSON.stringify({ text, mode: speakMode })
         });
         const d = await r.json();
         if (!r.ok || !d.segments || d.segments.length === 0) throw new Error(d.error || 'TTS gagal');

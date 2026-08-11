@@ -3,6 +3,8 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 import multer from 'multer';
+import crypto from 'crypto';
+import WebSocket from 'ws';
 
 dotenv.config();
 const app = express();
@@ -426,7 +428,6 @@ function cacheSet(map, key, value, max = 600) {
     map.set(key, value);
 }
 const EN_WORDS = /\b(the|you|your|i|and|to|of|a|is|it|we|they|me|my|hello|hi|hey|thanks|thank|sorry|love|okay|ok|yes|no|please|really|right|well|so|but|what|how|why|don't|im|i'm|be|are|was|were|have|has|with|for|that|this|do|did|not|can|just)\b/gi;
-const TTS_TL = { ind: 'id', eng: 'en', jpn: 'ja' };
 
 const TIKTOK_TTS_URL = process.env.TIKTOK_TTS_URL || 'https://tiktok-tts.weilnet.workers.dev/api/generation';
 const TIKTOK_TTS_URL_OFFICIAL = process.env.TIKTOK_TTS_URL_OFFICIAL || 'https://api16-normal-c-useast1a.tiktokv.com/media/api/text/speech/invoke/';
@@ -569,47 +570,118 @@ async function tiktokTts(text, lang) {
     return { segments, contentType: 'audio/mpeg', provider: 'tiktok', label: 'TikTok TTS (Miho jp_001)', lang, voice: TIKTOK_TTS_VOICE };
 }
 
-async function googleTts(text, lang) {
-    const tl = TTS_TL[lang] || 'id';
-    const chunks = chunkTtsText(text);
+const EDGE_WS_URL = 'wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4&ConnectionId=';
+const EDGE_VOICES = { jpn: 'ja-JP-NanamiNeural', ind: 'id-ID-GadisNeural', eng: 'en-US-JennyNeural' };
+const EDGE_VERSION = '1-143.0.3650.75';
+const EDGE_TRUSTED = '6A5AA1D4EAFF4E9FB37E23D68491D6F4';
+const EDGE_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0',
+    'Accept-Encoding': 'gzip, deflate, br, zstd',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Pragma': 'no-cache',
+    'Cache-Control': 'no-cache',
+    'Origin': 'chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold'
+};
+
+function edgeSecMsGec() {
+    const ticks = BigInt(Math.floor(Date.now() / 1000)) + 11644473600n;
+    const floored = ticks - (ticks % 300n);
+    const ns = floored * 10000000n;
+    return crypto.createHash('sha256').update(ns.toString() + EDGE_TRUSTED, 'ascii').digest('hex').toUpperCase();
+}
+
+function edgeEscape(text) {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+async function edgeTtsRequest(text, lang) {
+    const voice = EDGE_VOICES[lang] || EDGE_VOICES.ind;
+    const connId = crypto.randomUUID();
+    const muid = crypto.randomBytes(16).toString('hex').toUpperCase();
+    const url = EDGE_WS_URL + connId +
+        '&Sec-MS-GEC-Version=' + EDGE_VERSION +
+        '&Sec-MS-GEC=' + encodeURIComponent(edgeSecMsGec());
+    return new Promise((resolve) => {
+        const chunks = [];
+        const now = () => new Date(Date.now()).toISOString().replace(/\.\d{3}Z$/, 'Z') + 'Z';
+        let ws = null;
+        try {
+            ws = new WebSocket(url, {
+                perMessageDeflate: true,
+                headers: Object.assign({}, EDGE_HEADERS, { Cookie: 'muid=' + muid + ';' })
+            });
+        } catch (e) {
+            return resolve(null);
+        }
+        const timeout = setTimeout(() => { try { ws.close(); } catch (e) { } }, 25000);
+        ws.on('open', () => {
+            try {
+                ws.send(now() + '\r\nContent-Type: application/json; charset=utf-8\r\nPath: speech.config\r\n\r\n{"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"false","wordBoundaryEnabled":"true"},"outputFormat":"audio-24khz-48kbitrate-mono-mp3"}}}}');
+                const ssml = "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='" + voice.split('-').slice(0, 2).join('-') +
+                    "'><voice name='" + voice + "'><prosody pitch='+0Hz' rate='+5%' volume='+0%'>" + edgeEscape(text) + '</prosody></voice></speak>';
+                ws.send('X-RequestId:' + connId + '\r\nContent-Type: application/ssml+xml\r\nX-Timestamp:' + now() + '\r\nPath: ssml\r\n\r\n' + ssml);
+            } catch (e) {
+                clearTimeout(timeout);
+                try { ws.close(); } catch (x) { }
+                resolve(null);
+            }
+        });
+        ws.on('message', (data, isBinary) => {
+            if (!isBinary) {
+                if (data.toString('utf8').includes('Path: turn.end')) {
+                    clearTimeout(timeout);
+                    try { ws.close(); } catch (e) { }
+                }
+            } else {
+                chunks.push(data);
+            }
+        });
+        ws.on('error', () => { });
+        ws.on('close', () => {
+            clearTimeout(timeout);
+            if (chunks.length === 0) return resolve(null);
+            const buf = Buffer.concat(chunks);
+            resolve(buf.length > 1000 ? buf : null);
+        });
+    });
+}
+
+async function edgeTts(text, lang) {
+    const chunks = chunkTtsText(text, 300);
     const segments = [];
     for (const c of chunks) {
-        try {
-            const r = await fetch(`https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=${tl}&q=${encodeURIComponent(c)}`, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-            });
-            if (!r.ok) return null;
-            const buf = Buffer.from(await r.arrayBuffer());
-            if (buf.length < 1000) return null;
-            segments.push({ audioBase64: buf.toString('base64') });
-        } catch (e) {
-            return null;
-        }
+        const buf = await edgeTtsRequest(c, lang);
+        if (!buf) return null;
+        segments.push({ audioBase64: buf.toString('base64') });
     }
-    if (segments.length === 0) return null;
-    return { segments, contentType: 'audio/mpeg', provider: 'google', label: 'Google TTS', lang };
+    return { segments, contentType: 'audio/mpeg', provider: 'edge', label: 'Edge TTS (wanita Microsoft)', voice: EDGE_VOICES[lang] || EDGE_VOICES.ind, lang };
 }
 
 app.post('/api/tts', async (req, res) => {
     try {
         const rawText = String(req.body?.text || '').trim().slice(0, 500);
         if (!rawText) return res.status(400).json({ error: 'Teks kosong.' });
+        const mode = req.body?.mode === 'ind' ? 'ind' : 'jpn';
 
         let text = rawText;
-        let lang = req.body?.lang || detectTtsLang(text);
-        if (lang !== 'jpn') {
+        let lang = detectTtsLang(text);
+        if (mode === 'ind') {
+            if (lang !== 'jpn') text = addIdExpressions(text);
+        } else if (lang !== 'jpn') {
             const jp = await translateToJapanese(text);
             if (jp && jp !== text) {
                 text = jp;
-                lang = detectTtsLang(text) || 'jpn';
+                lang = 'jpn';
+            } else {
+                text = addIdExpressions(text);
             }
         }
 
-        const cacheKey = 'v5|' + lang + '|' + text;
+        const cacheKey = 'v6|' + mode + '|' + lang + '|' + text;
         if (ttsCache.has(cacheKey)) return res.json(ttsCache.get(cacheKey));
 
         let out = await tiktokTts(text, lang);
-        if (!out) out = await googleTts(text, lang);
+        if (!out) out = await edgeTts(text, lang);
         if (!out) return res.status(502).json({ error: 'Semua model TTS gagal. Coba lagi ya.' });
 
         const payload = { ...out, segments: out.segments, audioBase64: out.segments[0].audioBase64 };
@@ -725,10 +797,25 @@ async function translateToEnglish(prompt) {
     }
 }
 
+function addIdExpressions(text) {
+    let t = String(text).trim().replace(/\s+/g, ' ');
+    if (!t) return t;
+    t = t.replace(/\b(halo|hallo|hai|hei|hey)\b/gi, 'halo~ hehe');
+    t = t.replace(/\b(selamat pagi)\b/gi, 'selamat pagi~ semangat ya');
+    t = t.replace(/\b(selamat siang)\b/gi, 'selamat siang~ udah makan belum?');
+    t = t.replace(/\b(selamat malam)\b/gi, 'selamat malam~ mimpi indah ya');
+    t = t.replace(/\b(terima kasih|makasih)\b/gi, 'terima kasih ya~');
+    t = t.replace(/!+/g, '!~');
+    if (!/[?!~。]$/.test(t) && t.length > 3) {
+        t += (t.length % 7 === 0 ? ' hehe' : '~');
+    }
+    return t.replace(/\s+/g, ' ').trim();
+}
+
 async function translateToJapanese(text) {
     if (translateCache.has(text)) return translateCache.get(text) || null;
     const prompts = [
-        { role: 'system', content: 'You are a translator for an anime-style Japanese voice (cute waifu tone). Translate the user text into natural, fluent, spoken Japanese (spoken style like an anime girl, keep it short and warm, under 300 characters). Use kanji/kana normally. Reply with ONLY the Japanese translation, no quotes, no romaji, no explanations.' },
+        { role: 'system', content: 'You are a translator for an anime-style Japanese girl voice (waifu, cute, warm). Translate the user text into natural, fluent, expressive spoken Japanese — like an anime girl talking, NEVER stiff or literal. Add natural interjections and sentence-ending particles matching the mood: greetings (こんにちは〜 こんばんは〜), playful (アラアラ〜 ねぇ〜 ふふっ えへへ〜), energetic (わーい がんばるよ), soft warm endings (ね よ だよ 〜). Keep it under 300 characters. Reply with ONLY the Japanese translation, no quotes, no romaji, no explanations.' },
         { role: 'user', content: text }
     ];
     const attempts = [];

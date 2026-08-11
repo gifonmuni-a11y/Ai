@@ -252,6 +252,10 @@ textarea.modal-input { resize: none; font-family: inherit; }
 .settings-block { margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(96, 165, 250, 0.14); }
 .settings-block .modal-label { margin-top: 0; }
 
+.speak-row { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.speak-row .switch { margin-top: 0; flex-shrink: 0; }
+.speak-label { color: #e0f2fe; font-size: 14px; }
+
 .model-picker { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; padding-right: 4px; scroll-behavior: smooth; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
 .model-picker::-webkit-scrollbar { width: 4px; }
 .model-picker::-webkit-scrollbar-thumb { background: rgba(56, 189, 248, 0.4); border-radius: 6px; }

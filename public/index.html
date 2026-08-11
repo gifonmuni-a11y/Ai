@@ -102,6 +102,24 @@
                 <p class="modal-hint">Kalau ON, semua balasan teks dari Senka otomatis dibacakan pakai suara. Kalau OFF, tidak ada suara sama sekali.</p>
             </div>
             <div class="settings-block">
+                <label class="modal-label">Suara bicara Senka</label>
+                <div class="speak-row">
+                    <label class="switch">
+                        <input type="checkbox" id="speak-jp-input" onchange="updateSpeakToggles()">
+                        <span class="slider"></span>
+                    </label>
+                    <span class="speak-label">Bahasa Jepang (khas anime)</span>
+                </div>
+                <div class="speak-row">
+                    <label class="switch">
+                        <input type="checkbox" id="speak-id-input" onchange="updateSpeakToggles()">
+                        <span class="slider"></span>
+                    </label>
+                    <span class="speak-label">Bahasa Indonesia (ramah)</span>
+                </div>
+                <p class="modal-hint">Pilih salah satu bahasa bicara Senka. Di mode Jepang, teks di chat tetap Indonesia kok — cuma suaranya yang Jepang, dengan ekspresi anime kayak "konnichiwa~ ara ara~".</p>
+            </div>
+            <div class="settings-block">
                 <label class="modal-label" for="visionauto-input">Baca gambar otomatis</label>
                 <label class="switch">
                     <input type="checkbox" id="visionauto-input">
