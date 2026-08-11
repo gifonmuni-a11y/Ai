@@ -48,18 +48,12 @@ function clientFor(req) {
 const PROVIDERS = {
     openrouter: { base: "https://openrouter.ai/api/v1", env: "OPENROUTER_API_KEY" },
     groq:       { base: "https://api.groq.com/openai/v1", env: "GROQ_API_KEY" },
-    janitor:    { base: process.env.JANITOR_BASE || "https://api.janitorai.com/unlimited/v1", env: "JANITOR_API_KEY", always: true },
-    spicy:      { base: process.env.SPICY_BASE || "https://api.spicychat.ai/v1", env: "SPICY_API_KEY", always: true },
-    chub:       { base: process.env.CHUB_BASE || "https://venus.chub.ai/v1", env: "CHUB_API_KEY", always: true },
-    perchance:  { custom: "perchance", always: true }
+    horde:      { custom: "horde", always: true }
 };
 
 const MODELS = [
-    { key: "groq-llama33",   label: "Llama 3.3 70B (Groq, cepat)",          provider: "groq",       id: "llama-3.3-70b-versatile" },
-    { key: "janitor-llm",    label: "Janitor AI",                           provider: "janitor",    id: process.env.JANITOR_MODEL || "janitorllm" },
-    { key: "spicy-ai",       label: "SpicyChat AI",                         provider: "spicy",      id: process.env.SPICY_MODEL || "spicy-1.5" },
-    { key: "chub-ai",        label: "Chub AI",                              provider: "chub",       id: process.env.CHUB_MODEL || "openai/gpt-4o-mini" },
-    { key: "perchance-ai",   label: "Perchance AI Character Chat",          provider: "perchance",  id: process.env.PERCHANCE_MODEL || "ai-character-chat" },
+    { key: "groq-llama33",   label: "Llama 3.3 70B (Groq)",                 provider: "groq",       id: "llama-3.3-70b-versatile" },
+    { key: "horde-rp",       label: "AI Horde (gratis)",                      provider: "horde",      id: "any" },
     { key: "groq-oss120b",   label: "GPT-OSS 120B (Groq)",                  provider: "groq",       id: "openai/gpt-oss-120b" },
     { key: "or-gptoss",      label: "GPT-OSS 20B (OpenRouter)",              provider: "openrouter", id: "openai/gpt-oss-20b:free" },
     { key: "or-gemma",       label: "Gemma 4 31B (OpenRouter)",              provider: "openrouter", id: "google/gemma-4-31b-it:free" },
@@ -271,57 +265,98 @@ async function prepareMessagesForAI(messages, isVision) {
     return clean;
 }
 
-async function callPerchance(messages, modelId, temperature) {
+async function hordeSleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function pickHordeModel() {
+    try {
+        const r = await fetch('https://aihorde.net/api/v2/status/models?type=text', { headers: { 'Client-Agent': 'SenkaAI:1.0:website' } });
+        if (!r.ok) return null;
+        const list = await r.json();
+        const up = (list || []).filter(m => (m.count || 0) > 0);
+        if (!up.length) return null;
+        const PREF = ['stheno', 'uncensored', 'macaroni', 'maid', 'stheno', 'lewd', 'nsfw', 'blow'];
+        const scored = up.map(m => ({ m, score: PREF.findIndex(p => (m.name || '').toLowerCase().includes(p)) + 1 }));
+        scored.sort((a, b) => (b.score || 0) - (a.score || 0) || (b.m.count || 0) - (a.m.count || 0));
+        return scored[0].m.name;
+    } catch (e) {
+        return null;
+    }
+}
+
+async function callHorde(messages, modelId, temperature) {
+    const apiKey = process.env.AIHORDE_API_KEY || null;
     const system = messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n').slice(0, 6000);
     const rest = messages.filter(m => m.role !== 'system');
-    const last = rest[rest.length - 1] || { role: 'user', content: '' };
-    const history = rest.slice(0, -1);
     const toText = (c) => {
         if (typeof c === 'string') return c;
         return (c || []).filter(x => x.type === 'text').map(x => x.text).join(' ').trim();
     };
-    const body = {
-        scenario: system,
-        character: '',
-        model: modelId || 'ai-character-chat',
-        text: toText(last.content),
-        history: history.map(m => toText(m.content)).filter(Boolean)
-    };
-    const r = await fetch('https://ai-character-chat.perchance.org/api/generate', {
+    const parts = [system];
+    for (let i = 0; i < rest.length; i++) {
+        const m = rest[i];
+        const t = toText(m.content);
+        if (!t) continue;
+        parts.push((m.role === 'user' ? (i === rest.length - 1 ? 'User' : 'User') : 'Senka') + ': ' + t);
+    }
+    parts.push('Senka:');
+    const prompt = parts.join('\n').slice(0, 7500);
+
+    const model = await pickHordeModel();
+    const genRes = await fetch('https://aihorde.net/api/v2/generate/text/async', {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
+        headers: Object.assign(
+            { "Content-Type": "application/json", "Client-Agent": "SenkaAI:1.0:website" },
+            apiKey ? { "apikey": apiKey } : {}
+        ),
+        body: JSON.stringify({
+            prompt,
+            params: {
+                temperature: temperature !== undefined ? temperature : 0.88,
+                top_p: 0.95,
+                max_length: 500,
+                rep_pen: 1.1,
+                top_k: 100
+            },
+            models: model ? [model] : [],
+            workers: []
+        })
     });
-    if (!r.ok) {
+    const genData = await genRes.json().catch(() => ({}));
+    if (!genRes.ok || !genData.id) {
         return {
             ok: false,
-            status: r.status,
-            json: async () => ({ error: { message: 'Perchance menolak (HTTP ' + r.status + ')' } })
+            status: genRes.status || 502,
+            json: async () => ({ error: { message: 'AI Horde tolak: ' + JSON.stringify(genData).slice(0, 300) } })
         };
     }
-    const data = await r.json().catch(() => ({}));
-    const msgs = Array.isArray(data?.messages) ? data.messages : null;
-    let content = '';
-    if (msgs && msgs.length) {
-        const lastMsg = msgs[msgs.length - 1];
-        content = typeof lastMsg === 'string' ? lastMsg : (lastMsg?.content || '');
-        if (typeof content === 'object' && content?.text) content = content.text;
+    const t0 = Date.now();
+    let st = null;
+    while (Date.now() - t0 < 90000) {
+        await hordeSleep(2500);
+        const sr = await fetch('https://aihorde.net/api/v2/generate/text/status/' + genData.id, { headers: { 'Client-Agent': 'SenkaAI:1.0:website' } });
+        st = await sr.json().catch(() => ({}));
+        if (st.done || st.faulted) break;
     }
-    if (!content && typeof data?.text === 'string') content = data.text;
-    if (!content && typeof data?.html === 'string') content = data.html.replace(/<[^>]+>/g, '').trim();
+    const content = (st?.generations && st.generations[0]?.text || '').replace(/^Senka:\s*/i, '').trim();
+    if (!content) {
+        return {
+            ok: false,
+            status: 502,
+            json: async () => ({ error: { message: (st && st.faulted) || 'AI Horde kosong atau antrean terlalu lama. Model terpakai: ' + (model || 'any') } })
+        };
+    }
     return {
-        ok: !!content,
-        status: content ? 200 : 502,
-        json: async () => content
-            ? { choices: [{ message: { role: 'assistant', content } }] }
-            : { error: { message: 'Perchance balas kosong atau format berubah.' } }
+        ok: true,
+        status: 200,
+        label: 'AI Horde (' + model + ')',
+        json: async () => ({ choices: [{ message: { role: 'assistant', content } }] })
     };
 }
 
 async function callProvider(provider, messages, modelId, stream = false, temperature = 0.88) {
     const p = PROVIDERS[provider];
     if (!p) return null;
-    if (p.custom) return callPerchance(messages, modelId, temperature);
+    if (p.custom === 'horde') return callHorde(messages, modelId, temperature);
     if (!process.env[p.env]) return null;
     return await fetch(`${p.base}/chat/completions`, {
         method: "POST",

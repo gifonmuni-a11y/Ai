@@ -54,6 +54,7 @@ document.addEventListener('pointerdown', e => {
 
 window.onload = async () => {
     initSakura();
+    document.getElementById('sakura-input').checked = window.sakuraRunning;
     document.getElementById('panggilan-input').value = panggilan;
     document.getElementById('autospeak-input').checked = autospeak;
 
@@ -1979,6 +1980,9 @@ function initSakura() {
     const ctx = canvas.getContext('2d');
     let petals = [];
     let w, h, dpr;
+    let sakuraRAF = null;
+    window.sakuraRunning = localStorage.getItem('senka_sakura') !== 'off';
+    canvas.style.display = window.sakuraRunning ? 'block' : 'none';
     const COLORS = ['#ffd1dc', '#ffb7c5', '#ffc1cc', '#f9c8e2', '#ff9ec1'];
 
     function resize() {
@@ -2040,6 +2044,7 @@ function initSakura() {
 
     let last = performance.now();
     function tick(now) {
+        if (!window.sakuraRunning) return;
         const dt = Math.min((now - last) / 16.6667, 3);
         last = now;
         ctx.clearRect(0, 0, w, h);
@@ -2054,10 +2059,20 @@ function initSakura() {
             }
             drawPetal(p);
         }
-        requestAnimationFrame(tick);
+        sakuraRAF = requestAnimationFrame(tick);
     }
+
+    window.setSakura = function (on) {
+        window.sakuraRunning = !!on;
+        localStorage.setItem('senka_sakura', window.sakuraRunning ? 'on' : 'off');
+        canvas.style.display = window.sakuraRunning ? 'block' : 'none';
+        if (window.sakuraRunning && !sakuraRAF) {
+            last = performance.now();
+            sakuraRAF = requestAnimationFrame(tick);
+        }
+    };
 
     window.addEventListener('resize', resize);
     resize();
-    requestAnimationFrame(tick);
+    if (window.sakuraRunning) sakuraRAF = requestAnimationFrame(tick);
 }
