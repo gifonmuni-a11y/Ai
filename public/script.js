@@ -16,6 +16,7 @@ let lastUserImage = null;
 let isStreaming = false;
 let autospeak = localStorage.getItem('senka_autospeak') === '1';
 let speakMode = localStorage.getItem('senka_speakmode') === 'ind' ? 'ind' : 'jpn';
+let userGender = localStorage.getItem('senka_gender') === 'perempuan' ? 'perempuan' : 'laki';
 let visionAuto = localStorage.getItem('senka_visionauto') !== '0';
 let recognition = null;
 let listening = false;
@@ -601,6 +602,7 @@ function openSettings() {
     document.getElementById('visionauto-input').checked = visionAuto;
     document.getElementById('speak-jp-input').checked = speakMode === 'jpn';
     document.getElementById('speak-id-input').checked = speakMode === 'ind';
+    document.getElementById('gender-' + userGender + '-input').checked = true;
     document.getElementById('signout-block').style.display = supabaseEnabled ? 'block' : 'none';
     renderModelPicker();
     document.getElementById('settings-modal').style.display = 'flex';
@@ -671,6 +673,8 @@ function saveSettings() {
     localStorage.setItem('senka_visionauto', visionAuto ? '1' : '0');
     speakMode = document.getElementById('speak-id-input').checked && !document.getElementById('speak-jp-input').checked ? 'ind' : 'jpn';
     localStorage.setItem('senka_speakmode', speakMode);
+    userGender = document.getElementById('gender-perempuan-input').checked ? 'perempuan' : 'laki';
+    localStorage.setItem('senka_gender', userGender);
     if (modelKey) {
         localStorage.setItem('senka_model', modelKey);
     }
@@ -1257,7 +1261,7 @@ async function sendCallMessage(text) {
         const response = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages: [...memoryList], modelKey, panggilan, call: true })
+            body: JSON.stringify({ messages: [...memoryList], modelKey, panggilan, call: true, gender: userGender })
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
@@ -1611,7 +1615,7 @@ async function sendToSenka() {
         const response = await fetch('/api/chat/stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages: payloadMessages, modelKey, panggilan, useVision: visionAuto })
+            body: JSON.stringify({ messages: payloadMessages, modelKey, panggilan, useVision: visionAuto, gender: userGender })
         });
 
         if (!response.ok) {
