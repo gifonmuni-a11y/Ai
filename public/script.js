@@ -613,12 +613,18 @@ function setSpeakLang(wantJp) {
     document.getElementById('speak-id-input').checked = speakMode === 'ind';
     localStorage.setItem('senka_speakmode', speakMode);
 }
-function updateSpeakToggles() {
-    const jp = document.getElementById('speak-jp-input').checked;
-    const id = document.getElementById('speak-id-input').checked;
-    if (jp && !id) return setSpeakLang(true);
-    if (id && !jp) return setSpeakLang(false);
-    setSpeakLang(true);
+function updateSpeakToggles(ev) {
+    const t = ev && ev.target ? ev.target.id : '';
+    const jpE = document.getElementById('speak-jp-input');
+    const idE = document.getElementById('speak-id-input');
+    if (t === 'speak-id-input') {
+        if (idE.checked) { jpE.checked = false; speakMode = 'ind'; }
+        else { jpE.checked = true; speakMode = 'jpn'; }
+    } else if (t === 'speak-jp-input') {
+        if (jpE.checked) { idE.checked = false; speakMode = 'jpn'; }
+        else { idE.checked = true; speakMode = 'ind'; }
+    }
+    if (speakMode) localStorage.setItem('senka_speakmode', speakMode);
 }
 function openImageModal() { document.getElementById('image-modal').style.display = 'flex'; setTimeout(() => document.getElementById('image-prompt').focus(), 100); }
 function closeImageModal() { document.getElementById('image-modal').style.display = 'none'; }
@@ -663,7 +669,8 @@ function saveSettings() {
     localStorage.setItem('senka_autospeak', autospeak ? '1' : '0');
     visionAuto = document.getElementById('visionauto-input').checked;
     localStorage.setItem('senka_visionauto', visionAuto ? '1' : '0');
-    updateSpeakToggles();
+    speakMode = document.getElementById('speak-id-input').checked && !document.getElementById('speak-jp-input').checked ? 'ind' : 'jpn';
+    localStorage.setItem('senka_speakmode', speakMode);
     if (modelKey) {
         localStorage.setItem('senka_model', modelKey);
     }

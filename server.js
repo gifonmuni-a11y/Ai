@@ -432,7 +432,7 @@ const EN_WORDS = /\b(the|you|your|i|and|to|of|a|is|it|we|they|me|my|hello|hi|hey
 const TIKTOK_TTS_URL = process.env.TIKTOK_TTS_URL || 'https://tiktok-tts.weilnet.workers.dev/api/generation';
 const TIKTOK_TTS_URL_OFFICIAL = process.env.TIKTOK_TTS_URL_OFFICIAL || 'https://api16-normal-c-useast1a.tiktokv.com/media/api/text/speech/invoke/';
 const TIKTOK_TTS_VOICE = process.env.TIKTOK_TTS_VOICE || 'jp_001';
-const TIKTOK_TTS_TIMEOUT = Number(process.env.TIKTOK_TTS_TIMEOUT) || 8000;
+const TIKTOK_TTS_TIMEOUT = Number(process.env.TIKTOK_TTS_TIMEOUT) || 5000;
 
 function detectTtsLang(text) {
     if (/[\u3040-\u30ff\u4e00-\u9faf\uac00-\ud7af]/.test(text)) return 'jpn';
@@ -555,15 +555,26 @@ async function tiktokSpeak(text) {
     }
 }
 
+async function tiktokRace(text) {
+    let b64 = null;
+    const results = await Promise.allSettled([
+        tiktokSpeakJson(text),
+        tiktokSpeak(text)
+    ]);
+    for (const r of results) {
+        if (r.status === 'fulfilled' && r.value) { b64 = r.value; break; }
+    }
+    if (!b64) b64 = await tiktokSpeakJson(text);
+    return b64 || null;
+}
+
 async function tiktokTts(text, lang) {
     const chunks = chunkTtsMicro(text);
     if (chunks.length === 0) return null;
     const segments = [];
     for (let i = 0; i < chunks.length; i++) {
-        if (i > 0) await new Promise(r => setTimeout(r, 500));
-        let b64 = await tiktokSpeakJson(chunks[i]);
-        if (!b64) b64 = await tiktokSpeakJson(chunks[i]);
-        if (!b64) b64 = await tiktokSpeak(chunks[i]);
+        if (i > 0) await new Promise(r => setTimeout(r, 300));
+        const b64 = await tiktokRace(chunks[i]);
         if (!b64) return null;
         segments.push({ audioBase64: b64 });
     }
