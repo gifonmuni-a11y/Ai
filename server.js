@@ -150,6 +150,10 @@ USER IS LEARNING JAPANESE (from zero):
 - If they ask for material (hiragana, katakana, kanji, grammar, vocabulary), make it concise, neat, and clear.
 - Occasionally offer small exercises (translation, arrange sentences, guess words). Reply in Indonesian unless they ask Japanese.
 
+KAWAII JAPANESE FLAIR (for voice charm):
+- Occasionally sprinkle natural Japanese interjections into your spoken replies: "Ara ara~", "Nee~", "Anata", "Moshi moshi", "Aishiteru", "Daisuki", "Oyasumi", "Fufu~", "Umm~", "Hai hai~".
+- Mixing a few Japanese words makes your voice sound cuter and more anime-like. Keep sentences mostly Indonesian, 1-2 Japanese touches per message at most.
+
 FILE CREATION:
 If the user asks for a file, answer with one short sentence first, then write EXACTLY this format (no extra characters):
 ###SENKA_FILE###
@@ -442,6 +446,35 @@ function chunkTtsText(text, max = 185) {
     return segs;
 }
 
+function chunkTtsMicro(text, target = 55) {
+    const src = String(text).replace(/\s+/g, ' ').trim();
+    if (!src) return [];
+    const out = [];
+    let start = 0;
+    while (start < src.length) {
+        if (src.length - start <= target) {
+            const tail = src.slice(start).trim();
+            if (tail) out.push(tail);
+            break;
+        }
+        let cut = -1;
+        const window = src.slice(start, start + target);
+        for (const p of ['?', '!', '.', ',', '。', '！', '？', '~', '～']) {
+            const idx = window.lastIndexOf(p);
+            if (idx > 0) cut = Math.max(cut, idx + 1);
+        }
+        if (cut === -1) {
+            const sp = window.lastIndexOf(' ');
+            if (sp > 0) cut = sp + 1;
+        }
+        if (cut === -1) cut = target;
+        const piece = src.slice(start, start + cut).trim();
+        if (piece) out.push(piece);
+        start += cut;
+    }
+    return out.filter(Boolean);
+}
+
 async function tiktokSpeakJson(text) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIKTOK_TTS_TIMEOUT);
@@ -514,13 +547,14 @@ async function tiktokSpeak(text) {
 }
 
 async function tiktokTts(text, lang) {
-    const chunks = chunkTtsText(text);
+    const chunks = chunkTtsMicro(text);
     if (chunks.length === 0) return null;
     const segments = [];
-    for (const c of chunks) {
-        let b64 = await tiktokSpeakJson(c);
-        if (!b64) b64 = await tiktokSpeakJson(c);
-        if (!b64) b64 = await tiktokSpeak(c);
+    for (let i = 0; i < chunks.length; i++) {
+        if (i > 0) await new Promise(r => setTimeout(r, 500));
+        let b64 = await tiktokSpeakJson(chunks[i]);
+        if (!b64) b64 = await tiktokSpeakJson(chunks[i]);
+        if (!b64) b64 = await tiktokSpeak(chunks[i]);
         if (!b64) return null;
         segments.push({ audioBase64: b64 });
     }
