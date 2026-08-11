@@ -204,7 +204,7 @@ async function prepareMessagesForAI(messages, isVision) {
     return clean;
 }
 
-async function callProvider(provider, messages, modelId, stream = false) {
+async function callProvider(provider, messages, modelId, stream = false, temperature = 0.95) {
     const p = PROVIDERS[provider];
     if (!p || !process.env[p.env]) return null;
     return await fetch(`${p.base}/chat/completions`, {
@@ -216,7 +216,7 @@ async function callProvider(provider, messages, modelId, stream = false) {
         body: JSON.stringify({
             model: modelId,
             messages,
-            temperature: 0.95,
+            temperature,
             max_tokens: 4096,
             stream
         })
@@ -417,6 +417,14 @@ CALL MODE (ACTIVE NOW - STRICTLY ENFORCED):
 }
 
 const ttsCache = new Map();
+const translateCache = new Map();
+function cacheSet(map, key, value, max = 600) {
+    if (map.size >= max) {
+        const oldest = map.keys().next().value;
+        map.delete(oldest);
+    }
+    map.set(key, value);
+}
 const EN_WORDS = /\b(the|you|your|i|and|to|of|a|is|it|we|they|me|my|hello|hi|hey|thanks|thank|sorry|love|okay|ok|yes|no|please|really|right|well|so|but|what|how|why|don't|im|i'm|be|are|was|were|have|has|with|for|that|this|do|did|not|can|just)\b/gi;
 const TTS_TL = { ind: 'id', eng: 'en', jpn: 'ja' };
 
@@ -584,11 +592,20 @@ async function googleTts(text, lang) {
 
 app.post('/api/tts', async (req, res) => {
     try {
-        const text = String(req.body?.text || '').trim().slice(0, 500);
-        if (!text) return res.status(400).json({ error: 'Teks kosong.' });
+        const rawText = String(req.body?.text || '').trim().slice(0, 500);
+        if (!rawText) return res.status(400).json({ error: 'Teks kosong.' });
 
-        const lang = req.body?.lang || detectTtsLang(text);
-        const cacheKey = 'v4|' + lang + '|' + text;
+        let text = rawText;
+        let lang = req.body?.lang || detectTtsLang(text);
+        if (lang !== 'jpn') {
+            const jp = await translateToJapanese(text);
+            if (jp && jp !== text) {
+                text = jp;
+                lang = detectTtsLang(text) || 'jpn';
+            }
+        }
+
+        const cacheKey = 'v5|' + lang + '|' + text;
         if (ttsCache.has(cacheKey)) return res.json(ttsCache.get(cacheKey));
 
         let out = await tiktokTts(text, lang);
@@ -596,7 +613,7 @@ app.post('/api/tts', async (req, res) => {
         if (!out) return res.status(502).json({ error: 'Semua model TTS gagal. Coba lagi ya.' });
 
         const payload = { ...out, segments: out.segments, audioBase64: out.segments[0].audioBase64 };
-        ttsCache.set(cacheKey, payload);
+        cacheSet(ttsCache, cacheKey, payload);
         return res.json(payload);
     } catch (e) {
         res.status(500).json({ error: 'TTS error: ' + (e.message || e) });
@@ -706,6 +723,36 @@ async function translateToEnglish(prompt) {
         console.error('Translate error:', e.message);
         return prompt;
     }
+}
+
+async function translateToJapanese(text) {
+    if (translateCache.has(text)) return translateCache.get(text) || null;
+    const prompts = [
+        { role: 'system', content: 'You are a translator for an anime-style Japanese voice (cute waifu tone). Translate the user text into natural, fluent, spoken Japanese (spoken style like an anime girl, keep it short and warm, under 300 characters). Use kanji/kana normally. Reply with ONLY the Japanese translation, no quotes, no romaji, no explanations.' },
+        { role: 'user', content: text }
+    ];
+    const attempts = [];
+    if (process.env.GROQ_API_KEY) attempts.push(() => callProvider('groq', prompts, 'llama-3.1-8b-instant', false, 0.1));
+    if (process.env.OPENROUTER_API_KEY) attempts.push(() => callProvider('openrouter', prompts, 'openai/gpt-oss-20b:free', false, 0.1));
+    for (const fn of attempts) {
+        try {
+            const r = await fn();
+            if (!r || !r.ok) continue;
+            const data = await r.json();
+            const t = String(data?.choices?.[0]?.message?.content || '').trim()
+                .replace(/^[\s"'"“”「」『』`~]+|[\s"'"“”「」『』`~]+$/g, '');
+            if (!t) continue;
+            if (!/[\u3040-\u30ff\u4e00-\u9faf]/.test(t)) continue;
+            if (/[a-zA-Z]{2,}/.test(t)) continue;
+            cacheSet(translateCache, text, t, 400);
+            return t;
+        } catch (e) {
+            console.error('TranslateJP error:', e.message);
+        }
+    }
+    cacheSet(translateCache, text, null, 400);
+    console.warn('[tts:translate] tidak ada provider tersedia, pakai teks asli');
+    return null;
 }
 
 app.post('/api/video', async (req, res) => {
