@@ -370,7 +370,7 @@ function cleanupDuplicateGreetings() {
 
 async function loadRemoteChat() {
     try {
-        const q = new URLSearchParams({ limit: '25' });
+        const q = new URLSearchParams({ limit: '50' });
         if (cloudSid) q.set('sesiId', cloudSid);
         const r = await fetch('/api/chats?' + q.toString(), { headers: await authHeaders() });
         const d = await r.json().catch(() => ({}));
@@ -385,6 +385,17 @@ async function loadRemoteChat() {
             remoteSave('senka', 'text', greeting, item);
         }
         renderChat();
+        if (!chatHistoryDOM.dataset.scrollWatch) {
+            chatHistoryDOM.dataset.scrollWatch = '1';
+            let last = 0;
+            chatHistoryDOM.addEventListener('scroll', () => {
+                if (!supabaseEnabled || !remoteHasMore || remoteLoading) return;
+                const now = Date.now();
+                if (now - last < 2500 || chatHistoryDOM.scrollTop > 120) return;
+                last = now;
+                loadOlderRemote();
+            });
+        }
     } catch (e) {
         fallbackToLocal();
     }
@@ -839,7 +850,7 @@ function renderChat() {
     } else {
         const STEP = 80;
         if (supabaseEnabled && remoteHasMore) {
-            chatHistoryDOM.appendChild(makeRemoteBtn());
+            chatHistoryDOM.insertBefore(makeRemoteBtn(), chatHistoryDOM.firstChild);
         } else if (memoryList.length > STEP) {
             const hidden = memoryList.length - STEP;
             const btn = document.createElement('button');
@@ -965,7 +976,14 @@ function extractSticker(text) {
 }
 
 function stripStickerTag(text) {
-    return String(text).replace(STICKER_TAG_RE, '').replace(/\[ STIKER SENKA \]\s*/g, '').replace(STICKER_URL_RE, '').trim();
+    return String(text)
+        .replace(STICKER_TAG_RE, '')
+        .replace(/[\[({]?\s*STIKER\s+SENKA\s*[\]})]?/gi, '')
+        .replace(/\[STIKER[^\]]*\]/gi, '')
+        .replace(STICKER_URL_RE, '')
+        .replace(/[\[({]?\s*https?:\/\/[^\s)\]>]+\.webp\s*[\]})]?/gi, '')
+        .replace(/[\s]*[()]/g, '')
+        .trim();
 }
 
 function appendStickerImg(el, url) {
