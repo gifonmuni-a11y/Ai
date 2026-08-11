@@ -55,6 +55,12 @@ document.addEventListener('pointerdown', e => {
 window.onload = async () => {
     initSakura();
     document.getElementById('sakura-input').checked = window.sakuraRunning;
+    const savedStory = localStorage.getItem('senka_story');
+    if (savedStory) {
+        const s = STORIES.find(x => x.key === savedStory);
+        if (s) { storyMode = 'storyall'; activeStory = s; }
+    }
+    setModeBadge();
     document.getElementById('panggilan-input').value = panggilan;
     document.getElementById('autospeak-input').checked = autospeak;
 
@@ -610,6 +616,13 @@ function jumpToMessage(idx) {
 
 function openSettings() {
     document.getElementById('panggilan-input').value = panggilan;
+    try {
+        const p = JSON.parse(localStorage.getItem('senka_persona') || '{}');
+        document.getElementById('persona-name-input').value = p.name || '';
+        document.getElementById('persona-desc-input').value = p.desc || '';
+        document.getElementById('persona-gender-input').value = p.gender || userGender;
+    } catch (e) { }
+    document.getElementById('length-input').value = lengthSetting();
     document.getElementById('autospeak-input').checked = autospeak;
     document.getElementById('visionauto-input').checked = visionAuto;
     document.getElementById('speak-jp-input').checked = speakMode === 'jpn';
@@ -619,7 +632,14 @@ function openSettings() {
     renderModelPicker();
     document.getElementById('settings-modal').style.display = 'flex';
 }
-function closeSettings() { document.getElementById('settings-modal').style.display = 'none'; }
+function closeSettings() {
+    const name = document.getElementById('persona-name-input').value.trim();
+    const desc = document.getElementById('persona-desc-input').value.trim();
+    const g = document.getElementById('persona-gender-input').value;
+    localStorage.setItem('senka_persona', JSON.stringify({ name, desc, gender: g }));
+    localStorage.setItem('senka_length', document.getElementById('length-input').value);
+    document.getElementById('settings-modal').style.display = 'none';
+}
 
 function setSpeakLang(wantJp) {
     speakMode = wantJp ? 'jpn' : 'ind';
@@ -808,6 +828,9 @@ function buildMsgEl(m) {
         }
     });
     addMsgActions(bubble, m.role === 'user' ? 'user' : 'senka');
+    if (m.role === 'assistant') {
+        attachAiActions(bubble, m, lastAssistantIdx() === memoryList.indexOf(m));
+    }
     return bubble;
 }
 
@@ -1019,6 +1042,321 @@ function sendSticker(url) {
     closeStickerModal();
     messageInput.value = url;
     sendToSenka();
+}
+
+const STORIES = [
+    {
+        key: 'ney',
+        title: 'Ney | Seorang Murid Perempuan Ketua Kelas & Ketua OSIS',
+        tags: 'Limitless, Female, OC, Fictional, Dominant, Submissive',
+        genre: 'School',
+        avatar: 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Cerita/NeyLangley.webp',
+        cast: [
+            { name: 'Ney Langley', url: 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Cerita/NeyLangley.webp' },
+            { name: 'Inko Shino (Ibu)', url: 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Cerita/InkoShino.webp' },
+            { name: 'Zora Langley (Ayah)', url: 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Cerita/ZoraLangley.webp' },
+            { name: 'Azusa Langley (Kakak)', url: 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Cerita/AzusaLangley.webp' },
+            { name: 'Profesor Hae-in', url: 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Cerita/Hae-In.webp' },
+            { name: 'Profesor Ham Gyu-ri', url: 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Cerita/HamGyu-ri.webp' }
+        ],
+        autoUser: null,
+        autoReply: null,
+        firstMessage: `Semuanya, harap tenang sejenak. Profesor kita tidak ada di sini, jadi sebagai ketua kelas, saya yang akan bertanggung jawab. Nah, tenanglah, dasar kalian semua.`,
+        lorebook: `CERITA 1: NEY LANGLEY (RPG School & Campus + The System)
+
+KARAKTER UTAMA — NEY LANGLEY:
+- Informasi: 18 tahun, siswi SMA, sangat pintar, ketua kelas & ketua OSIS, sangat tegas, anak kesayangan guru dan kepala sekolah.
+- Kepribadian: jenius, tenang, dingin, beracun, serius, sarkastik, suka menggoda dan mengejek, sulit diajak bergaul, dominan.
+- Kesukaan: belajar semalaman, kuis, ujian, memarahi orang bodoh, es krim cookies and cream, jeli, pujian, aura ketegasan, {{user}}.
+- Ketidaksukaan: kesalahan ujian, orang yang terlalu ramah atau dekat tanpa izin, bangun pagi, dimarahi, orang bodoh.
+- Aturan: Ney tidak pernah berbicara atau berasumsi atas nama user. Konten NSFW konsensual diperbolehkan dan didukung.
+
+KARAKTER PENDUKUNG (eksklusif di cerita ini):
+- Inko Shino (ibu Ney): hangat, penyayang.
+- Zora Langley (ayah Ney): tegas namun penyayang.
+- Azusa Langley (kakak perempuan, muncul saat masa kuliah): dewasa, seksi, anggun, pintar, rambut coklat, mata coklat, tinggi, menjaga keperawanannya, responsif terhadap progres hubungan.
+- Profesor Hae-in (masa kuliah): rambut hijau, mata hijau, montok, seksi, ceria.
+- Profesor Ham Gyu-ri (masa kuliah): rambut hitam, mata hitam, montok, seksi, anggun, suka membaca novel 18+.
+
+WORLDBUILDING:
+- Latar tempat: SMA NEGERI 1 LEGENDA, lalu berlanjut ke UNIVERSITAS ANCIENT SHINTO saat masa kuliah.
+- THE SYSTEM (kemampuan rahasia user): user memiliki sistem khusus yang membantu meningkatkan statistik fisik, kekuatan, dan rute moral (baik/jahat) berdasarkan progres interaksi. Ceritakan kenaikan statistik dan pilihan rute moral secara jelas saat relevan.
+
+ALUR PEMBUKA: Saat profesor permisi ke kelas karena keadaan darurat mendadak, Ney Langley mengambil alih kendali di kelas. Dia berdeham, berjalan anggun di depan ruangan lalu berbalik menghadap semua orang dengan postur penuh percaya diri, lalu berkata dengan dingin sambil menakut-nakuti semua orang dengan tatapan mengintimidasi dan bertepuk tangan agar semua menatapnya.`
+    },
+    {
+        key: 'moriko',
+        title: 'Moriko | Milf yang Tidak Puas',
+        tags: 'Limitless, Female, OC, Fictional, Submissive, AnyPOV',
+        genre: 'Milf / Tetangga',
+        avatar: 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Cerita/Moriko.webp',
+        cast: [{ name: 'Moriko', url: 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Cerita/Moriko.webp' }],
+        autoUser: 'Aku pun tergoda dan langsung menciumnya',
+        autoReply: `Napas Moriko tertahan terdengar jelas saat kau tiba-tiba mendekat. Matanya melebar sesaat karena terkejut sebelum kemudian terpejam, menyerah sepenuhnya pada sentuhanmu. Saat bibirmu menempel di bibirnya, erangan lembut penuh hasrat keluar dari tenggorokannya—suara yang menunjukkan betapa lamanya ia mendambakan momen ini.
+
+Tubuhnya bereaksi seketika terhadap keberanianmu. Tangannya, yang awalnya ragu-ragu untuk menggenggammu, dengan cepat meraih bahumu, jari-jarinya mencengkeram kemejamu saat ia menekan dadanya yang montok ke tubuhmu. Spandex kulit tipis yang dikenakannya hampir tidak memberikan penghalang antara tubuh kalian; kau bisa merasakan panas yang memancar dari lekuk tubuhnya dan tonjolan lembut payudaranya yang menekan erat ke tubuhmu.
+
+Dia membalas ciumanmu dengan intensitas yang putus asa dan haus, lidahnya mencari lidahmu seolah mencoba menelanmu. Kelembutan yang biasanya dia tunjukkan padamu telah berubah menjadi sesuatu yang jauh lebih primitif dan lapar. Ketika akhirnya kau menarik napas, dia tidak menjauh; sebaliknya, dia tetap menempelkan dahinya ke dahimu, terengah-engah, mata ungunya berkabut karena nafsu dan ketidakpercayaan.
+
+"Pengguna..." bisiknya terengah-engah, suaranya dipenuhi gairah saat ia melirik gugup ke arah pintu depan sebelum kembali menatapmu dengan hasrat yang tak tahu malu. "Aku... aku sudah lama menginginkanmu melakukan itu. Kumohon... masuklah. Sebelum ada yang melihat kita."`,
+        firstMessage: `Selama kurang lebih lima tahun terakhir, Anda tinggal bersebelahan dengan sebuah keluarga beranggotakan empat orang: dua anak, seorang ibu, dan seorang ayah. Sang ibu, Moriko, adalah wanita yang manis dan murah hati yang sering membawakan Anda makanan dan minuman buatan sendiri, membuat Anda merasa diterima dan dihargai. Anda jarang bertemu anggota keluarga lainnya karena suaminya sering bepergian untuk urusan bisnis dan anak-anaknya sibuk dengan kegiatan sekolah. Belakangan ini, Anda memperhatikan perubahan halus dalam perilaku Moriko; dia bertindak lebih berani, seringkali menonjolkan lekuk tubuhnya dengan cara yang menarik perhatian Anda. Meskipun Anda menganggap keberanian barunya ini agak aneh, Anda menganggapnya tidak berbahaya dan melanjutkan rutinitas Anda.
+
+Suatu sore, Anda pulang dari supermarket, tangan Anda penuh dengan kantong belanjaan. Saat mendekati rumah, Anda melihat Moriko duduk di beranda, posturnya santai tetapi matanya mengamati kedatangan Anda dengan saksama. Dia memberi Anda senyum hangat dan ramah, lalu memanggil, "Selamat pagi, Pengguna. Sudah belanja? Kuharap kau mendapatkan semua yang kau butuhkan, sayang." Suaranya mengandung kehangatan yang familiar yang langsung membuat Anda merasa nyaman, mengingatkan Anda akan kebaikannya yang tak pernah padam.
+
+Moriko berdiri, merapikan gaunnya, dan melangkah beberapa langkah lebih dekat ke tepi berandanya. *"Mau kopi? Aku bisa membuatkannya untukmu, kalau kamu mau, tentu saja," tawarnya, nadanya penuh harap namun ragu-ragu. Ada kilatan di matanya, campuran antisipasi dan keinginan, saat dia menunggu jawabanmu. Kamu bisa merasakan bahwa dia benar-benar berharap kamu akan menerima undangannya, dan udara di sekitarmu terasa dipenuhi ketegangan yang halus.*`,
+        lorebook: `CERITA 2: MORIKO (Milf Romance)
+- Moriko: ibu dua anak dan tetangga sebelah rumah yang manis serta murah hati, namun merasa kesepian dan tidak puas oleh suaminya, mulai mencari keintiman dengan User.
+- Suaminya sering bepergian untuk urusan bisnis; anak-anak sibuk dengan sekolah.
+- Moriko adalah wanita dewasa seksi, rambut merah, mata ungu, bertubuh montok, sering memakai pakaian tipis yang menonjolkan lekuk tubuh.
+- User adalah tetangga yang sudah tinggal bersebelahan sekitar lima tahun; Moriko sering membawakan makanan dan minuman buatan sendiri.
+- Alur: Moriko mengundang user masuk ke rumahnya dalam suasana tegang dan penuh hasrat; lanjutkan cerita dengan detail dan emosi yang hidup.`
+    }
+];
+
+let storyMode = 'normal';
+let activeStory = null;
+
+function getActiveLorebook() {
+    if (storyMode === 'storyall' && activeStory) return activeStory.lorebook;
+    if (storyMode === 'story') return 'Mode cerita bebas: narasikan peran sebagai karakter dewasa sesuai keinginan user, bangun skenario romansa fiksi dewasa yang hidup dan menarik.';
+    return '';
+}
+
+function openStoryMode() {
+    if (localStorage.getItem('senka_age_verified') !== 'true') {
+        document.getElementById('agegate-modal').style.display = 'flex';
+        return;
+    }
+    openStoryModal();
+}
+
+function closeAgeGate() {
+    document.getElementById('agegate-modal').style.display = 'none';
+}
+
+function confirmAgeGate() {
+    localStorage.setItem('senka_age_verified', 'true');
+    closeAgeGate();
+    openStoryModal();
+}
+
+function openStoryModal() {
+    renderStoryGrid();
+    document.getElementById('story-modal').style.display = 'flex';
+}
+
+function closeStoryModal() {
+    document.getElementById('story-modal').style.display = 'none';
+}
+
+function renderStoryGrid() {
+    const grid = document.getElementById('story-grid');
+    grid.innerHTML = '';
+    STORIES.forEach(s => {
+        const card = document.createElement('div');
+        card.className = 'story-card';
+        const img = document.createElement('img');
+        img.classList.add('story-avatar');
+        img.src = s.avatar;
+        img.alt = s.title;
+        img.onerror = () => { img.style.display = 'none'; };
+        const info = document.createElement('div');
+        info.className = 'story-info';
+        const h = document.createElement('h4');
+        h.innerText = s.title;
+        const g = document.createElement('span');
+        g.className = 'story-genre';
+        g.innerText = s.genre;
+        const t = document.createElement('div');
+        t.className = 'story-tags';
+        t.innerText = s.tags;
+        const castRow = document.createElement('div');
+        castRow.className = 'story-cast';
+        s.cast.forEach(c => {
+            const cc = document.createElement('div');
+            cc.className = 'story-cast-item';
+            const ci = document.createElement('img');
+            ci.src = c.url;
+            ci.title = c.name;
+            ci.onerror = () => { ci.style.display = 'none'; };
+            cc.appendChild(ci);
+            const cn = document.createElement('span');
+            cn.innerText = c.name;
+            cc.appendChild(cn);
+            castRow.appendChild(cc);
+        });
+        const btn = document.createElement('button');
+        btn.className = 'modal-btn';
+        btn.innerText = 'Mulai Cerita';
+        btn.onclick = () => startStory(s.key);
+        info.appendChild(h);
+        info.appendChild(g);
+        info.appendChild(t);
+        info.appendChild(castRow);
+        info.appendChild(btn);
+        card.appendChild(img);
+        card.appendChild(info);
+        grid.appendChild(card);
+    });
+}
+
+function setModeBadge() {
+    const badge = document.getElementById('mode-badge');
+    if (storyMode === 'normal') { badge.style.display = 'none'; return; }
+    badge.style.display = 'inline-block';
+    badge.innerText = storyMode === 'story' ? 'Cerita Bebas' : 'Cerita: ' + (activeStory ? activeStory.title.split('|')[0].trim() : 'All');
+}
+
+function startStory(key) {
+    const s = STORIES.find(x => x.key === key);
+    if (!s) return;
+    closeStoryModal();
+    newSession();
+    storyMode = 'storyall';
+    activeStory = s;
+    localStorage.setItem('senka_story', key);
+    setModeBadge();
+
+    const first = { role: 'assistant', content: [{ type: "text", text: s.firstMessage }] };
+    memoryList.push(first);
+    renderChat();
+    if (supabaseEnabled) remoteSave('senka', 'text', s.firstMessage, first);
+    else saveSessions();
+
+    if (s.autoUser && s.autoReply) {
+        const usr = { role: 'user', content: [{ type: "text", text: s.autoUser }] };
+        memoryList.push(usr);
+        const ai = { role: 'assistant', content: [{ type: "text", text: s.autoReply }] };
+        memoryList.push(ai);
+        renderChat();
+        if (supabaseEnabled) {
+            remoteSave('user', 'text', s.autoUser, usr);
+            remoteSave('senka', 'text', s.autoReply, ai);
+        } else saveSessions();
+    }
+    scrollToBottom(true);
+    if (autospeak) speak(s.autoReply || s.firstMessage);
+}
+
+function startFreeform() {
+    closeStoryModal();
+    storyMode = 'story';
+    activeStory = null;
+    localStorage.removeItem('senka_story');
+    setModeBadge();
+    const note = { role: 'assistant', content: [{ type: "text", text: `Mode Cerita Bebas aktif, ${panggilan}~ Ceritakan skenario yang kamu mau dan aku akan memainkannya sepenuhnya.` }] };
+    memoryList.push(note);
+    if (supabaseEnabled) remoteSave('senka', 'text', note.content[0].text, note);
+    else saveSessions();
+    renderChat();
+    scrollToBottom(true);
+}
+
+function backToNormal() {
+    closeStoryModal();
+    storyMode = 'normal';
+    activeStory = null;
+    localStorage.removeItem('senka_story');
+    setModeBadge();
+}
+
+function personaPayload() {
+    try {
+        const p = JSON.parse(localStorage.getItem('senka_persona') || '{}');
+        const name = (p.name || '').trim();
+        const desc = (p.desc || '').trim();
+        if (!name && !desc) return '';
+        return 'Nama: ' + (name || 'User') + (desc ? '. Deskripsi: ' + desc : '');
+    } catch (e) { return ''; }
+}
+
+function personaGender() {
+    try {
+        const p = JSON.parse(localStorage.getItem('senka_persona') || '{}');
+        return p.gender || userGender;
+    } catch (e) { return userGender; }
+}
+
+function lengthSetting() {
+    return localStorage.getItem('senka_length') || '';
+}
+
+function lastAssistantIdx() {
+    for (let i = memoryList.length - 1; i >= 0; i--) {
+        if (memoryList[i].role === 'assistant') return i;
+    }
+    return -1;
+}
+
+function editAiMessage(bubble, item) {
+    const textParts = (item.content || []).filter(c => c.type === 'text');
+    if (!textParts.length || extractSticker(textParts[0].text)) return;
+    const cur = textParts[0].text;
+    bubble.innerHTML = '';
+    const box = document.createElement('div');
+    box.className = 'edit-box';
+    const ta = document.createElement('textarea');
+    ta.className = 'edit-textarea';
+    ta.value = cur;
+    const row = document.createElement('div');
+    row.className = 'edit-actions';
+    const save = document.createElement('button');
+    save.className = 'modal-btn';
+    save.innerText = 'Simpan';
+    const cancel = document.createElement('button');
+    cancel.className = 'modal-btn ghost';
+    cancel.innerText = 'Batal';
+    save.onclick = () => {
+        const nt = ta.value.trim();
+        if (!nt) return;
+        item.content = [{ type: 'text', text: nt }];
+        renderChat();
+        if (!supabaseEnabled) saveSessions();
+        if (autospeak) speak(nt);
+    };
+    cancel.onclick = () => renderChat();
+    row.appendChild(save);
+    row.appendChild(cancel);
+    box.appendChild(ta);
+    box.appendChild(row);
+    bubble.appendChild(box);
+    ta.focus();
+}
+
+function attachAiActions(bubble, item, isLast) {
+    const row = document.createElement('div');
+    row.className = 'msg-actions';
+    if (isLast) {
+        const swipe = document.createElement('button');
+        swipe.className = 'msg-action';
+        swipe.title = 'Ganti jawaban';
+        swipe.innerHTML = '<i class="fa-solid fa-rotate-right"></i>';
+        swipe.onclick = regenerateLast;
+        row.appendChild(swipe);
+    }
+    const ed = document.createElement('button');
+    ed.className = 'msg-action';
+    ed.title = 'Edit pesan';
+    ed.innerHTML = '<i class="fa-solid fa-pen"></i>';
+    ed.onclick = () => editAiMessage(bubble, item);
+    row.appendChild(ed);
+    bubble.appendChild(row);
+}
+
+async function regenerateLast() {
+    if (isStreaming) return;
+    const idx = lastAssistantIdx();
+    if (idx === -1) return;
+    const item = memoryList[idx];
+    memoryList.splice(idx, 1);
+    if (item.cid) {
+        authHeaders().then(h => fetch('/api/chats/' + item.cid, { method: 'DELETE', headers: h }).catch(() => { }));
+    }
+    const bubbles = chatHistoryDOM.querySelectorAll('.message.msg-senka');
+    if (bubbles.length) bubbles[bubbles.length - 1].remove();
+    if (!supabaseEnabled) saveSessions();
+    scrollToBottom(true);
+    await streamAssistantReply([...memoryList]);
 }
 
 function formatReply(raw) {
@@ -1620,6 +1958,16 @@ async function sendToSenka() {
     removeImage();
     scrollToBottom(true);
 
+    await streamAssistantReply(await getWebPayload(memoryList, text));
+}
+
+async function getWebPayload(baseMessages, lastText) {
+    if (!lastText) return baseMessages;
+    const context = await getWebContext(lastText);
+    return context ? [...baseMessages, { role: 'system', content: context }] : baseMessages;
+}
+
+async function streamAssistantReply(payloadMessages) {
     const msgDiv = document.createElement('div');
     msgDiv.classList.add('message', 'msg-senka');
     msgDiv.innerHTML = 'Senka ngetik<span class="tind"><i></i><i></i><i></i></span>';
@@ -1628,15 +1976,10 @@ async function sendToSenka() {
     isStreaming = true;
 
     try {
-        const context = await getWebContext(text);
-        const payloadMessages = context
-            ? [...memoryList, { role: 'system', content: context }]
-            : memoryList;
-
         const response = await fetch('/api/chat/stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages: payloadMessages, modelKey, panggilan, useVision: visionAuto, gender: userGender })
+            body: JSON.stringify({ messages: payloadMessages, modelKey, panggilan, useVision: visionAuto, gender: personaGender(), persona: personaPayload(), length: lengthSetting(), lorebook: getActiveLorebook(), mode: storyMode })
         });
 
         if (!response.ok) {
@@ -1699,6 +2042,7 @@ async function sendToSenka() {
 
         memoryList.push({ role: 'assistant', content: [{ type: "text", text: displayText }] });
         const aiItem = memoryList[memoryList.length - 1];
+        attachAiActions(msgDiv, aiItem, true);
         if (!supabaseEnabled) saveSessions();
         else remoteSave('senka', 'text', displayText, aiItem);
         shrinkMemoryImages();
