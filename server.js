@@ -515,25 +515,60 @@ async function callProvider(provider, messages, modelId, stream = false, tempera
     });
 }
 
+const SEARCH_INTENTS = ['ANIME', 'NEWS_ECO', 'GENERAL'];
+
 const SEARCH_TOOL = {
     type: "function",
     function: {
         name: "search_web",
-        description: "Gunakan alat ini untuk mencari informasi terkini di internet (berita hari ini, anime yang sedang tayang, cuaca, ekonomi, harga kripto, jadwal, fakta terbaru, dll).",
+        description: "Panggil alat ini bila pertanyaan user membutuhkan informasi terkini dari internet. Pilih intent dan kata kunci yang jelas & spesifik. PERTAHANKAN kata kunci penting dari pertanyaan user (misal 'hari ini', nama topik/benda) apa adanya. Jika tidak butuh internet, jangan panggil alat ini (balas 'TIDAK').",
         parameters: {
             type: "object",
             properties: {
+                intent: {
+                    type: "string",
+                    enum: SEARCH_INTENTS,
+                    description: "ANIME: topik anime/manga/season yang sedang tayang atau jadwal rilis. NEWS_ECO: berita terbaru, ekonomi, pasar saham/kripto, harga, cuaca, jadwal, fakta terkini. GENERAL: info internet lainnya (fakta umum, tutorial, istilah, dll)."
+                },
                 query: {
                     type: "string",
-                    description: "Kata kunci pencarian yang jelas dan spesifik, misalnya 'harga bitcoin hari ini' atau 'anime musim ini yang sedang tayang 2026'."
+                    description: "Kata kunci pencarian yang jelas dan spesifik dalam bahasa Indonesia."
                 }
             },
-            required: ["query"]
+            required: ["intent", "query"]
         }
     }
 };
 
-const SEARCH_RESULT_HINT = `Hasil pencarian internet di atas adalah FAKTA TERKINI (per tanggal ${TODAY_STR}). Jawablah pertanyaan user secara langsung dan spesifik berdasarkan hasil tersebut — sebutkan judul, angka, nama, atau detail yang ada di hasil. Jika hasil tidak relevan dengan pertanyaan, jawab dari pengetahuanmu dengan percaya diri. JANGAN menanyakan balik hal yang sudah bisa dijawab, JANGAN bilang "tidak bisa", JANGAN bilang "tergantung platform", dan JANGAN menyebut bahwa kamu mencari di internet. Tetap gunakan gaya karaktermu dan bahasa yang sama dengan user.`;
+const VERIFIED_DATA_GUARD = `VERIFIED DATA GUARDRAIL (MUTLAK, WAJIB DIPATUHI):
+- Kamu DILARANG KERAS mengarang fakta, jadwal, tanggal, nama, harga, atau angka statistik.
+- Jawab HANYA berdasarkan isi <verified_data> di bawah ini.
+- Wajib cantumkan kutipan sumber berupa angka referensi seperti [1] atau [2] DI AKHIR setiap kalimat yang memuat fakta/angka — nomornya persis sesuai daftar <verified_data>.
+- Jika informasi yang ditanyakan user TIDAK ADA di dalam <verified_data>, katakan dengan jujur bahwa kamu tidak menemukan informasinya di internet, lalu bantu dengan cara lain — JANGAN mengarang atau menerka.
+- Tetap gunakan bahasa, warna, dan kepribadian karaktermu (natural, bukan pembaca berita robotik). JANGAN menyebut bahwa kamu mencari di internet, memakai API, atau menyebut nama alat.`;
+
+const ANIME_INTENT_RE = /anime|manga|manhwa|manhua|season|episode|seiyuu|jadwal\s+tayang|sedang\s+tayang|musim\s+ini|waifu|otaku|myanimelist|\bmal\b|\bdub\b|\bsub\b/i;
+const NEWS_ECO_INTENT_RE = /harga|berapa\s+\S*(sekarang|hari\s+ini|saat\s+ini|terbaru)|cuaca|ramalan|berita|kabar|info\s+terbaru|jadwal|rilis|bitcoin|btc|crypto|kripto|saham|emas|kurs|nilai\s+tukar|hasil\s+pertandingan|pemenang|juara|chart|prediksi|rekomendasi|update|latest|terkini|inflasi|ekonomi|pasar\s+(uang|saham|valas)/i;
+
+const SEARCH_DETECTOR_SYS = `Kamu adalah pendeteksi kebutuhan pencarian web (intent router). Jika pertanyaan user membutuhkan data dari internet, panggil fungsi search_web dengan:
+- intent ANIME jika topiknya anime/manga/season tayang/jadwal rilis anime.
+- intent NEWS_ECO jika topiknya berita terbaru, ekonomi, pasar saham/kripto, harga, cuaca, jadwal, fakta terkini.
+- intent GENERAL jika topik informasi umum dari internet.
+PERTAHANKAN kata kunci penting dari pertanyaan user apa adanya, jangan diubah atau dihilangkan. Jika tidak butuh internet (obrolan biasa), balas cukup kata "TIDAK".`;
+
+function decodeEntities(str) {
+    let s = String(str || '');
+    for (let i = 0; i < 2; i++) {
+        s = s
+            .replace(/<!\[CDATA\[|\]\]>/g, '')
+            .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+            .replace(/&nbsp;/g, ' ').replace(/&#0?183;/g, '·')
+            .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)))
+            .replace(/&amp;/g, '&');
+    }
+    return s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+}
 
 async function ddgSearch(query, maxResults = 3, timeoutMs = 12000) {
     try {
@@ -554,15 +589,15 @@ async function ddgSearch(query, maxResults = 3, timeoutMs = 12000) {
                 } catch (e) { }
                 return {
                     url: href,
-                    title: m[2].replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&#x27;/g, "'").replace(/&quot;/g, '"').trim()
+                    title: decodeEntities(m[2])
                 };
             })
             .filter(x => x.title);
         const snippets = [...html.matchAll(/<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>(.*?)<\/a>/gi)]
-            .map(m => m[1].replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim());
+            .map(m => decodeEntities(m[1]).slice(0, 400));
         const results = [];
         for (let i = 0; i < urls.length && results.length < maxResults; i++) {
-            results.push({ title: urls[i].title, url: urls[i].url, snippet: (snippets[i] || '').slice(0, 400) });
+            results.push({ title: urls[i].title, url: urls[i].url, snippet: (snippets[i] || '').slice(0, 400), source: 'DDG' });
         }
         return results;
     } catch (e) {
@@ -593,10 +628,10 @@ async function bingSearch(query, maxResults = 3, timeoutMs = 12000) {
         const re = /<li class="b_algo"[^>]*>[\s\S]*?<h2[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>(.*?)<\/a>[\s\S]*?<p[^>]*>(.*?)<\/p>/g;
         let m;
         while ((m = re.exec(html)) && results.length < maxResults) {
-            const title = (m[2] || '').replace(/<[^>]+>/g, '').trim();
+            const title = decodeEntities(m[2]);
             if (!title) continue;
-            const snippet = (m[3] || '').replace(/<[^>]+>/g, '').trim();
-            results.push({ title, url: decodeBingUrl(m[1]), snippet: snippet.slice(0, 400) });
+            const snippet = decodeEntities(m[3]).slice(0, 400);
+            results.push({ title, url: decodeBingUrl(m[1]), snippet, source: 'Bing' });
         }
         return results;
     } catch (e) {
@@ -619,70 +654,15 @@ async function newsSearch(query, maxResults = 3, timeoutMs = 12000) {
             const link = (block.match(/<link>(.*?)<\/link>/) || [])[1] || '';
             const pubDate = (block.match(/<pubDate>(.*?)<\/pubDate>/) || [])[1] || '';
             let desc = (block.match(/<description>(.*?)<\/description>/) || [])[1] || '';
-            desc = desc.replace(/<!\[CDATA\[|\]\]>/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+            desc = decodeEntities(desc).slice(0, 400);
             if (!title) continue;
-            results.push({ title: title.trim().slice(0, 200), url: link, snippet: desc.slice(0, 400), date: pubDate });
+            results.push({ title: decodeEntities(title).slice(0, 200), url: link, snippet: desc, date: pubDate, source: 'Google News RSS' });
             if (results.length >= maxResults) break;
         }
         return results;
     } catch (e) {
         return [];
     }
-}
-
-async function searchWeb(query, maxResults = 3, timeoutMs = 12000) {
-    const isNews = /berita|kabar|news|terkini|hari\s+ini/i.test(query);
-    const sources = isNews ? [newsSearch, bingSearch, ddgSearch] : [bingSearch, ddgSearch, newsSearch];
-    const batches = await Promise.all(sources.map(fn => fn(query, maxResults, timeoutMs).catch(() => [])));
-    const seen = new Set();
-    const merged = [];
-    for (const batch of batches) {
-        for (const x of batch) {
-            if (!x || !x.title || seen.has(x.url)) continue;
-            seen.add(x.url);
-            merged.push(x);
-            if (merged.length >= maxResults) return merged;
-        }
-    }
-    return merged;
-}
-
-const SEARCH_INTENT_RE = /harga|berapa\s+\S*(sekarang|hari\s+ini|saat\s+ini|terbaru)|cuaca|ramalan|berita|kabar|info\s+terbaru|jadwal|tayang|rilis|bitcoin|btc|crypto|kripto|saham|emas\s+hari|kurs|nilai\s+tukar|hasil\s+pertandingan|pemenang|juara|chart|prediksi|rekomendasi\s+anime|sedang\s+tayang|update|latest|terkini/i;
-
-const SEARCH_DETECTOR_SYS = 'Kamu adalah pendeteksi kebutuhan pencarian web. Jika pertanyaan user membutuhkan data terkini dari internet (berita terbaru, harga pasar, cuaca, jadwal tayang, hasil pertandingan, fakta terbaru, dll), panggil fungsi search_web dengan kata kunci pencarian yang jelas dan spesifik. PERTAHANKAN kata kunci penting dari pertanyaan user apa adanya (misal: "hari ini", nama benda/topik), jangan diubah atau dihilangkan. Jika tidak membutuhkan, balas cukup dengan kata "TIDAK".';
-
-const SEARCH_STOPWORDS = new Set(['yang', 'dengan', 'untuk', 'dari', 'ini', 'apa', 'dan', 'atau', 'sih', 'dong', 'kah', 'nya', 'di', 'ke', 'pada', 'sebutkan', 'tolong', 'coba', 'aku', 'saya', 'kamu', 'senka', 'sudah', 'belum', 'masih', 'juga', 'adalah', 'akan', 'bisa', 'tolong']);
-
-function hasRelevantResults(text, query) {
-    const q = String(query || '').toLowerCase();
-    const words = [...new Set(q.split(/[^a-z0-9]/i).map(w => w.trim()).filter(w => w.length >= 4 && !SEARCH_STOPWORDS.has(w)))];
-    const blocks = (text || '').split(/\n(?=\d+\.\s)/).map(b => b.slice(0, 160).toLowerCase());
-    if (!words.length) return true;
-    const distinctHit = new Set();
-    for (const b of blocks) {
-        for (const w of words) { if (b.includes(w)) distinctHit.add(w); }
-    }
-    return distinctHit.size >= Math.min(2, words.length);
-}
-
-function buildSearchCandidates(preflightQuery, rawText) {
-    const base = [];
-    if (rawText && rawText.trim()) {
-        const cleaned = rawText.replace(/[?؟]/g, '').trim();
-        if (cleaned) base.push(cleaned);
-    }
-    if (preflightQuery && preflightQuery.trim() && preflightQuery.trim() !== base[0]) base.push(preflightQuery.trim());
-    const out = [];
-    const now = new Date();
-    const monthYear = now.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
-    const year = String(now.getFullYear());
-    for (const q of base) {
-        out.push(q);
-        if (/\b(19|20)\d{2}\b/.test(q)) continue;
-        out.push(`${q} ${monthYear}`);
-        out.push(`${q} ${year}`);
-    }
-    return [...new Set(out)].slice(0, 4);
 }
 
 function withTimeout(promise, ms) {
@@ -697,66 +677,281 @@ function lastUserText(messages) {
     return '';
 }
 
-async function runSearchTool(query, timeoutMs = 12000) {
-    if (!query) return 'Tidak ada hasil pencarian yang relevan.';
-    const results = await searchWeb(query.slice(0, 200), 3, timeoutMs);
-    if (!results.length) return 'Tidak ada hasil pencarian yang relevan.';
-    return results.map((x, i) => `${i + 1}. ${x.title}${x.date ? ` (${x.date.slice(0, 16)})` : ''}\n   Sumber: ${x.url}\n   ${x.snippet}`).join('\n\n');
+function guessIntent(text) {
+    const t = String(text || '');
+    if (ANIME_INTENT_RE.test(t)) return 'ANIME';
+    if (NEWS_ECO_INTENT_RE.test(t)) return 'NEWS_ECO';
+    return null;
 }
 
+// ====== SUMBER 1: Tavily (web search PRIMARY untuk intent GENERAL) ======
+async function tavilySearch(query, maxResults = 5, timeoutMs = 9000) {
+    const key = process.env.TAVILY_API_KEY;
+    if (!key) return [];
+    try {
+        const r = await fetch('https://api.tavily.com/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+            body: JSON.stringify({
+                query: String(query || '').slice(0, 400),
+                max_results: Math.max(1, Math.min(maxResults, 8)),
+                search_depth: 'basic',
+                include_answer: false,
+                include_raw_content: false,
+                include_images: false
+            }),
+            signal: AbortSignal.timeout(timeoutMs)
+        });
+        if (!r.ok) {
+            console.error('[RAG tavily] HTTP', r.status);
+            return [];
+        }
+        const data = await r.json();
+        return (data.results || []).map(x => ({
+            title: (x.title || '').trim(),
+            url: x.url || '',
+            snippet: (x.content || '').slice(0, 500),
+            source: 'Tavily'
+        })).filter(x => x.title && x.url);
+    } catch (e) {
+        console.error('[RAG tavily] error:', e.message.slice(0, 80));
+        return [];
+    }
+}
+
+// ====== SUMBER 2: Exa AI (web search SECONDARY jika Tavily gagal/limit) ======
+async function exaSearch(query, maxResults = 5, timeoutMs = 10000) {
+    const key = process.env.EXA_API_KEY;
+    if (!key) return [];
+    try {
+        const r = await fetch('https://api.exa.ai/search', {
+            method: 'POST',
+            headers: { 'x-api-key': key, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                query: String(query || '').slice(0, 300),
+                type: 'auto',
+                numResults: Math.max(1, Math.min(maxResults, 8)),
+                contents: { highlights: true }
+            }),
+            signal: AbortSignal.timeout(timeoutMs)
+        });
+        if (!r.ok) {
+            console.error('[RAG exa] HTTP', r.status);
+            return [];
+        }
+        const data = await r.json();
+        return (data.results || []).map(x => ({
+            title: (x.title || '').trim(),
+            url: x.url || '',
+            snippet: (x.highlights || []).join(' ').slice(0, 500),
+            date: x.publishedDate || null,
+            source: 'Exa'
+        })).filter(x => x.title && x.url);
+    } catch (e) {
+        console.error('[RAG exa] error:', e.message.slice(0, 80));
+        return [];
+    }
+}
+
+// ====== SUMBER 3: Jikan / MyAnimeList (ANIME, gratis) ======
+let jikanLastCall = 0;
+async function jikanThrottle(minGap = 450) {
+    const wait = minGap - (Date.now() - jikanLastCall);
+    if (wait > 0) await new Promise(r => setTimeout(r, wait));
+    jikanLastCall = Date.now();
+}
+
+function jikanItemToResult(a) {
+    if (!a || !a.title) return null;
+    return {
+        title: (a.title_english || a.title || 'Unknown').trim(),
+        url: a.url || ('https://myanimelist.net/anime/' + (a.mal_id || '')),
+        snippet: [
+            a.status ? 'Status: ' + a.status : '',
+            a.type ? 'Tipe: ' + a.type : '',
+            a.episodes ? 'Episode: ' + a.episodes : '',
+            a.score ? 'Skor: ' + a.score : '',
+            a.rating ? 'Rating: ' + a.rating : '',
+            a.aired && a.aired.string ? 'Rilis: ' + a.aired.string : '',
+            a.broadcast && a.broadcast.string ? 'Jadwal: ' + a.broadcast.string : '',
+            (a.synopsis || '').slice(0, 200)
+        ].filter(Boolean).join(' | ').slice(0, 600),
+        source: 'Jikan/MAL'
+    };
+}
+
+async function jikanSeasonNow(maxItems = 8, timeoutMs = 9000) {
+    try {
+        await jikanThrottle();
+        const r = await fetch('https://api.jikan.moe/v4/seasons/now', {
+            headers: { 'User-Agent': 'SenkaAI/1.0' },
+            signal: AbortSignal.timeout(timeoutMs)
+        });
+        if (!r.ok) { console.error('[RAG jikan:season] HTTP', r.status); return []; }
+        const data = await r.json();
+        return (data.data || []).slice(0, maxItems).map(jikanItemToResult).filter(Boolean);
+    } catch (e) {
+        console.error('[RAG jikan:season] error:', e.message.slice(0, 80));
+        return [];
+    }
+}
+
+async function jikanSearch(query, maxItems = 6, timeoutMs = 9000) {
+    try {
+        await jikanThrottle();
+        const r = await fetch('https://api.jikan.moe/v4/anime?q=' + encodeURIComponent(query) + '&limit=' + maxItems + '&order_by=members&sort=desc', {
+            headers: { 'User-Agent': 'SenkaAI/1.0' },
+            signal: AbortSignal.timeout(timeoutMs)
+        });
+        if (!r.ok) { console.error('[RAG jikan:search] HTTP', r.status); return []; }
+        const data = await r.json();
+        return (data.data || []).map(jikanItemToResult).filter(Boolean);
+    } catch (e) {
+        console.error('[RAG jikan:search] error:', e.message.slice(0, 80));
+        return [];
+    }
+}
+
+async function searchAnime(query, rawText, timeoutMs = 10000) {
+    const out = [];
+    const season = await jikanSeasonNow(8, timeoutMs);
+    for (const s of season) out.push(s);
+    const titleLike = (rawText || query || '').trim();
+    if (titleLike) {
+        const byTitle = await jikanSearch(titleLike, 6, timeoutMs);
+        for (const b of byTitle) out.push(b);
+    }
+    const seen = new Set();
+    const uniq = [];
+    for (const x of out) {
+        if (!x || !x.title || seen.has(x.url)) continue;
+        seen.add(x.url);
+        uniq.push(x);
+    }
+    return uniq.slice(0, 12);
+}
+
+// ====== SUMBER 4: Google News RSS (NEWS_ECO, gratis) — lihat newsSearch() ======
+
+// ====== FALLBACK TERAKHIR: scraping DDG + Bing paralel ======
+async function fallbackScrape(query, maxResults = 4, timeoutMs = 9000) {
+    const [ddg, bing] = await Promise.all([
+        ddgSearch(query, maxResults, timeoutMs).catch(() => []),
+        bingSearch(query, maxResults, timeoutMs).catch(() => [])
+    ]);
+    const seen = new Set();
+    const out = [];
+    for (const x of [...ddg, ...bing]) {
+        if (!x || !x.title || seen.has(x.url)) continue;
+        seen.add(x.url);
+        out.push(x);
+        if (out.length >= maxResults) break;
+    }
+    return out;
+}
+
+// ====== FORMAT: hasil menjadi <verified_data> bernomor ======
+function formatVerifiedData(results) {
+    return results.map((x, i) => {
+        const n = i + 1;
+        const lines = [`[${n}] ${x.title}`, `    Sumber: ${x.url}`];
+        if (x.date) lines.splice(2, 0, '    Tanggal: ' + String(x.date).slice(0, 16));
+        if (x.snippet) lines.push('    ' + x.snippet);
+        return lines.join('\n').trim();
+    }).join('\n');
+}
+
+// ====== EXECUTOR: jalankan pencarian sesuai intent dengan fallback berantai ======
+async function executeVerifiedSearch(intent, query, rawText, budgetMs = 13000) {
+    const deadline = Date.now() + budgetMs;
+    const remain = (min = 1500) => Math.max(min, Math.min(9000, deadline - Date.now()));
+
+    if (intent === 'ANIME') {
+        const anime = await searchAnime(query, rawText, remain());
+        if (anime.length) return anime;
+        const news = await newsSearch(`${query} anime`, 4, remain(3000));
+        if (news.length) return news;
+    }
+
+    if (intent === 'NEWS_ECO') {
+        const news = await newsSearch(query, 6, remain(3000));
+        if (news.length) return news;
+    }
+
+    // GENERAL (atau NEWS_ECO yang kosong): Tavily → Exa → scraping DDG/Bing
+    const tavily = await tavilySearch(query, 6, remain(4000));
+    if (tavily.length) return tavily;
+    const exa = await exaSearch(query, 6, remain(5000));
+    if (exa.length) return exa;
+    return fallbackScrape(query, 4, remain(5000));
+}
+
+// ====== ROUTER: pre-flight LLM (timeout cepat) → { intent, query } ======
+async function detectSearchIntent(lastText) {
+    const preflights = [];
+    if (process.env.GROQ_API_KEY) preflights.push(['groq', 'llama-3.1-8b-instant']);
+    if (process.env.GEMINI_API_KEY) preflights.push(['gemini', process.env.GEMINI_MODEL || 'gemini-3.6-flash']);
+    const res = await Promise.all(preflights.map(([pv, pid]) =>
+        withTimeout(
+            callProvider(pv, [
+                { role: 'system', content: SEARCH_DETECTOR_SYS },
+                { role: 'user', content: lastText.slice(0, 400) }
+            ], pid, false, 0, { tools: [SEARCH_TOOL], max_tokens: 90 }).then(r => (r && r.ok) ? r.json() : null),
+            4000
+        ).catch(() => null)
+    ));
+    for (const data of res) {
+        if (!data) continue;
+        const msg = data?.choices?.[0]?.message;
+        const call = (msg?.tool_calls || []).find(c => c?.function?.name === 'search_web');
+        if (!call) continue;
+        let args;
+        try { args = JSON.parse(call.function.arguments || '{}'); } catch (e) { args = {}; }
+        const query = String(args.query || '').trim();
+        if (!query) continue;
+        let intent = String(args.intent || '').toUpperCase().trim();
+        if (!SEARCH_INTENTS.includes(intent)) {
+            const heur = guessIntent(lastText);
+            if (!heur) continue;
+            intent = heur;
+        }
+        return { intent, query };
+    }
+    const heur = guessIntent(lastText);
+    if (heur) {
+        const q = lastText.replace(/[?؟]/g, '').trim().slice(0, 200);
+        return { intent: heur, query: q };
+    }
+    return null;
+}
+
+// ====== ORCHESTRATOR: route intent → verifikasi data → injeksi <verified_data> ======
 async function applyWebSearch(messages) {
     try {
         const lastText = lastUserText(messages);
         if (!lastText) return messages;
-        let query = '';
-        const preflights = [];
-        if (process.env.GROQ_API_KEY) preflights.push(['groq', 'llama-3.1-8b-instant']);
-        if (process.env.GEMINI_API_KEY) preflights.push(['gemini', process.env.GEMINI_MODEL || 'gemini-3.6-flash']);
-        const preflightRes = await Promise.all(preflights.map(([pv, pid]) =>
-            withTimeout(
-                callProvider(pv, [
-                    { role: 'system', content: SEARCH_DETECTOR_SYS },
-                    { role: 'user', content: lastText.slice(0, 400) }
-                ], pid, false, 0, { tools: [SEARCH_TOOL], max_tokens: 80 }).then(r => (r && r.ok) ? r.json() : null),
-                4000
-            ).catch(() => null)
-        ));
-        for (const data of preflightRes) {
-            if (!data) continue;
-            const msg = data?.choices?.[0]?.message;
-            const call = (msg?.tool_calls || []).find(c => c?.function?.name === 'search_web');
-            if (!call) continue;
-            try { query = (JSON.parse(call.function.arguments || '{}').query || '').trim(); } catch (e) { }
-            if (!query) query = (call.function.arguments || '').replace(/[{}"\\]/g, ' ').trim();
-            if (query) break;
+        const route = await detectSearchIntent(lastText);
+        if (!route) return messages;
+        const { intent, query } = route;
+        const results = await executeVerifiedSearch(intent, query, lastText);
+        if (!results.length) {
+            console.error('[RAG] tidak ada hasil | intent:', intent, '| query:', query.slice(0, 80));
+            return messages;
         }
-        if (!query && SEARCH_INTENT_RE.test(lastText)) query = lastText.replace(/[?؟]/g, '').slice(0, 200);
-        if (!query) return messages;
-        const deadline = Date.now() + 12000;
-        let toolContent = '';
-        let bestContent = '';
-        for (const q of buildSearchCandidates(query, lastText)) {
-            const remaining = deadline - Date.now();
-            if (remaining <= 0) break;
-            const content = await runSearchTool(q, Math.min(remaining, 8000));
-            console.error('[SEARCH DBG] candidate:', q.slice(0, 80), '| hasil:', JSON.stringify(content).slice(0, 180));
-            if (!content || content.startsWith('Tidak ada hasil')) continue;
-            if (!bestContent) bestContent = content;
-            if (hasRelevantResults(content, q)) { toolContent = content; break; }
-        }
-        if (!toolContent) toolContent = bestContent;
-        console.error('[SEARCH DBG] final dipakai | relevan:', !!toolContent, '| panjang:', (toolContent || '').length);
-        if (!toolContent || toolContent.startsWith('Tidak ada hasil')) return messages;
+        const verified = formatVerifiedData(results);
+        if (!verified) return messages;
+        console.error('[RAG] OK | intent:', intent, '| query:', query.slice(0, 80), '| entri:', results.length);
         const out = [...messages];
+        const block = `<verified_data>\n${verified}\n</verified_data>\n\n${VERIFIED_DATA_GUARD}`;
         const firstSys = out.find(m => m.role === 'system' && typeof m.content === 'string');
         if (firstSys) {
-            firstSys.content += `\n\nHASIL PENCARIAN INTERNET (per tanggal ${TODAY_STR}):\n${toolContent}\n\n${SEARCH_RESULT_HINT}`;
+            firstSys.content += '\n\n' + block;
         } else {
-            out.push({ role: 'system', content: `HASIL PENCARIAN INTERNET (per tanggal ${TODAY_STR}):\n${toolContent}\n\n${SEARCH_RESULT_HINT}` });
+            out.unshift({ role: 'system', content: block });
         }
         return out;
     } catch (e) {
-        console.error('[SEARCH DBG] error:', e.message);
+        console.error('[RAG] error:', e.message);
         return messages;
     }
 }
@@ -838,19 +1033,25 @@ app.post('/api/access-code', async (req, res) => {
 app.get('/api/search-debug', async (req, res) => {
     const q = String(req.query.q || '').trim().slice(0, 200);
     if (!q) return res.json({ error: 'Parameter q wajib diisi' });
-    const report = { query: q, today: TODAY_STR, sources: {} };
-    const sources = { ddg: ddgSearch, bing: bingSearch, news: newsSearch };
+    const report = { query: q, today: TODAY_STR, intent: guessIntent(q), sources: {} };
+    const sources = {
+        tavily: () => tavilySearch(q, 3, 7000),
+        exa: () => exaSearch(q, 3, 7000),
+        jikan_season: () => jikanSeasonNow(3, 7000),
+        jikan_search: () => jikanSearch(q, 3, 7000),
+        news: () => newsSearch(q, 3, 7000),
+        ddg: () => ddgSearch(q, 3, 7000),
+        bing: () => bingSearch(q, 3, 7000)
+    };
     for (const [name, fn] of Object.entries(sources)) {
         const t0 = Date.now();
         try {
-            const r = await fn(q, 3);
+            const r = await fn();
             report.sources[name] = { ok: true, count: r.length, ms: Date.now() - t0, first: r[0] || null };
         } catch (e) {
             report.sources[name] = { ok: false, ms: Date.now() - t0, error: String(e.message || e).slice(0, 120) };
         }
     }
-    const all = await searchWeb(q, 3);
-    report.merged = all;
     res.json(report);
 });
 
