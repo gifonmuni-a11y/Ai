@@ -768,13 +768,17 @@ function shrinkMemoryImages() {
 function buildMsgEl(m) {
     const bubble = document.createElement('div');
     bubble.classList.add('message', m.role === 'user' ? 'msg-user' : 'msg-senka');
+    let bubbleText = '';
     (m.content || []).forEach(c => {
         if (!c) return;
         if (c.type === 'text') {
             const stk = extractSticker(c.text);
             const p = document.createElement('div');
             const cleanText = stk ? stripStickerTag(c.text) : c.text;
-            if (cleanText) p.innerHTML = formatReply(cleanText);
+            if (cleanText) {
+                p.innerHTML = formatReply(cleanText);
+                if (m.role === 'assistant') bubbleText += ' ' + cleanText;
+            }
             if (stk) appendStickerImg(p, stk);
             bubble.appendChild(p);
         } else if (c.type === 'image_url') {
@@ -819,6 +823,7 @@ function buildMsgEl(m) {
     });
     addMsgActions(bubble, m.role === 'user' ? 'user' : 'senka');
     if (m.role === 'assistant') {
+        if (bubbleText.trim()) maybeAttachTranslate(bubble, bubbleText.trim());
         attachAiActions(bubble, m, lastAssistantIdx() === memoryList.indexOf(m));
     }
     return bubble;
@@ -1614,6 +1619,42 @@ function editAiMessage(bubble, item) {
     ta.focus();
 }
 
+// ===== Terjemahan otomatis mode telfon (bila teks Senka ada huruf Jepang) =====
+const msgTlCache = new Map();
+
+function hasJapaneseText(text) {
+    return /[\u3040-\u30ff\u4e00-\u9faf]/.test(text);
+}
+
+function attachCallTranslation(bubble, text) {
+    if (!bubble || !text || !hasJapaneseText(text)) return;
+    const div = document.createElement('div');
+    div.className = 'call-tl';
+    const lbl = document.createElement('span');
+    lbl.className = 'call-tl-label';
+    lbl.innerHTML = '<i class="fa-solid fa-language"></i> Terjemahan: ';
+    const body = document.createElement('span');
+    body.className = 'call-tl-body';
+    body.textContent = 'menerjemahkan...';
+    div.appendChild(lbl);
+    div.appendChild(body);
+    bubble.appendChild(div);
+    const done = (t) => { body.textContent = t; };
+    if (msgTlCache.has(text)) { done(msgTlCache.get(text)); return; }
+    fetch('/api/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+    })
+        .then(r => r.json().catch(() => ({})))
+        .then(d => {
+            if (!d || !d.translated) throw new Error('gagal');
+            msgTlCache.set(text, d.translated);
+            done(d.translated);
+        })
+        .catch(() => { body.textContent = 'Terjemahan gagal. Coba lagi ya.'; });
+}
+
 function attachAiActions(bubble, item, isLast) {
     if (storyMode === 'normal') return;
     const row = document.createElement('div');
@@ -1853,8 +1894,62 @@ let pendingMicAction = null;
 let callCtx = null;
 let callMicMuted = false;
 let callSpeakerOn = false;
+let callMinimized = false;
+let callConnectedAt = 0;
+let callTimerInt = null;
 const CALL_PROFILE_IMG = 'assets/profiletelfonsenka.webp';
 const CALL_WALLPAPER_IMG = 'assets/wallpapertelfonsenka.webp';
+
+function formatCallDur(ms) {
+    const total = Math.max(0, Math.floor(ms / 1000));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    const pad = n => String(n).padStart(2, '0');
+    return h > 0 ? h + ':' + pad(m) + ':' + pad(s) : pad(m) + ':' + pad(s);
+}
+
+function updateCallTimer() {
+    if (!callActive || !callConnectedAt) return;
+    const str = formatCallDur(Date.now() - callConnectedAt);
+    const t = document.getElementById('call-timer');
+    if (t) t.innerText = str;
+    const p = document.getElementById('call-pill-timer');
+    if (p) p.innerText = str;
+}
+
+function startCallTimer() {
+    if (callConnectedAt || !callActive) return;
+    callConnectedAt = Date.now();
+    updateCallTimer();
+    clearInterval(callTimerInt);
+    callTimerInt = setInterval(updateCallTimer, 1000);
+}
+
+function stopCallTimer() {
+    clearInterval(callTimerInt);
+    callTimerInt = null;
+    callConnectedAt = 0;
+}
+
+function minimizeCall() {
+    if (!callActive) return;
+    callMinimized = true;
+    const screen = document.getElementById('call-screen');
+    const pill = document.getElementById('call-pill');
+    if (screen) screen.style.display = 'none';
+    if (pill) pill.style.display = 'flex';
+    updateCallTimer();
+}
+
+function restoreCall() {
+    callMinimized = false;
+    const screen = document.getElementById('call-screen');
+    const pill = document.getElementById('call-pill');
+    if (screen) screen.style.display = 'flex';
+    if (pill) pill.style.display = 'none';
+    updateCallTimer();
+}
 
 function unlockAudio() {
     try {
@@ -1872,10 +1967,17 @@ function initCallScreenAssets() {
         probe.src = CALL_WALLPAPER_IMG;
     }
     const img = document.getElementById('call-profile-img');
-    if (img) {
+    const pillImg = document.getElementById('call-pill-img');
+    if (img || pillImg) {
         const probe = new Image();
-        probe.onload = () => { img.src = CALL_PROFILE_IMG; };
-        probe.onerror = () => { img.src = 'assets/avatar.webp'; };
+        probe.onload = () => {
+            if (img) img.src = CALL_PROFILE_IMG;
+            if (pillImg) pillImg.src = CALL_PROFILE_IMG;
+        };
+        probe.onerror = () => {
+            if (img) img.src = 'assets/avatar.webp';
+            if (pillImg) pillImg.src = 'assets/avatar.webp';
+        };
         probe.src = CALL_PROFILE_IMG;
     }
 }
@@ -1889,7 +1991,7 @@ function setCallUI(on, label) {
         btn.innerHTML = on ? '<i class="fa-solid fa-phone-flip"></i>' : '<i class="fa-solid fa-phone"></i>';
     }
     if (!screen) return;
-    screen.style.display = on ? 'flex' : 'none';
+    screen.style.display = (on && !callMinimized) ? 'flex' : 'none';
     screen.classList.toggle('ringing', on && /(Memanggil|Menghubungi)/i.test(label || ''));
     if (stateText) {
         stateText.innerText = label || (on ? 'Memanggil' : '');
@@ -1951,6 +2053,10 @@ function startCall() {
     callActive = true;
     callMicMuted = false;
     callSpeakerOn = false;
+    callMinimized = false;
+    stopCallTimer();
+    const pill = document.getElementById('call-pill');
+    if (pill) pill.style.display = 'none';
     const sBtn = document.getElementById('call-speaker-btn');
     if (sBtn) {
         sBtn.classList.remove('on');
@@ -1974,6 +2080,7 @@ function startCallRecognition() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return;
     setCallUI(true, 'Mendengarkan...');
+    startCallTimer();
     if (!callRecog) {
         callRecog = new SR();
         callRecog.lang = 'id-ID';
@@ -2101,6 +2208,10 @@ function endCall() {
     callSpeaking = false;
     callMicMuted = false;
     callSpeakerOn = false;
+    callMinimized = false;
+    stopCallTimer();
+    const pill = document.getElementById('call-pill');
+    if (pill) pill.style.display = 'none';
     if (callRecog) { try { callRecog.stop(); } catch (e) { } }
     if (callAudio) {
         try { callAudio.pause(); callAudio.src = ''; } catch (e) { }
@@ -2476,6 +2587,7 @@ async function streamAssistantReply(payloadMessages) {
         msgDiv.innerHTML = formatReply(renderText);
         if (stk) appendStickerImg(msgDiv, stk);
         if (fileReq) msgDiv.appendChild(makeFileCard(fileReq.meta));
+        if (!fileReq && displayText.trim()) maybeAttachTranslate(msgDiv, displayText.trim());
         addMsgActions(msgDiv, 'senka');
 
         memoryList.push({ role: 'assistant', content: [{ type: "text", text: displayText }] });

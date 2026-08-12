@@ -2110,6 +2110,19 @@ async function translateToIndonesian(text) {
     return null;
 }
 
+app.post('/api/translate', async (req, res) => {
+    try {
+        const text = String(req.body?.text || '').trim().slice(0, 1000);
+        if (!text) return res.status(400).json({ error: 'Teks kosong.' });
+        const t = await translateToIndonesian(text);
+        if (!t) return res.status(502).json({ error: 'Terjemahan gagal. Coba lagi ya.' });
+        res.json({ translated: t });
+    } catch (e) {
+        console.error('Translate API error:', e.message);
+        res.status(500).json({ error: 'Waduh, terjemahan gagal. Coba lagi ya.' });
+    }
+});
+
 app.post('/api/video', async (req, res) => {
     try {
         const { prompt } = req.body;
