@@ -616,13 +616,6 @@ function jumpToMessage(idx) {
 
 function openSettings() {
     document.getElementById('panggilan-input').value = panggilan;
-    try {
-        const p = JSON.parse(localStorage.getItem('senka_persona') || '{}');
-        document.getElementById('persona-name-input').value = p.name || '';
-        document.getElementById('persona-desc-input').value = p.desc || '';
-        document.getElementById('persona-gender-input').value = p.gender || userGender;
-    } catch (e) { }
-    document.getElementById('length-input').value = lengthSetting();
     document.getElementById('autospeak-input').checked = autospeak;
     document.getElementById('visionauto-input').checked = visionAuto;
     document.getElementById('speak-jp-input').checked = speakMode === 'jpn';
@@ -633,11 +626,6 @@ function openSettings() {
     document.getElementById('settings-modal').style.display = 'flex';
 }
 function closeSettings() {
-    const name = document.getElementById('persona-name-input').value.trim();
-    const desc = document.getElementById('persona-desc-input').value.trim();
-    const g = document.getElementById('persona-gender-input').value;
-    localStorage.setItem('senka_persona', JSON.stringify({ name, desc, gender: g }));
-    localStorage.setItem('senka_length', document.getElementById('length-input').value);
     document.getElementById('settings-modal').style.display = 'none';
 }
 
@@ -686,8 +674,9 @@ function renderModelPicker() {
                          <span class="mo-prov"></span>`;
         btn.querySelector('.mo-label').innerText = m.label;
         btn.querySelector('.mo-prov').innerText = m.vision ? 'Bisa baca gambar — dipakai otomatis saat kamu kirim foto' : 'Cepat dan responsif';
-        btn.querySelector('.mo-chip').innerText = m.provider === 'groq' ? 'Groq' : 'OpenRouter';
-        btn.querySelector('.mo-chip').classList.add(m.provider === 'groq' ? 'chip-groq' : 'chip-or');
+        const chipText = m.provider === 'groq' ? 'Groq' : m.provider === 'gemini' ? 'Gemini' : 'OpenRouter';
+        btn.querySelector('.mo-chip').innerText = chipText;
+        btn.querySelector('.mo-chip').classList.add(m.provider === 'groq' ? 'chip-groq' : m.provider === 'gemini' ? 'chip-gemini' : 'chip-or');
         btn.onclick = () => { modelKey = m.key; renderModelPicker(); };
         picker.appendChild(btn);
     });
@@ -1124,24 +1113,172 @@ function getActiveLorebook() {
 }
 
 function openStoryMode() {
-    if (localStorage.getItem('senka_age_verified') !== 'true') {
-        document.getElementById('agegate-modal').style.display = 'flex';
+    if (localStorage.getItem('senka_story_access') === 'true') {
+        openStoryModal();
         return;
     }
-    openStoryModal();
+    document.getElementById('accessgate-modal').style.display = 'flex';
+    setTimeout(() => document.getElementById('access-code-input').focus(), 100);
 }
 
-function closeAgeGate() {
-    document.getElementById('agegate-modal').style.display = 'none';
+function closeAccessGate() {
+    document.getElementById('accessgate-modal').style.display = 'none';
+    document.getElementById('access-code-input').value = '';
 }
 
-function confirmAgeGate() {
-    localStorage.setItem('senka_age_verified', 'true');
-    closeAgeGate();
-    openStoryModal();
+async function getActiveAccessCode() {
+    const stored = localStorage.getItem('senka_active_code');
+    if (stored) return stored;
+    try {
+        const r = await fetch('/api/access-code');
+        const d = await r.json();
+        return d.code || null;
+    } catch (e) {
+        return null;
+    }
+}
+
+async function submitAccessCode() {
+    const input = document.getElementById('access-code-input').value.trim();
+    if (!input) return;
+    const activeCode = await getActiveAccessCode();
+    if (activeCode && input === activeCode) {
+        localStorage.setItem('senka_story_access', 'true');
+        closeAccessGate();
+        openStoryModal();
+    } else {
+        showToast('Kode tidak valid');
+        document.getElementById('access-code-input').value = '';
+        document.getElementById('access-code-input').focus();
+    }
+}
+
+function loadPersonaSettings() {
+    try {
+        const p = JSON.parse(localStorage.getItem('senka_persona') || '{}');
+        document.getElementById('persona-name-input').value = p.name || '';
+        document.getElementById('persona-desc-input').value = p.desc || '';
+        document.getElementById('persona-gender-input').value = p.gender || userGender;
+    } catch (e) { }
+    document.getElementById('length-input').value = lengthSetting();
+}
+
+function savePersonaSettings() {
+    const name = document.getElementById('persona-name-input').value.trim();
+    const desc = document.getElementById('persona-desc-input').value.trim();
+    const g = document.getElementById('persona-gender-input').value;
+    localStorage.setItem('senka_persona', JSON.stringify({ name, desc, gender: g }));
+    localStorage.setItem('senka_length', document.getElementById('length-input').value);
+}
+
+['persona-name-input', 'persona-gender-input', 'persona-desc-input', 'length-input'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', savePersonaSettings);
+});
+document.getElementById('access-code-input').addEventListener('keydown', e => { if (e.key === 'Enter') submitAccessCode(); });
+
+let adminHoldTimer = null;
+
+function startAdminHold(e) {
+    e.preventDefault();
+    if (adminHoldTimer) return;
+    const wrap = document.querySelector('.avatar-wrap');
+    if (wrap) wrap.classList.add('admin-holding');
+    adminHoldTimer = setTimeout(() => {
+        adminHoldTimer = null;
+        if (wrap) wrap.classList.remove('admin-holding');
+        openAdminLogin();
+    }, 10000);
+}
+
+function cancelAdminHold() {
+    clearTimeout(adminHoldTimer);
+    adminHoldTimer = null;
+    const wrap = document.querySelector('.avatar-wrap');
+    if (wrap) wrap.classList.remove('admin-holding');
+}
+
+const adminAvatarEl = document.querySelector('.avatar-wrap .avatar');
+if (adminAvatarEl) {
+    ['touchstart', 'mousedown'].forEach(ev => adminAvatarEl.addEventListener(ev, startAdminHold));
+    ['touchend', 'touchcancel', 'mouseup', 'mouseleave', 'contextmenu'].forEach(ev => adminAvatarEl.addEventListener(ev, cancelAdminHold));
+}
+
+function openAdminLogin() {
+    document.getElementById('admin-login-modal').style.display = 'flex';
+    setTimeout(() => document.getElementById('admin-pass-input').focus(), 100);
+}
+function closeAdminLogin() {
+    document.getElementById('admin-login-modal').style.display = 'none';
+    document.getElementById('admin-pass-input').value = '';
+}
+
+async function submitAdminLogin() {
+    const pass = document.getElementById('admin-pass-input').value;
+    if (!pass) return;
+    try {
+        const r = await fetch('/api/admin/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: pass })
+        });
+        const d = await r.json();
+        if (d.ok) {
+            sessionStorage.setItem('senka_admin_pass', pass);
+            closeAdminLogin();
+            openAdminPanel();
+        } else {
+            showToast('Password admin salah');
+            document.getElementById('admin-pass-input').value = '';
+        }
+    } catch (e) {
+        showToast('Gagal verifikasi admin');
+    }
+}
+
+async function openAdminPanel() {
+    let cur = localStorage.getItem('senka_active_code') || '';
+    try {
+        const r = await fetch('/api/access-code');
+        const d = await r.json();
+        if (d.code) cur = d.code;
+    } catch (e) { }
+    document.getElementById('admin-current-code').innerText = cur || '(belum diatur)';
+    document.getElementById('admin-panel-modal').style.display = 'flex';
+    setTimeout(() => document.getElementById('admin-new-code-input').focus(), 100);
+}
+function closeAdminPanel() {
+    document.getElementById('admin-panel-modal').style.display = 'none';
+    document.getElementById('admin-new-code-input').value = '';
+}
+
+async function saveAccessCode() {
+    const code = document.getElementById('admin-new-code-input').value.trim();
+    const pass = sessionStorage.getItem('senka_admin_pass');
+    if (code.length < 3) { showToast('Kode akses minimal 3 karakter'); return; }
+    if (!pass) { showToast('Sesi admin habis — tahan avatar 10 detik untuk login ulang'); return; }
+    try {
+        const r = await fetch('/api/access-code', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: pass, code })
+        });
+        const d = await r.json();
+        if (d.ok) {
+            localStorage.setItem('senka_active_code', code);
+            document.getElementById('admin-current-code').innerText = code;
+            document.getElementById('admin-new-code-input').value = '';
+            showToast(d.saved ? 'Kode akses baru disimpan & aktif' : 'Kode akses baru disimpan di perangkat ini');
+        } else {
+            showToast(d.error || 'Gagal menyimpan kode');
+        }
+    } catch (e) {
+        showToast('Gagal menyimpan kode');
+    }
 }
 
 function openStoryModal() {
+    loadPersonaSettings();
     renderStoryGrid();
     document.getElementById('story-modal').style.display = 'flex';
 }
