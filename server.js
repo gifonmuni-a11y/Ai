@@ -488,7 +488,7 @@ async function callProvider(provider, messages, modelId, stream = false, tempera
     const body = {
         model: modelId,
         messages,
-        max_tokens: extra.max_tokens || 800,
+        max_tokens: extra.max_tokens || (provider === 'gemini' ? 2048 : 800),
         stream
     };
     if (provider !== 'gemini') {
