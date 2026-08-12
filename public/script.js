@@ -1588,27 +1588,66 @@ function addMsgActions(bubble, role) {
 let senkaAudio = null;
 function stopSenkaAudio() { if (senkaAudio) { try { senkaAudio.pause(); } catch (e) { } senkaAudio = null; } }
 
+function playSpeechBlob(b64, type) {
+    return new Promise((resolve, reject) => {
+        const blob = base64ToBlob(b64, type || 'audio/mpeg');
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        senkaAudio = audio;
+        audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
+        audio.onerror = () => { URL.revokeObjectURL(url); reject(new Error('audio rusak')); };
+        audio.play().catch(() => { URL.revokeObjectURL(url); reject(new Error('play gagal')); });
+    });
+}
+
+async function ttsStreamTo(onSegment, body) {
+    const r = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+        body: JSON.stringify(body)
+    });
+    if (!r.ok) return { error: true };
+    if (!(r.headers.get('content-type') || '').includes('text/event-stream')) {
+        const d = await r.json();
+        if (!d.segments || d.segments.length === 0) return { error: true };
+        for (const seg of d.segments) {
+            await onSegment(seg.audioBase64, d.contentType || 'audio/mpeg');
+        }
+        return { error: false };
+    }
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let pendingEvent = '';
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) {
+            if (line.startsWith('event:')) { pendingEvent = line.slice(6).trim(); continue; }
+            if (!line.startsWith('data:')) continue;
+            const payload = line.slice(5).trim();
+            if (pendingEvent === 'segment') {
+                pendingEvent = '';
+                try {
+                    const seg = JSON.parse(payload);
+                    await onSegment(seg.audioBase64, seg.contentType || 'audio/mpeg');
+                } catch (e) { }
+                continue;
+            }
+            if (pendingEvent === 'error') { pendingEvent = ''; return { error: true }; }
+            pendingEvent = '';
+        }
+    }
+    return { error: false };
+}
+
 async function speak(text) {
     if (senkaAudio) stopSenkaAudio();
     try {
-        const r = await fetch('/api/tts', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text, mode: speakMode })
-        });
-        const d = await r.json();
-        if (!r.ok || !d.segments || d.segments.length === 0) return;
-        for (const seg of d.segments) {
-            const blob = base64ToBlob(seg.audioBase64, d.contentType || 'audio/mpeg');
-            const url = URL.createObjectURL(blob);
-            const audio = new Audio(url);
-            senkaAudio = audio;
-            await new Promise((res, rej) => {
-                audio.onended = () => { URL.revokeObjectURL(url); res(); };
-                audio.onerror = () => { URL.revokeObjectURL(url); rej(new Error('audio rusak')); };
-                audio.play().catch(() => { URL.revokeObjectURL(url); rej(new Error('play gagal')); });
-            });
-        }
+        await ttsStreamTo((b64, type) => playSpeechBlob(b64, type), { text, mode: speakMode });
     } catch (e) {
         // teks tetap tampil di chat; suara hanyalah bonus
     }
@@ -1855,18 +1894,12 @@ async function speakCallText(text) {
     callSpeaking = true;
     setCallUI(true, 'Senka bicara...');
     try {
-        const r = await fetch('/api/tts', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text, mode: speakMode })
-        });
-        const d = await r.json();
-        if (!r.ok || !d.segments || d.segments.length === 0) throw new Error(d.error || 'TTS gagal');
-        for (const seg of d.segments) {
-            if (!callActive) break;
-            const blob = base64ToBlob(seg.audioBase64, d.contentType || 'audio/mpeg');
+        const result = await ttsStreamTo(async (b64, type) => {
+            if (!callActive) return;
+            const blob = base64ToBlob(b64, type || 'audio/mpeg');
             await playCallBlob(blob);
-        }
+        }, { text, mode: speakMode });
+        if (result.error) throw new Error('TTS gagal');
     } catch (e) {
         showToast(`Suara Senka gagal diputar: ${String(e.message || e).slice(0, 40)} — teksnya udah tampil di chat`);
     } finally {
@@ -2221,6 +2254,8 @@ async function streamAssistantReply(payloadMessages) {
         let streamBuf = '';
         let started = false;
         let streamError = null;
+        let ragReplacement = null;
+        let pendingEvent = '';
 
         while (true) {
             const { done, value } = await reader.read();
@@ -2230,8 +2265,18 @@ async function streamAssistantReply(payloadMessages) {
             buffer = lines.pop();
 
             for (const line of lines) {
+                if (line.startsWith('event:')) { pendingEvent = line.slice(6).trim(); continue; }
                 if (!line.startsWith('data:')) continue;
                 const payload = line.slice(5).trim();
+                if (pendingEvent === 'rag_guard') {
+                    pendingEvent = '';
+                    try {
+                        const g = JSON.parse(payload);
+                        if (g && g.replacement) ragReplacement = g.replacement;
+                    } catch (e) { }
+                    continue;
+                }
+                pendingEvent = '';
                 if (payload === '[DONE]') continue;
                 try {
                     const j = JSON.parse(payload);
@@ -2252,6 +2297,7 @@ async function streamAssistantReply(payloadMessages) {
 
         if (streamError) throw new Error(streamError);
         if (!started) throw new Error('empty');
+        if (ragReplacement !== null) streamBuf = ragReplacement;
 
         const fullReply = streamBuf;
         const stk = extractSticker(fullReply);

@@ -540,12 +540,22 @@ const SEARCH_TOOL = {
     }
 };
 
-const VERIFIED_DATA_GUARD = `VERIFIED DATA GUARDRAIL (MUTLAK, WAJIB DIPATUHI):
-- Kamu DILARANG KERAS mengarang fakta, jadwal, tanggal, nama, harga, atau angka statistik.
-- Jawab HANYA berdasarkan isi <verified_data> di bawah ini.
-- Wajib cantumkan kutipan sumber berupa angka referensi seperti [1] atau [2] DI AKHIR setiap kalimat yang memuat fakta/angka — nomornya persis sesuai daftar <verified_data>.
-- Jika informasi yang ditanyakan user TIDAK ADA di dalam <verified_data>, katakan dengan jujur bahwa kamu tidak menemukan informasinya di internet, lalu bantu dengan cara lain — JANGAN mengarang atau menerka.
-- Tetap gunakan bahasa, warna, dan kepribadian karaktermu (natural, bukan pembaca berita robotik). JANGAN menyebut bahwa kamu mencari di internet, memakai API, atau menyebut nama alat.`;
+const VERIFIED_DATA_GUARD = `ATURAN MUTLAK SISTEM (berlaku ABSOLUT — blok ini MENG-OVERRIDE instruksi persona Senka di atas bila bertentangan; ini aturan sistem, bukan bagian dari persona):
+- ATURAN MUTLAK SISTEM: Jika tag <verified_data> kosong, KAMU DILARANG KERAS menebak, mengarang fakta, atau menyebutkan judul karya fiksi. Wajib jawab persis seperti ini: "Maaf, Senka lagi gak bisa ngecek datanya nih, sistemnya lagi gangguan."
+- Kamu WAJIB menyertakan kutipan sumber seperti [1], [2] di akhir setiap fakta — nomornya persis sesuai daftar di <verified_data> di atas.
+- Jawab HANYA berdasarkan isi <verified_data>. Jika informasi yang ditanyakan user TIDAK ADA di <verified_data>, katakan jujur bahwa kamu tidak menemukannya di internet — JANGAN mengarang atau menerka.
+- DILARANG KERAS memakai format tabel Markdown (karakter pipa '|') dalam balasan. Gunakan bullet points / daftar biasa saja.
+- Tetap pakai bahasa & kepribadian karaktermu, tapi hanya sebagai gaya bicara — fakta/angka HARUS dari <verified_data>. JANGAN menyebut kamu mencari di internet, memakai API, atau menyebut nama alat.`;
+
+const VERIFIED_DATA_GUARD_EMPTY = `ATURAN MUTLAK SISTEM (berlaku ABSOLUT — baris terakhir system prompt ini MENG-OVERRIDE instruksi persona apapun bila bertentangan):
+- <verified_data> di atas KOSONG karena pencarian ke sumber data gagal/gangguan.
+- KAMU DILARANG KERAS menebak, mengarang fakta, atau menyebutkan judul karya fiksi apa pun.
+- Wajib jawab persis seperti ini: "Maaf, Senka lagi gak bisa ngecek datanya nih, sistemnya lagi gangguan."
+- JANGAN memberikan informasi/judul/angka dari ingatanmu sendiri.
+- DILARANG KERAS memakai format tabel Markdown (karakter pipa '|'). 
+- Tetap pakai bahasa & kepribadian karaktermu sebagai gaya bicara, lalu akhiri dengan tawaran bantuan lain secara singkat dan santai.`;
+
+const RAG_CORRECTION_HINT = 'PERBAIKAN WAJIB: Jawabanmu untuk pertanyaan berbasis data/berita ini WAJIB menyertakan kutipan sumber berupa angka referensi seperti [1] atau [2] di akhir setiap kalimat fakta, dan DILARANG memakai format tabel Markdown (karakter pipa "|"). Ulangi jawaban dengan benar.';
 
 const ANIME_INTENT_RE = /anime|manga|manhwa|manhua|season|episode|seiyuu|jadwal\s+tayang|sedang\s+tayang|musim\s+ini|waifu|otaku|myanimelist|\bmal\b|\bdub\b|\bsub\b/i;
 const NEWS_ECO_INTENT_RE = /harga|berapa\s+\S*(sekarang|hari\s+ini|saat\s+ini|terbaru)|cuaca|ramalan|berita|kabar|info\s+terbaru|jadwal|rilis|bitcoin|btc|crypto|kripto|saham|emas|kurs|nilai\s+tukar|hasil\s+pertandingan|pemenang|juara|chart|prediksi|rekomendasi|update|latest|terkini|inflasi|ekonomi|pasar\s+(uang|saham|valas)/i;
@@ -645,7 +655,10 @@ async function newsSearch(query, maxResults = 3, timeoutMs = 12000) {
             headers: { 'User-Agent': 'Mozilla/5.0' },
             signal: AbortSignal.timeout(timeoutMs)
         });
-        if (!r.ok) return [];
+        if (!r.ok) {
+            console.error('[RAG news:rss] HTTP', r.status, '| query:', String(query).slice(0, 50));
+            return [];
+        }
         const xml = await r.text();
         const results = [];
         for (const item of xml.matchAll(/<item>([\s\S]*?)<\/item>/g)) {
@@ -661,6 +674,7 @@ async function newsSearch(query, maxResults = 3, timeoutMs = 12000) {
         }
         return results;
     } catch (e) {
+        console.error('[RAG news:rss] error:', e.message.slice(0, 60), '| query:', String(query).slice(0, 50));
         return [];
     }
 }
@@ -862,28 +876,67 @@ function formatVerifiedData(results) {
 }
 
 // ====== EXECUTOR: jalankan pencarian sesuai intent dengan fallback berantai ======
+// Anti silent-failure: SETIAP sumber dicatat durasi + status (OK/EMPTY/ERROR) ke log.
 async function executeVerifiedSearch(intent, query, rawText, budgetMs = 13000) {
     const deadline = Date.now() + budgetMs;
     const remain = (min = 1500) => Math.max(min, Math.min(9000, deadline - Date.now()));
+    const diag = [];
 
+    async function run(name, fn) {
+        const t0 = Date.now();
+        try {
+            const out = await fn();
+            const ms = Date.now() - t0;
+            diag.push({ name, ms, count: out.length, status: out.length ? 'OK' : 'EMPTY' });
+            console.error(`[RAG][SOURCE] ${name} -> ${out.length ? out.length + ' hasil' : 'EMPTY'} | ${ms}ms`);
+            return out;
+        } catch (e) {
+            const ms = Date.now() - t0;
+            diag.push({ name, ms, count: 0, status: 'ERROR', err: String(e.message || e).slice(0, 120) });
+            console.error(`[RAG][SOURCE] ${name} -> ERROR | ${ms}ms | ${String(e.message || e).slice(0, 120)}`);
+            return [];
+        }
+    }
+
+    function dedupe(arr) {
+        const seen = new Set();
+        const out = [];
+        for (const x of arr) {
+            if (!x || !x.title || seen.has(x.url)) continue;
+            seen.add(x.url);
+            out.push(x);
+            if (out.length >= 12) break;
+        }
+        return out;
+    }
+
+    let final = [];
     if (intent === 'ANIME') {
-        const anime = await searchAnime(query, rawText, remain());
-        if (anime.length) return anime;
-        const news = await newsSearch(`${query} anime`, 4, remain(3000));
-        if (news.length) return news;
+        const [season, byTitle, news] = await Promise.all([
+            run('jikan/season-now', () => jikanSeasonNow(8, remain(3000))),
+            run('jikan/search', () => jikanSearch((rawText || query || '').trim(), 6, remain(3000))),
+            run('google-news', () => newsSearch(`${query} anime`, 4, remain(3000)))
+        ]);
+        final = dedupe([...season, ...byTitle, ...news]);
+    } else if (intent === 'NEWS_ECO') {
+        const [news, tavily, exa] = await Promise.all([
+            run('google-news', () => newsSearch(query, 6, remain(3000))),
+            run('tavily', () => tavilySearch(query, 5, remain(4000))),
+            run('exa', () => exaSearch(query, 5, remain(4000)))
+        ]);
+        final = dedupe([...news, ...tavily, ...exa]);
+    } else {
+        const [tavily, exa] = await Promise.all([
+            run('tavily', () => tavilySearch(query, 6, remain(4000))),
+            run('exa', () => exaSearch(query, 6, remain(5000)))
+        ]);
+        final = dedupe([...tavily, ...exa]);
     }
 
-    if (intent === 'NEWS_ECO') {
-        const news = await newsSearch(query, 6, remain(3000));
-        if (news.length) return news;
+    if (final.length === 0) {
+        final = await run('fallback/scrape(DDG+Bing)', () => fallbackScrape(query, 4, remain(5000)));
     }
-
-    // GENERAL (atau NEWS_ECO yang kosong): Tavily → Exa → scraping DDG/Bing
-    const tavily = await tavilySearch(query, 6, remain(4000));
-    if (tavily.length) return tavily;
-    const exa = await exaSearch(query, 6, remain(5000));
-    if (exa.length) return exa;
-    return fallbackScrape(query, 4, remain(5000));
+    return { results: final.slice(0, 12), diag };
 }
 
 // ====== ROUTER: pre-flight LLM (timeout cepat) → { intent, query } ======
@@ -926,33 +979,49 @@ async function detectSearchIntent(lastText) {
 }
 
 // ====== ORCHESTRATOR: route intent → verifikasi data → injeksi <verified_data> ======
+// Note: .env hanya memuat akses key; semua kesalahan API dicatat & tidak pernah menghasilkan data palsu.
+// Guardrail SELALU disisipkan di system message PALING BAWAH (paling dekat dengan turn user terakhir)
+// agar aturan anti-halusinasi meng-override prompt persona bila terjadi konflik.
+function appendGuardBlock(messages, block) {
+    const out = [...messages];
+    let lastSys = null;
+    for (let i = out.length - 1; i >= 0; i--) {
+        if (out[i] && out[i].role === 'system' && typeof out[i].content === 'string') {
+            lastSys = out[i];
+            break;
+        }
+    }
+    if (lastSys) lastSys.content += '\n\n' + block;
+    else out.push({ role: 'system', content: block });
+    return out;
+}
+
 async function applyWebSearch(messages) {
     try {
         const lastText = lastUserText(messages);
-        if (!lastText) return messages;
+        if (!lastText) return { messages, rag: null };
         const route = await detectSearchIntent(lastText);
-        if (!route) return messages;
+        if (!route) return { messages, rag: null };
         const { intent, query } = route;
-        const results = await executeVerifiedSearch(intent, query, lastText);
-        if (!results.length) {
-            console.error('[RAG] tidak ada hasil | intent:', intent, '| query:', query.slice(0, 80));
-            return messages;
-        }
+        const result = await executeVerifiedSearch(intent, query, lastText);
+        const results = result.results;
         const verified = formatVerifiedData(results);
-        if (!verified) return messages;
-        console.error('[RAG] OK | intent:', intent, '| query:', query.slice(0, 80), '| entri:', results.length);
-        const out = [...messages];
-        const block = `<verified_data>\n${verified}\n</verified_data>\n\n${VERIFIED_DATA_GUARD}`;
-        const firstSys = out.find(m => m.role === 'system' && typeof m.content === 'string');
-        if (firstSys) {
-            firstSys.content += '\n\n' + block;
+        let block;
+        if (verified) {
+            block = `<verified_data>\n${verified}\n</verified_data>\n\n${VERIFIED_DATA_GUARD}`;
+            console.error('[RAG] OK | intent:', intent, '| query:', query.slice(0, 80), '| entri verified_data:', results.length,
+                '| sources:', result.diag.map(d => `${d.name}=${d.status}(${d.ms}ms)`).join(', '));
         } else {
-            out.unshift({ role: 'system', content: block });
+            block = `<verified_data></verified_data>\n\n${VERIFIED_DATA_GUARD_EMPTY}`;
+            console.error('[RAG][SILENT-FAIL] SEMUA SUMBER GAGAL/KOSONG → <verified_data> BENAR-BENAR KOSONG | intent:', intent, '| query:', query.slice(0, 80),
+                '| sources:', result.diag.map(d => `${d.name}=${d.status}(${d.ms}ms)${d.err ? ' err=' + d.err : ''}`).join(', '));
         }
-        return out;
+        return { messages: appendGuardBlock(messages, block), rag: { injected: !!verified, intent, query, sources: result.diag } };
     } catch (e) {
         console.error('[RAG] error:', e.message);
-        return messages;
+        // Tetap injeksi guard KOSONG agar model TIDAK mengarang walau ada error tak terduga.
+        const block = `<verified_data></verified_data>\n\n${VERIFIED_DATA_GUARD_EMPTY}`;
+        return { messages: appendGuardBlock(messages, block), rag: { injected: false, intent: null, query: null, error: String(e.message || e).slice(0, 150) } };
     }
 }
 
@@ -981,6 +1050,52 @@ function candidateList(chosen, imageIncluded = false, useVision = true) {
         .sort((a, b) => (priority[a.provider] ?? 9) - (priority[b.provider] ?? 9));
     if (imageIncluded && useVision) return [...vision, chosen, ...rest];
     return [chosen, ...rest];
+}
+
+// ====== MIDDLEWARE VALIDASI RAG (Anti-Halusinasi) ======
+function stripMarkdownTables(content) {
+    const src = String(content || '');
+    const lines = src.split('\n');
+    const kept = lines.filter(l => (l.match(/\|/g) || []).length < 2);
+    const out = kept.join('\n').trim();
+    return out || src;
+}
+
+function hasCitation(content) {
+    return /\[\d+\]/.test(String(content || ''));
+}
+
+function truncateToCitation(content) {
+    const src = String(content || '').trim();
+    if (hasCitation(src)) {
+        const sents = src.split(/(?<=[.!?。！？~])/).map(s => s.trim()).filter(Boolean);
+        const keep = [];
+        for (const s of sents) {
+            keep.push(s);
+            if (/\[\d+\]/.test(s)) break;
+        }
+        if (keep.length) return keep.join(' ').trim();
+    }
+    const sents2 = src.split(/(?<=[.!?。！？~])/).map(s => s.trim()).filter(Boolean);
+    return (sents2.slice(0, 2).join(' ') || src.slice(0, 120)).trim();
+}
+
+async function regenWithCorrection(baseMessages, model, maxAttempts = 2) {
+    let lastContent = null;
+    for (let i = 0; i < maxAttempts; i++) {
+        try {
+            const corrected = baseMessages.map(x => ({ ...x }));
+            const sys = corrected.find(x => x.role === 'system' && typeof x.content === 'string');
+            if (sys) sys.content += '\n\n' + RAG_CORRECTION_HINT;
+            const r = await callProvider(model.provider, corrected, model.id);
+            if (!r) continue;
+            const data = await r.json();
+            const content = stripMarkdownTables(data?.choices?.[0]?.message?.content || '');
+            lastContent = content;
+            if (hasCitation(content)) return content;
+        } catch (e) { }
+    }
+    return lastContent ? truncateToCitation(lastContent) : null;
 }
 
 app.get('/api/config', (req, res) => {
@@ -1078,20 +1193,46 @@ app.post('/api/chat', async (req, res) => {
         if (call) systemPrompt = withCallMode(systemPrompt);
         const finalMessages = await prepareMessagesForAI(messages, isVision, mode === 'storyall' && /NEY LANGLEY/i.test(lorebook || ''), normalMode);
         let baseMessages = [systemPrompt, ...finalMessages];
-        if (!isVision) baseMessages = await applyWebSearch(baseMessages);
+        let rag = null;
+        if (!isVision) {
+            const res = await applyWebSearch(baseMessages);
+            baseMessages = res.messages;
+            rag = res.rag;
+        }
         let lastErr = null;
 
         for (const m of candidateList(chosen, isVision, useVision !== false)) {
             let response;
+            let msgsForModel = null;
             try {
-                const msgsForModel = m.vision ? baseMessages : stripImagesForModel(baseMessages);
+                msgsForModel = m.vision ? baseMessages : stripImagesForModel(baseMessages);
                 response = await callProvider(m.provider, msgsForModel, m.id);
             } catch (e) {
                 continue;
             }
             if (!response) continue;
             const data = await response.json();
-            if (response.ok) return res.json({ ...data, model_used: m.label });
+            if (response.ok) {
+                const content = data?.choices?.[0]?.message?.content;
+                if (typeof content === 'string') {
+                    let fixed = stripMarkdownTables(content);
+                    const needsCitation = rag && rag.injected && ['ANIME', 'NEWS_ECO'].includes(rag.intent)
+                        && !/^Maaf|^Maap|^Oh\s*maaf/i.test(fixed.trim()) && !hasCitation(fixed);
+                    if (needsCitation) {
+                        console.error('[RAG][MODERASI] jawaban tanpa kutipan → regenerasi | model:', m.label, '| intent:', rag.intent);
+                        const regen = await regenWithCorrection(msgsForModel, m, 2);
+                        if (regen) {
+                            fixed = regen;
+                            console.error('[RAG][MODERASI] regenerasi selesai, kutipan:', hasCitation(fixed));
+                        } else {
+                            fixed = truncateToCitation(fixed);
+                            console.error('[RAG][MODERASI] regenerasi gagal → jawaban DIPOTONG ke kutipan | model:', m.label);
+                        }
+                    }
+                    data.choices[0].message.content = fixed;
+                }
+                return res.json({ ...data, model_used: m.label });
+            }
             lastErr = { status: response.status, data };
             console.error(`Chat ${m.label} gagal:`, data?.error?.message || response.status);
         }
@@ -1128,7 +1269,12 @@ app.post('/api/chat/stream', async (req, res) => {
         if (call) systemPrompt = withCallMode(systemPrompt);
         const finalMessages = await prepareMessagesForAI(messages, isVision, mode === 'storyall' && /NEY LANGLEY/i.test(lorebook || ''), normalMode);
         let baseMessages = [systemPrompt, ...finalMessages];
-        if (!isVision) baseMessages = await applyWebSearch(baseMessages);
+        let rag = null;
+        if (!isVision) {
+            const res = await applyWebSearch(baseMessages);
+            baseMessages = res.messages;
+            rag = res.rag;
+        }
         for (const m of candidateList(chosen, isVision, useVision !== false)) {
             let upstream;
             try {
@@ -1154,13 +1300,21 @@ app.post('/api/chat/stream', async (req, res) => {
 
             if (!upstream.body || typeof upstream.body.getReader !== 'function') {
                 const jd = await upstream.json().catch(() => ({}));
-                const content = jd?.choices?.[0]?.message?.content || null;
+                let content = jd?.choices?.[0]?.message?.content || null;
                 if (!content) {
                     res.write(`data: ${JSON.stringify({ error: { message: jd?.error?.message || 'Provider balas kosong.' } })}\n\n`);
                 } else {
+                    let fixed = stripMarkdownTables(content);
+                    if (rag && rag.injected && ['ANIME', 'NEWS_ECO'].includes(rag.intent)
+                        && !hasCitation(fixed) && !/^Maaf|^Maap/i.test(fixed.trim())) {
+                        const full = fixed;
+                        fixed = truncateToCitation(fixed) || fixed;
+                        console.error('[RAG][MODERASI:stream] jawaban (provider non-streaming) tanpa kutipan → DIPOTONG | intent:', rag.intent, '| model:', m.label, '| len:', full.length, '->', fixed.length);
+                        res.write(`event: rag_guard\ndata: ${JSON.stringify({ replacement: fixed })}\n\n`);
+                    }
                     const chunk = 120;
-                    for (let i = 0; i < content.length; i += chunk) {
-                        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: content.slice(i, i + chunk) } }] })}\n\n`);
+                    for (let i = 0; i < fixed.length; i += chunk) {
+                        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: fixed.slice(i, i + chunk) } }] })}\n\n`);
                     }
                 }
                 res.write(`data: [DONE]\n\n`);
@@ -1170,14 +1324,43 @@ app.post('/api/chat/stream', async (req, res) => {
 
             const reader = upstream.body.getReader();
             const decoder = new TextDecoder();
+            let streamFull = '';
+            let shownLen = 0;
+            let rear = '';
+            const REAR = 600;
+            const sanitize = (s) => String(s || '').replace(/\|/g, '');
             try {
                 while (true) {
                     const { done, value } = await reader.read();
                     if (done) break;
-                    res.write(decoder.decode(value));
+                    const raw = decoder.decode(value);
+                    streamFull += raw;
+                    rear += sanitize(raw);
+                    if (rear.length > REAR) {
+                        const flush = rear.slice(0, rear.length - REAR);
+                        res.write(flush);
+                        shownLen += flush.length;
+                        rear = rear.slice(-REAR);
+                    }
                 }
             } catch (e) {
                 console.error("Stream terputus:", e.message);
+            }
+            const fullShown = sanitize(streamFull);
+            let finalText = fullShown;
+            let ragReplacement = null;
+            if (rag && rag.injected && ['ANIME', 'NEWS_ECO'].includes(rag.intent)
+                && !hasCitation(fullShown) && !/^Maaf|^Maap/i.test(fullShown.trim())) {
+                finalText = truncateToCitation(fullShown) || fullShown;
+                console.error('[RAG][MODERASI:stream] jawaban streaming tanpa kutipan → EKOR DIPOTONG | intent:', rag.intent, '| model:', m.label, '| len:', fullShown.length, '->', finalText.length);
+                ragReplacement = finalText;
+            }
+            if (finalText.length > shownLen) {
+                res.write(finalText.slice(shownLen));
+                shownLen = finalText.length;
+            }
+            if (ragReplacement) {
+                res.write(`event: rag_guard\ndata: ${JSON.stringify({ replacement: ragReplacement })}\n\n`);
             }
             res.end();
             return;
@@ -1271,7 +1454,10 @@ function chunkTtsText(text, max = 185) {
     return segs;
 }
 
-function chunkTtsMicro(text, target = 55) {
+// Micro-chunking per kalimat/tanda baca (40-60 char) — wajib untuk lolos language
+// check mirror TikTok (voice jp_001 menolak teks Indonesia panjang dgn HTTP 500)
+// sekaligus membuat tiap request TTS kecil & cepat.
+function chunkTtsMicro(text, target = 60) {
     const src = String(text).replace(/\s+/g, ' ').trim();
     if (!src) return [];
     const out = [];
@@ -1297,6 +1483,30 @@ function chunkTtsMicro(text, target = 55) {
         if (piece) out.push(piece);
         start += cut;
     }
+    return out.filter(Boolean);
+}
+
+function chunkTtsSmart(text, max = 150, hardMax = 190) {
+    const src = String(text).replace(/\s+/g, ' ').trim();
+    if (!src) return [];
+    const sentences = src.split(/(?<=[.!?。！？~])|\n/).map(s => s.trim()).filter(Boolean);
+    const out = [];
+    let cur = '';
+    for (const s of sentences) {
+        if ((cur + ' ' + s).trim().length <= max && cur) {
+            cur = (cur + ' ' + s).trim();
+        } else if (!cur) {
+            cur = s;
+        } else {
+            if (cur) out.push(cur);
+            cur = s;
+        }
+        if (cur.length > hardMax) {
+            if (cur) out.push(cur.slice(0, hardMax).trim());
+            cur = cur.slice(hardMax).trim();
+        }
+    }
+    if (cur) out.push(cur);
     return out.filter(Boolean);
 }
 
@@ -1352,7 +1562,7 @@ async function tiktokSpeak(text, voice = TIKTOK_TTS_VOICE) {
         }
         const data = await r.json();
         if (data.code !== 0 || data.message !== 'success' || !data.data?.v_str) {
-            console.error('[tts:tiktok] gagal:', data.code, data.status_msg || data.message || 'unknown', '| voice:', TIKTOK_TTS_VOICE);
+            console.error('[tts:tiktok] gagal:', data.code, data.status_msg || data.message || 'unknown', '| voice:', voice);
             return null;
         }
         const m = String(data.data.v_str).match(/^data:audio\/mp3;base64,(.+)$/);
@@ -1371,14 +1581,40 @@ async function tiktokSpeak(text, voice = TIKTOK_TTS_VOICE) {
     }
 }
 
+// Ambil hasil NON-NULL PALING CEPAT — tidak menunggu provider terlambat/gagal.
+// (Bug lama: Promise.allSettled menunggu request PALING LAMBAT → latency membengkak.)
+function firstNonNull(promises) {
+    return new Promise((resolve) => {
+        let done = false;
+        let pending = promises.length;
+        if (pending === 0) return resolve(null);
+        for (const p of promises) {
+            Promise.resolve(p)
+                .then((v) => { if (!done && v) { done = true; resolve(v); } })
+                .catch(() => { })
+                .finally(() => { if (!done && --pending === 0) resolve(null); });
+        }
+    });
+}
+
+let officialTtsFailStreak = 0;
+let officialTtsOfflineUntil = 0;
+
 async function tiktokRace(text, voice = TIKTOK_TTS_VOICE) {
-    let b64 = null;
-    const results = await Promise.allSettled([
-        tiktokSpeakJson(text, voice),
-        tiktokSpeak(text, voice)
-    ]);
-    for (const r of results) {
-        if (r.status === 'fulfilled' && r.value) { b64 = r.value; break; }
+    const officialIncluded = Date.now() >= officialTtsOfflineUntil;
+    const quickOne = tiktokSpeakJson(text, voice);
+    const officialP = officialIncluded ? tiktokSpeak(text, voice) : Promise.resolve(null);
+    const b64 = await firstNonNull([quickOne, officialP]);
+    const officialResult = await officialP;
+    if (officialResult) {
+        officialTtsFailStreak = 0;
+    } else if (officialIncluded) {
+        officialTtsFailStreak += 1;
+        if (officialTtsFailStreak >= 3) {
+            officialTtsOfflineUntil = Date.now() + 120000;
+            officialTtsFailStreak = 0;
+            console.error('[tts] Official API TikTok gagal 3x berturut → dinonaktifkan 2 menit (mirror tetap dipakai)');
+        }
     }
     if (!b64) b64 = await tiktokSpeakJson(text, voice);
     return b64 || null;
@@ -1388,13 +1624,22 @@ async function tiktokTts(text, lang) {
     const voice = TIKTOK_VOICES[lang] || TIKTOK_TTS_VOICE;
     const chunks = chunkTtsMicro(text);
     if (chunks.length === 0) return null;
+    console.time('[tts][tiktok] total');
+    console.error(`[tts][tiktok] voice=${voice} chunk=${chunks.length} seg | teks=${String(text).length}char`);
     const segments = [];
     for (let i = 0; i < chunks.length; i++) {
-        if (i > 0) await new Promise(r => setTimeout(r, 300));
+        if (i > 0) await new Promise(r => setTimeout(r, 150));
+        console.time(`[tts][tiktok] chunk-${i + 1}`);
         const b64 = await tiktokRace(chunks[i], voice);
-        if (!b64) return null;
+        console.timeEnd(`[tts][tiktok] chunk-${i + 1}`);
+        if (!b64) {
+            console.error(`[tts][tiktok] chunk-${i + 1} GAGAL → fallback ke Edge`);
+            console.timeEnd('[tts][tiktok] total');
+            return null;
+        }
         segments.push({ audioBase64: b64 });
     }
+    console.timeEnd('[tts][tiktok] total');
     return { segments, contentType: 'audio/mpeg', provider: 'tiktok', label: 'TikTok TTS (' + voice + ')', lang, voice };
 }
 
@@ -1486,39 +1731,87 @@ async function edgeTts(text, lang) {
 }
 
 app.post('/api/tts', async (req, res) => {
-    try {
-        const rawText = String(req.body?.text || '').trim().slice(0, 500);
-        if (!rawText) return res.status(400).json({ error: 'Teks kosong.' });
-        const mode = req.body?.mode === 'ind' ? 'ind' : 'jpn';
+    const rawText = String(req.body?.text || '').trim().slice(0, 500);
+    if (!rawText) return res.status(400).json({ error: 'Teks kosong.' });
+    const mode = req.body?.mode === 'ind' ? 'ind' : 'jpn';
+    const wantsStream = String(req.headers.accept || '').includes('text/event-stream');
 
-        let text = rawText.replace(/[*_#`{}]/g, '');
-        let lang = detectTtsLang(text);
-        if (mode === 'ind') {
-            if (lang === 'jpn') {
-                const id = await translateToIndonesian(text);
-                if (id && id !== text) text = id;
-            }
-            lang = 'ind';
-            text = addIdExpressions(text);
-        } else if (lang !== 'jpn') {
-            const jp = await translateToJapanese(text);
-            if (jp && jp !== text) {
-                text = jp;
-                lang = 'jpn';
-            } else {
-                text = addIdExpressions(text);
-                lang = 'ind';
-            }
+    const t0 = Date.now();
+    let text = rawText.replace(/[*_#`{}]/g, '');
+    let lang = detectTtsLang(text);
+    if (mode === 'ind') {
+        if (lang === 'jpn') {
+            const id = await translateToIndonesian(text);
+            if (id && id !== text) text = id;
         }
+        lang = 'ind';
+        text = addIdExpressions(text);
+    } else if (lang !== 'jpn') {
+        const jp = await translateToJapanese(text);
+        if (jp && jp !== text) {
+            text = jp;
+            lang = 'jpn';
+        } else {
+            text = addIdExpressions(text);
+            lang = 'ind';
+        }
+    }
+    console.error(`[tts] mode=${mode} lang=${lang} teks=${String(text).length}char translate=${Date.now() - t0}ms`);
 
-        const cacheKey = 'v8|' + mode + '|' + lang + '|' + text;
-        if (ttsCache.has(cacheKey)) return res.json(ttsCache.get(cacheKey));
+    const cacheKey = 'v8|' + mode + '|' + lang + '|' + text;
+    if (ttsCache.has(cacheKey)) {
+        const payload = ttsCache.get(cacheKey);
+        if (wantsStream) {
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.flushHeaders();
+            for (const seg of payload.segments) {
+                res.write(`event: segment\ndata: ${JSON.stringify({ audioBase64: seg.audioBase64, contentType: payload.contentType })}\n\n`);
+            }
+            res.write(`event: done\ndata: ${JSON.stringify(payload)}\n\n`);
+            return res.end();
+        }
+        return res.json(payload);
+    }
 
+    const speakAll = async () => {
+        console.time('[tts] total (tayo ke audio)');
         let out = await tiktokTts(text, lang);
-        if (!out) out = await edgeTts(text, lang);
-        if (!out) return res.status(502).json({ error: 'Semua model TTS gagal. Coba lagi ya.' });
+        if (!out) {
+            console.error('[tts] TikTok gagal → fallback Edge TTS');
+            out = await edgeTts(text, lang);
+        }
+        console.timeEnd('[tts] total (tayo ke audio)');
+        if (!out) return null;
+        return { ...out, segments: out.segments, audioBase64: out.segments[0].audioBase64 };
+    };
 
-        const payload = { ...out, segments: out.segments, audioBase64: out.segments[0].audioBase64 };
+    if (wantsStream) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.flushHeaders();
+        try {
+            const payload = await speakAll();
+            if (!payload) {
+                res.write(`event: error\ndata: ${JSON.stringify({ error: 'Semua model TTS gagal. Coba lagi ya.' })}\n\n`);
+                res.end();
+                return;
+            }
+            for (const seg of payload.segments) {
+                res.write(`event: segment\ndata: ${JSON.stringify({ audioBase64: seg.audioBase64, contentType: payload.contentType })}\n\n`);
+            }
+            res.write(`event: done\ndata: ${JSON.stringify(payload)}\n\n`);
+            cacheSet(ttsCache, cacheKey, payload);
+        } catch (e) {
+            res.write(`event: error\ndata: ${JSON.stringify({ error: 'TTS error: ' + (e.message || e) })}\n\n`);
+        }
+        return res.end();
+    }
+
+    try {
+        const payload = await speakAll();
+        if (!payload) return res.status(502).json({ error: 'Semua model TTS gagal. Coba lagi ya.' });
         cacheSet(ttsCache, cacheKey, payload);
         return res.json(payload);
     } catch (e) {
