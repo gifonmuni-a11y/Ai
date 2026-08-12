@@ -117,6 +117,8 @@ async function startCloud(user) {
     document.body.classList.add('cloud');
     document.getElementById('login-modal').style.display = 'none';
     document.getElementById('signout-block').style.display = 'block';
+    const logoutBtn = document.getElementById('logout-btn');
+    if (logoutBtn) logoutBtn.style.display = 'inline-flex';
     renderSessionName();
     await loadCloudSessions();
 }
@@ -125,6 +127,7 @@ async function loadCloudSessions() {
     try {
         const resp = await fetch('/api/sessions', { headers: await authHeaders() });
         const d = await resp.json().catch(() => ({}));
+        if (resp.status === 401) { handleAuthFail(); return; }
         if (!resp.ok) throw new Error(d.error || 'Gagal ambil sesi.');
         cloudSessions = d.sessions || [];
         cloudSid = localStorage.getItem('senka_sid_' + cloudUid) || '';
@@ -144,8 +147,26 @@ function fallbackToLocal() {
     supabaseEnabled = false;
     document.body.classList.remove('cloud');
     document.getElementById('login-modal').style.display = 'none';
+    const signout = document.getElementById('signout-block');
+    if (signout) signout.style.display = 'none';
+    const logoutBtn = document.getElementById('logout-btn');
+    if (logoutBtn) logoutBtn.style.display = 'none';
     loadSessions();
     renderChat();
+}
+
+async function handleAuthFail() {
+    supabaseEnabled = false;
+    cloudUid = '';
+    cloudSid = '';
+    document.body.classList.remove('cloud');
+    const signout = document.getElementById('signout-block');
+    if (signout) signout.style.display = 'none';
+    const logoutBtn = document.getElementById('logout-btn');
+    if (logoutBtn) logoutBtn.style.display = 'none';
+    if (sbAuth) { try { await sbAuth.auth.signOut(); } catch (e) { } }
+    const login = document.getElementById('login-modal');
+    if (login) login.style.display = 'flex';
 }
 
 async function newSessionCloud() {
@@ -382,6 +403,7 @@ async function loadRemoteChat() {
         if (cloudSid) q.set('sesiId', cloudSid);
         const r = await fetch('/api/chats?' + q.toString(), { headers: await authHeaders() });
         const d = await r.json().catch(() => ({}));
+        if (r.status === 401) { handleAuthFail(); return; }
         if (!r.ok) throw new Error(d.error || 'Gagal ambil chat.');
         memoryList = (d.messages || []).map(remoteToLocal);
         cleanupDuplicateGreetings();
