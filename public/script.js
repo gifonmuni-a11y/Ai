@@ -54,6 +54,7 @@ document.addEventListener('pointerdown', e => {
 
 window.onload = async () => {
     initSakura();
+    initCallPillDrag();
     document.getElementById('sakura-input').checked = window.sakuraRunning;
     const savedStory = localStorage.getItem('senka_story');
     if (savedStory) {
@@ -117,8 +118,6 @@ async function startCloud(user) {
     document.body.classList.add('cloud');
     document.getElementById('login-modal').style.display = 'none';
     document.getElementById('signout-block').style.display = 'block';
-    const logoutBtn = document.getElementById('logout-btn');
-    if (logoutBtn) logoutBtn.style.display = 'inline-flex';
     renderSessionName();
     await loadCloudSessions();
 }
@@ -149,8 +148,6 @@ function fallbackToLocal() {
     document.getElementById('login-modal').style.display = 'none';
     const signout = document.getElementById('signout-block');
     if (signout) signout.style.display = 'none';
-    const logoutBtn = document.getElementById('logout-btn');
-    if (logoutBtn) logoutBtn.style.display = 'none';
     loadSessions();
     renderChat();
 }
@@ -162,8 +159,6 @@ async function handleAuthFail() {
     document.body.classList.remove('cloud');
     const signout = document.getElementById('signout-block');
     if (signout) signout.style.display = 'none';
-    const logoutBtn = document.getElementById('logout-btn');
-    if (logoutBtn) logoutBtn.style.display = 'none';
     if (sbAuth) { try { await sbAuth.auth.signOut(); } catch (e) { } }
     const login = document.getElementById('login-modal');
     if (login) login.style.display = 'flex';
@@ -1960,7 +1955,10 @@ function minimizeCall() {
     const screen = document.getElementById('call-screen');
     const pill = document.getElementById('call-pill');
     if (screen) screen.style.display = 'none';
-    if (pill) pill.style.display = 'flex';
+    if (pill) {
+        pill.style.display = 'flex';
+        applyCallPillPos();
+    }
     updateCallTimer();
 }
 
@@ -1971,6 +1969,98 @@ function restoreCall() {
     if (screen) screen.style.display = 'flex';
     if (pill) pill.style.display = 'none';
     updateCallTimer();
+}
+
+let callPillPos = null;
+let callPillDrag = null;
+const CALL_PILL_DRAG_THRESHOLD = 8;
+
+function applyCallPillPos() {
+    const pill = document.getElementById('call-pill');
+    if (!pill) return;
+    if (callPillPos) {
+        pill.style.left = callPillPos.x + 'px';
+        pill.style.top = callPillPos.y + 'px';
+        pill.style.right = 'auto';
+        pill.style.bottom = 'auto';
+        pill.style.transform = 'none';
+    } else {
+        pill.style.left = '';
+        pill.style.top = '';
+        pill.style.right = '';
+        pill.style.bottom = '';
+        pill.style.transform = '';
+    }
+}
+
+function clampCallPillPos() {
+    if (!callPillPos) return;
+    const pill = document.getElementById('call-pill');
+    if (!pill) return;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const pr = pill.getBoundingClientRect();
+    callPillPos.x = Math.max(4, Math.min(vw - pr.width - 4, callPillPos.x));
+    callPillPos.y = Math.max(4, Math.min(vh - pr.height - 4, callPillPos.y));
+    applyCallPillPos();
+}
+
+function initCallPillDrag() {
+    const pill = document.getElementById('call-pill');
+    if (!pill || pill.dataset.dragInit) return;
+    pill.dataset.dragInit = '1';
+
+    const onDown = (e) => {
+        if (!callActive) return;
+        if (e.target.closest('.call-pill-end')) return;
+        const rect = pill.getBoundingClientRect();
+        callPillDrag = {
+            startX: e.clientX,
+            startY: e.clientY,
+            startLeft: rect.left,
+            startTop: rect.top,
+            moved: false
+        };
+        pill.classList.add('dragging');
+        try { pill.setPointerCapture(e.pointerId); } catch (err) { }
+    };
+    const onMove = (e) => {
+        if (!callPillDrag) return;
+        const dx = e.clientX - callPillDrag.startX;
+        const dy = e.clientY - callPillDrag.startY;
+        if (!callPillDrag.moved && Math.hypot(dx, dy) > CALL_PILL_DRAG_THRESHOLD) {
+            callPillDrag.moved = true;
+        }
+        if (callPillDrag.moved) {
+            const vw = window.innerWidth;
+            const vh = window.innerHeight;
+            const pr = pill.getBoundingClientRect();
+            let left = callPillDrag.startLeft + dx;
+            let top = callPillDrag.startTop + dy;
+            left = Math.max(4, Math.min(vw - pr.width - 4, left));
+            top = Math.max(4, Math.min(vh - pr.height - 4, top));
+            pill.style.left = left + 'px';
+            pill.style.top = top + 'px';
+            pill.style.right = 'auto';
+            pill.style.bottom = 'auto';
+            pill.style.transform = 'none';
+            callPillPos = { x: left, y: top };
+        }
+    };
+    const onUp = (e) => {
+        if (!callPillDrag) return;
+        const wasDrag = callPillDrag.moved;
+        pill.classList.remove('dragging');
+        try { pill.releasePointerCapture(e.pointerId); } catch (err) { }
+        callPillDrag = null;
+        if (!wasDrag && callActive) restoreCall();
+    };
+
+    pill.addEventListener('pointerdown', onDown);
+    pill.addEventListener('pointermove', onMove);
+    pill.addEventListener('pointerup', onUp);
+    pill.addEventListener('pointercancel', onUp);
+    window.addEventListener('resize', clampCallPillPos);
 }
 
 function unlockAudio() {
@@ -2233,7 +2323,11 @@ function endCall() {
     callMinimized = false;
     stopCallTimer();
     const pill = document.getElementById('call-pill');
-    if (pill) pill.style.display = 'none';
+    if (pill) {
+        pill.style.display = 'none';
+        pill.classList.remove('dragging');
+    }
+    callPillDrag = null;
     if (callRecog) { try { callRecog.stop(); } catch (e) { } }
     if (callAudio) {
         try { callAudio.pause(); callAudio.src = ''; } catch (e) { }

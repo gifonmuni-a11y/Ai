@@ -75,8 +75,6 @@ button:focus, button:focus-visible, a:focus, a:focus-visible, [tabindex]:focus-v
 .icon-btn:hover { background: rgba(56, 189, 248, 0.25); color: #fff; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(56, 189, 248, 0.3); }
 .icon-btn:active { transform: scale(0.94); }
 .gear-btn:hover { transform: rotate(90deg); }
-.logout-btn { border-color: rgba(248, 113, 113, 0.4); color: #fecaca; }
-.logout-btn:hover { background: rgba(239, 68, 68, 0.3); box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3); transform: translateY(-1px); }
 .session-btn { max-width: 130px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .chat-history { flex: 1; padding: 18px 20px; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 12px; scroll-behavior: smooth; overscroll-behavior: contain; touch-action: pan-y; -webkit-overflow-scrolling: touch; }
@@ -183,6 +181,12 @@ button:focus, button:focus-visible, a:focus, a:focus-visible, [tabindex]:focus-v
     width: 100%; max-width: 480px;
 }
 .call-avatar-wrap { position: relative; margin-bottom: 18px; }
+.call-avatar-border {
+    position: absolute; inset: -18px; z-index: 3;
+    width: calc(100% + 36px); height: calc(100% + 36px);
+    pointer-events: none; object-fit: fill;
+    filter: drop-shadow(0 0 14px rgba(56, 189, 248, 0.35));
+}
 .call-avatar {
     width: 220px; height: 220px; max-width: 60vw; max-height: 60vw;
     border-radius: 50%; object-fit: cover;
@@ -232,15 +236,17 @@ button:focus, button:focus-visible, a:focus, a:focus-visible, [tabindex]:focus-v
     text-shadow: 0 1px 10px rgba(0, 0, 0, 0.6);
 }
 .call-pill {
-    position: fixed; bottom: 84px; left: 50%; transform: translateX(-50%); z-index: 85;
+    position: fixed; bottom: 84px; left: 50%; transform: translateX(-50%); z-index: 999;
     display: flex; align-items: center; gap: 10px;
     background: rgba(10, 14, 30, 0.92); backdrop-filter: blur(14px);
     border: 1px solid rgba(56, 189, 248, 0.4); border-radius: 999px;
     padding: 8px 14px 8px 8px;
     box-shadow: 0 10px 32px rgba(0, 0, 0, 0.55), 0 0 18px rgba(56, 189, 248, 0.2);
-    cursor: pointer; max-width: 92vw;
+    cursor: grab; max-width: 92vw;
     animation: cusSelIn 0.2s ease;
+    touch-action: none; user-select: none; -webkit-user-select: none;
 }
+.call-pill.dragging { cursor: grabbing; scale: 1.05; box-shadow: 0 14px 40px rgba(0, 0, 0, 0.7), 0 0 24px rgba(56, 189, 248, 0.35); }
 .call-pill:hover { border-color: rgba(56, 189, 248, 0.7); }
 .call-pill img { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; border: 2px solid rgba(56, 189, 248, 0.5); flex-shrink: 0; }
 .call-pill-info { display: flex; flex-direction: column; line-height: 1.25; }

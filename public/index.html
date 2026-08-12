@@ -49,7 +49,6 @@
                         <button class="icon-btn" onclick="openSearch()" title="Cari di chat"><i class="fa-solid fa-magnifying-glass"></i></button>
                         <button class="icon-btn" onclick="openExport()" title="Simpan chat (PDF/Word)"><i class="fa-solid fa-file-export"></i></button>
                         <button class="icon-btn gear-btn" onclick="openSettings()" title="Pengaturan"><i class="fa-solid fa-gear"></i></button>
-                        <button class="icon-btn logout-btn" id="logout-btn" onclick="signOut()" title="Keluar dari akun" style="display:none;"><i class="fa-solid fa-right-from-bracket"></i></button>
                     </div>
                 </div>
 
@@ -87,6 +86,7 @@
         <div class="call-content">
             <div class="call-avatar-wrap">
                 <img id="call-profile-img" class="call-avatar" src="assets/profiletelfonsenka.webp" alt="Senka" onerror="this.onerror=null;this.src='assets/avatar.webp'">
+                <img class="call-avatar-border" src="assets/BoarderSenkaTelfon.gif" alt="" aria-hidden="true" onerror="if(this.dataset.fb){this.style.display='none'}else{this.dataset.fb='1';this.src='https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Boarder/Untitled%20folder/BoarderSenkaTelfon.gif'}">
             </div>
             <div class="call-name">Senka 千花</div>
             <div class="call-state" id="call-state-text">Memanggil</div>
@@ -99,7 +99,7 @@
         </div>
     </div>
 
-    <div id="call-pill" class="call-pill" style="display:none;" onclick="restoreCall()">
+    <div id="call-pill" class="call-pill" style="display:none;">
         <img id="call-pill-img" src="assets/profiletelfonsenka.webp" alt="Senka" onerror="this.onerror=null;this.src='assets/avatar.webp'">
         <div class="call-pill-info">
             <div class="call-pill-name">Senka 千花</div>
