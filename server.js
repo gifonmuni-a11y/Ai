@@ -75,10 +75,68 @@ const IMAGE_MODELS = {
     openrouter:   { type: "openrouter",   label: "FLUX.2 Klein (OpenRouter)" }
 };
 
+// ====== KEY FAILOVER GENERIK (Groq & OpenRouter) ======
+// Jika key aktif kena rate limit (429 / "Rate limit"), otomatis pindah ke key
+// cadangan berikutnya selama cooldown agar chat tidak kehabisan token.
+const KEY_FAILOVER_COOLDOWN_MS = 10 * 60 * 1000;
+
+function makeKeyFailover(label, envNames) {
+    const keys = envNames.map(n => (n && process.env[n]) || null).filter(Boolean);
+    const limitedUntil = {};
+    let index = 0;
+    return {
+        label,
+        keys,
+        available: () => keys.length > 0,
+        pick: () => {
+            if (!keys.length) return null;
+            const cur = keys[index];
+            if (!cur || Date.now() < (limitedUntil[cur] || 0)) {
+                for (let i = 1; i <= keys.length; i++) {
+                    const k = keys[(index + i) % keys.length];
+                    if (Date.now() >= (limitedUntil[k] || 0)) {
+                        index = keys.indexOf(k);
+                        console.error(`[${label}] failover -> pakai key cadangan (slot ${index + 1}/${keys.length})`);
+                        return k;
+                    }
+                }
+            }
+            return cur || keys[0] || null;
+        },
+        markLimited: (raw) => {
+            const key = keys[index];
+            if (!key || !raw) return;
+            const msg = String(raw);
+            if (/rate limit|429|quota|insufficient/i.test(msg)) {
+                limitedUntil[key] = Date.now() + KEY_FAILOVER_COOLDOWN_MS;
+                console.error(`[${label}] RATE LIMIT terdeteksi → key aktif di-cooldown ${KEY_FAILOVER_COOLDOWN_MS / 60000} menit |`, msg.slice(0, 100));
+                for (let i = 1; i <= keys.length; i++) {
+                    const k = keys[(index + i) % keys.length];
+                    if (Date.now() >= (limitedUntil[k] || 0)) { index = keys.indexOf(k); break; }
+                }
+            }
+        }
+    };
+}
+
+const groqFailover = makeKeyFailover('groq', ['GROQ_API_KEY', 'GROQ_API_KEY_BACKUP', 'GROQ_API_KEY_BACKUP2']);
+const openRouterFailover = makeKeyFailover('openrouter', ['OPENROUTER_API_KEY', 'OPENROUTER_API_KEY_BACKUP']);
+
+function groqKey() { return groqFailover.pick(); }
+function hasGroqKey() { return groqFailover.available(); }
+function markGroqKeyLimited(raw) { groqFailover.markLimited(raw); }
+function openRouterKey() { return openRouterFailover.pick(); }
+function hasOpenRouterKey() { return openRouterFailover.available(); }
+function markOpenRouterKeyLimited(raw) { openRouterFailover.markLimited(raw); }
+
 function availableModels() {
     return MODELS.filter(m => {
         const p = PROVIDERS[m.provider];
-        return p && (p.always || process.env[p.env]);
+        if (!p) return false;
+        if (p.always) return true;
+        if (p.env === 'GROQ_API_KEY') return hasGroqKey();
+        if (p.env === 'OPENROUTER_API_KEY') return hasOpenRouterKey();
+        return !!process.env[p.env];
     });
 }
 
@@ -484,7 +542,13 @@ async function callProvider(provider, messages, modelId, stream = false, tempera
     const p = PROVIDERS[provider];
     if (!p) return null;
     if (p.custom === 'horde') return callHorde(messages, modelId, temperature);
-    if (!process.env[p.env]) return null;
+    if (provider === 'groq') {
+        if (!groqKey()) return null;
+    } else if (provider === 'openrouter') {
+        if (!openRouterKey()) return null;
+    } else if (!process.env[p.env]) {
+        return null;
+    }
     const body = {
         model: modelId,
         messages,
@@ -499,20 +563,33 @@ async function callProvider(provider, messages, modelId, stream = false, tempera
         body.tools = extra.tools;
         body.tool_choice = extra.tool_choice || 'auto';
     }
-    return await fetch(`${p.base}/chat/completions`, {
+    const failover = provider === 'groq' ? groqFailover : provider === 'openrouter' ? openRouterFailover : null;
+    const bearerKey = failover ? failover.pick() : process.env[p.env];
+    const doFetch = (key) => fetch(`${p.base}/chat/completions`, {
         method: "POST",
         headers: {
-            "Authorization": `Bearer ${process.env[p.env]}`,
+            "Authorization": `Bearer ${key}`,
             "Content-Type": "application/json"
         },
         body: JSON.stringify(body)
-    }).then(async r => {
-        if (!r.ok && process.env.DEBUG_CALL) {
-            const t = await r.clone().text();
-            console.error(`[DEBUG] ${p.base} ${modelId} ->`, r.status, t.slice(0, 200));
-        }
-        return r;
     });
+    let r = await doFetch(bearerKey);
+    if (!r.ok && failover) {
+        const t = await r.clone().text();
+        failover.markLimited(t);
+        if (/rate limit|429/i.test(t)) {
+            const alt = failover.pick();
+            if (alt && alt !== bearerKey) {
+                console.error(`[${failover.label}] key aktif kena rate limit → retry sekali dengan key cadangan`);
+                r = await doFetch(alt);
+            }
+        }
+    }
+    if (!r.ok && process.env.DEBUG_CALL) {
+        const t = await r.clone().text();
+        console.error(`[DEBUG] ${p.base} ${modelId} ->`, r.status, t.slice(0, 200));
+    }
+    return r;
 }
 
 const SEARCH_INTENTS = ['ANIME', 'NEWS_ECO', 'GENERAL'];
@@ -942,7 +1019,7 @@ async function executeVerifiedSearch(intent, query, rawText, budgetMs = 13000) {
 // ====== ROUTER: pre-flight LLM (timeout cepat) → { intent, query } ======
 async function detectSearchIntent(lastText) {
     const preflights = [];
-    if (process.env.GROQ_API_KEY) preflights.push(['groq', 'llama-3.1-8b-instant']);
+    if (hasGroqKey()) preflights.push(['groq', 'llama-3.1-8b-instant']);
     if (process.env.GEMINI_API_KEY) preflights.push(['gemini', process.env.GEMINI_MODEL || 'gemini-3.6-flash']);
     const res = await Promise.all(preflights.map(([pv, pid]) =>
         withTimeout(
@@ -1385,14 +1462,26 @@ async function pollinationsImage(prompt) {
 }
 
 async function openRouterImage(prompt) {
-    const response = await fetch("https://openrouter.ai/api/v1/images", {
+    const doCall = (key) => fetch("https://openrouter.ai/api/v1/images", {
         method: "POST",
         headers: {
-            "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+            "Authorization": `Bearer ${key}`,
             "Content-Type": "application/json"
         },
         body: JSON.stringify({ model: "black-forest-labs/flux.2-klein-4b", prompt, n: 1, resolution: "1K" })
     });
+    let key = openRouterKey();
+    let response = await doCall(key);
+    const errText = response.ok ? '' : await response.clone().text();
+    if (!response.ok && /rate limit|429/i.test(errText)) {
+        openRouterFailover.markLimited(errText);
+        const alt = openRouterKey();
+        if (alt && alt !== key) {
+            console.error('[openrouter] key aktif kena rate limit (image gen) → retry dengan key cadangan');
+            key = alt;
+            response = await doCall(alt);
+        }
+    }
     const data = await response.json();
     if (!response.ok) {
         return { error: data?.error?.message || `API error (${response.status})`, status: response.status };
@@ -1831,7 +1920,7 @@ app.post('/api/image', async (req, res) => {
             return res.json({ url: dataUrl, model: "Pollinations FLUX (gratis)" });
         }
 
-        if (process.env.OPENROUTER_API_KEY) {
+        if (hasOpenRouterKey()) {
             const fallback = await openRouterImage(prompt.trim());
             if (fallback.url) return res.json({ url: fallback.url, model: "FLUX.2 Klein (OpenRouter)" });
             if (fallback.error && fallback.status === 402) {
@@ -1899,7 +1988,7 @@ app.get('/api/search', async (req, res) => {
 const LTX_SPACE = 'https://lightricks-ltx-video-distilled.hf.space';
 
 async function translateToEnglish(prompt) {
-    const key = process.env.GROQ_API_KEY;
+    const key = groqKey();
     if (!key) return prompt;
     try {
         const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -1946,8 +2035,8 @@ async function translateToJapanese(text) {
         { role: 'user', content: text }
     ];
     const attempts = [];
-    if (process.env.GROQ_API_KEY) attempts.push(() => callProvider('groq', prompts, 'llama-3.1-8b-instant', false, 0.1));
-    if (process.env.OPENROUTER_API_KEY) attempts.push(() => callProvider('openrouter', prompts, 'openai/gpt-oss-20b:free', false, 0.1));
+    if (hasGroqKey()) attempts.push(() => callProvider('groq', prompts, 'llama-3.1-8b-instant', false, 0.1));
+    if (hasOpenRouterKey()) attempts.push(() => callProvider('openrouter', prompts, 'openai/gpt-oss-20b:free', false, 0.1));
     for (const fn of attempts) {
         try {
             const r = await fn();
@@ -1976,8 +2065,8 @@ async function translateToIndonesian(text) {
         { role: 'user', content: text }
     ];
     const attempts = [];
-    if (process.env.GROQ_API_KEY) attempts.push(() => callProvider('groq', prompts, 'llama-3.1-8b-instant', false, 0.1));
-    if (process.env.OPENROUTER_API_KEY) attempts.push(() => callProvider('openrouter', prompts, 'openai/gpt-oss-20b:free', false, 0.1));
+    if (hasGroqKey()) attempts.push(() => callProvider('groq', prompts, 'llama-3.1-8b-instant', false, 0.1));
+    if (hasOpenRouterKey()) attempts.push(() => callProvider('openrouter', prompts, 'openai/gpt-oss-20b:free', false, 0.1));
     for (const fn of attempts) {
         try {
             const r = await fn();
