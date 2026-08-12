@@ -59,12 +59,6 @@
                     <i class="fa-solid fa-xmark remove-btn" onclick="removeImage()"></i>
                 </div>
 
-                <div id="call-banner" class="call-banner" style="display:none;">
-                    <span class="call-pulse"></span>
-                    <span id="call-status">Menghubungi Senka...</span>
-                    <i class="fa-solid fa-xmark call-end" onclick="endCall()" title="Akhiri panggilan"></i>
-                </div>
-
                 <div class="input-area">
                     <div class="plus-wrap">
                         <button class="tool-btn" id="plus-btn" onclick="togglePlusMenu()" title="Menu"><i class="fa-solid fa-plus"></i></button>
@@ -82,6 +76,22 @@
                     <button class="tool-btn call-btn" id="call-btn" onclick="toggleCall()" title="Panggilan suara (Sleep Call)"><i class="fa-solid fa-phone"></i></button>
                     <button id="send-btn" onclick="sendToSenka()"><i class="fa-solid fa-paper-plane"></i></button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="call-screen" class="call-screen" style="display:none;">
+        <div class="call-bg" id="call-bg"></div>
+        <div class="call-content">
+            <div class="call-avatar-wrap">
+                <img id="call-profile-img" class="call-avatar" src="assets/profiletelfonsenka.webp" alt="Senka" onerror="this.onerror=null;this.src='assets/avatar.webp'">
+            </div>
+            <div class="call-name">Senka 千花</div>
+            <div class="call-state" id="call-state-text">Memanggil</div>
+            <div class="call-controls">
+                <button class="call-ctl" id="call-mute-btn" onclick="toggleCallMute()" title="Senyapkan mikrofon"><i class="fa-solid fa-microphone"></i></button>
+                <button class="call-ctl call-ctl-end" onclick="endCall()" title="Akhiri panggilan"><i class="fa-solid fa-phone-slash"></i></button>
+                <button class="call-ctl" id="call-speaker-btn" onclick="toggleCallSpeaker()" title="Speaker"><i class="fa-solid fa-volume-high"></i></button>
             </div>
         </div>
     </div>

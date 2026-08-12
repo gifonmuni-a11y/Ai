@@ -1106,6 +1106,7 @@ Moriko berdiri, merapikan gaunnya, dan melangkah beberapa langkah lebih dekat ke
 
 let storyMode = 'normal';
 let activeStory = null;
+let storyUnlocked = false;
 
 function getActiveLorebook() {
     if (storyMode === 'storyall' && activeStory) return activeStory.lorebook;
@@ -1114,7 +1115,7 @@ function getActiveLorebook() {
 }
 
 function openStoryMode() {
-    if (localStorage.getItem('senka_story_access') === 'true') {
+    if (storyUnlocked) {
         openStoryModal();
         return;
     }
@@ -1148,7 +1149,7 @@ async function submitAccessCode() {
         return;
     }
     if (input === activeCode) {
-        localStorage.setItem('senka_story_access', 'true');
+        storyUnlocked = true;
         closeAccessGate();
         openStoryModal();
     } else {
@@ -1544,8 +1545,10 @@ function backToNormal() {
     closeStoryModal();
     storyMode = 'normal';
     activeStory = null;
+    storyUnlocked = false;
     localStorage.removeItem('senka_story');
     setModeBadge();
+    if (memoryList.length) renderChat();
 }
 
 function personaPayload() {
@@ -1612,6 +1615,7 @@ function editAiMessage(bubble, item) {
 }
 
 function attachAiActions(bubble, item, isLast) {
+    if (storyMode === 'normal') return;
     const row = document.createElement('div');
     row.className = 'msg-actions';
     if (isLast) {
@@ -1847,6 +1851,10 @@ let callAudio = null;
 let callRecog = null;
 let pendingMicAction = null;
 let callCtx = null;
+let callMicMuted = false;
+let callSpeakerOn = false;
+const CALL_PROFILE_IMG = 'assets/profiletelfonsenka.webp';
+const CALL_WALLPAPER_IMG = 'assets/wallpapertelfonsenka.webp';
 
 function unlockAudio() {
     try {
@@ -1855,14 +1863,64 @@ function unlockAudio() {
     } catch (e) { }
 }
 
+function initCallScreenAssets() {
+    const bg = document.getElementById('call-bg');
+    if (bg) {
+        const probe = new Image();
+        probe.onload = () => { bg.style.backgroundImage = "url('" + CALL_WALLPAPER_IMG + "')"; };
+        probe.onerror = () => { bg.style.backgroundImage = "url('assets/wallpaper.webp')"; };
+        probe.src = CALL_WALLPAPER_IMG;
+    }
+    const img = document.getElementById('call-profile-img');
+    if (img) {
+        const probe = new Image();
+        probe.onload = () => { img.src = CALL_PROFILE_IMG; };
+        probe.onerror = () => { img.src = 'assets/avatar.webp'; };
+        probe.src = CALL_PROFILE_IMG;
+    }
+}
+
 function setCallUI(on, label) {
     const btn = document.getElementById('call-btn');
-    const banner = document.getElementById('call-banner');
-    if (!btn || !banner) return;
-    btn.classList.toggle('active', on);
-    btn.innerHTML = on ? '<i class="fa-solid fa-phone-flip"></i>' : '<i class="fa-solid fa-phone"></i>';
-    banner.style.display = on ? 'flex' : 'none';
-    if (label) document.getElementById('call-status').innerText = label;
+    const screen = document.getElementById('call-screen');
+    const stateText = document.getElementById('call-state-text');
+    if (btn) {
+        btn.classList.toggle('active', on);
+        btn.innerHTML = on ? '<i class="fa-solid fa-phone-flip"></i>' : '<i class="fa-solid fa-phone"></i>';
+    }
+    if (!screen) return;
+    screen.style.display = on ? 'flex' : 'none';
+    screen.classList.toggle('ringing', on && /(Memanggil|Menghubungi)/i.test(label || ''));
+    if (stateText) {
+        stateText.innerText = label || (on ? 'Memanggil' : '');
+        stateText.classList.toggle('ringing', /(Memanggil|Menghubungi)/i.test(label || ''));
+    }
+}
+
+function toggleCallMute() {
+    callMicMuted = !callMicMuted;
+    const btn = document.getElementById('call-mute-btn');
+    if (btn) {
+        btn.classList.toggle('on', callMicMuted);
+        btn.title = callMicMuted ? 'Aktifkan mikrofon' : 'Senyapkan mikrofon';
+        btn.innerHTML = callMicMuted ? '<i class="fa-solid fa-microphone-slash"></i>' : '<i class="fa-solid fa-microphone"></i>';
+    }
+    if (callMicMuted) {
+        if (callRecog) { try { callRecog.stop(); } catch (e) { } }
+    } else {
+        startCallRecognition();
+    }
+}
+
+function toggleCallSpeaker() {
+    callSpeakerOn = !callSpeakerOn;
+    const btn = document.getElementById('call-speaker-btn');
+    if (btn) {
+        btn.classList.toggle('on', callSpeakerOn);
+        btn.title = callSpeakerOn ? 'Matikan speaker' : 'Aktifkan speaker';
+        btn.innerHTML = callSpeakerOn ? '<i class="fa-solid fa-volume-high"></i>' : '<i class="fa-solid fa-volume-off"></i>';
+    }
+    if (callAudio) callAudio.muted = callSpeakerOn;
 }
 
 async function toggleCall() {
@@ -1891,9 +1949,22 @@ async function toggleCall() {
 function startCall() {
     pendingMicAction = null;
     callActive = true;
+    callMicMuted = false;
+    callSpeakerOn = false;
+    const sBtn = document.getElementById('call-speaker-btn');
+    if (sBtn) {
+        sBtn.classList.remove('on');
+        sBtn.innerHTML = '<i class="fa-solid fa-volume-high"></i>';
+    }
+    const mBtn = document.getElementById('call-mute-btn');
+    if (mBtn) {
+        mBtn.classList.remove('on');
+        mBtn.innerHTML = '<i class="fa-solid fa-microphone"></i>';
+    }
     unlockAudio();
-    setCallUI(true, 'Menghubungi Senka...');
-    appendMessage('senka', '📞 *Panggilan dimulai* — ngomong aja, aku dengerin.');
+    initCallScreenAssets();
+    setCallUI(true, 'Memanggil');
+    appendMessage('senka', '📞 Panggilan dimulai — ngomong aja, aku dengerin.');
     scrollToBottom(true);
     startCallRecognition();
 }
@@ -2008,6 +2079,7 @@ function playCallBlob(blob) {
         const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
         callAudio = audio;
+        if (callSpeakerOn) audio.muted = true;
         audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
         audio.onerror = () => { URL.revokeObjectURL(url); reject(new Error('audio rusak')); };
         audio.play().catch(err => {
@@ -2027,13 +2099,15 @@ function base64ToBlob(b64, type) {
 function endCall() {
     callActive = false;
     callSpeaking = false;
+    callMicMuted = false;
+    callSpeakerOn = false;
     if (callRecog) { try { callRecog.stop(); } catch (e) { } }
     if (callAudio) {
         try { callAudio.pause(); callAudio.src = ''; } catch (e) { }
         callAudio = null;
     }
     setCallUI(false);
-    appendMessage('senka', '📞 *Panggilan diakhiri* — kabari lagi kalau mau ngobrol ya.');
+    appendMessage('senka', '📞 Panggilan diakhiri — kabari lagi kalau mau ngobrol ya.');
     scrollToBottom(true);
 }
 
@@ -2111,7 +2185,8 @@ async function generateVideoWithPrompt(prompt) {
                 actions.className = 'msg-actions';
                 const dl = document.createElement('button');
                 dl.className = 'msg-action';
-                dl.innerHTML = '<i class="fa-solid fa-download"></i> Download';
+                dl.title = 'Download video';
+                dl.innerHTML = '<i class="fa-solid fa-download"></i>';
                 dl.onclick = () => downloadImage(sd.videoUrl, 'senka-video-' + Date.now() + '.mp4');
                 actions.appendChild(dl);
                 loading.appendChild(actions);
@@ -2577,7 +2652,8 @@ function generateImageWithPrompt(prompt) {
                 actions.className = 'msg-actions';
                 const dl = document.createElement('button');
                 dl.className = 'msg-action';
-                dl.innerHTML = '<i class="fa-solid fa-download"></i> Download';
+                dl.title = 'Download gambar';
+                dl.innerHTML = '<i class="fa-solid fa-download"></i>';
                 dl.onclick = () => downloadImage(imgSrc, 'senka-' + prompt.slice(0, 25).replace(/[^a-zA-Z0-9]+/g, '_') + '.jpg');
                 actions.appendChild(dl);
                 loading.appendChild(actions);
