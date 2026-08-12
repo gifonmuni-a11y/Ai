@@ -61,6 +61,7 @@ window.onload = async () => {
         if (s) { storyMode = 'storyall'; activeStory = s; }
     }
     setModeBadge();
+    initCustomSelects();
     document.getElementById('panggilan-input').value = panggilan;
     document.getElementById('autospeak-input').checked = autospeak;
 
@@ -1157,6 +1158,88 @@ async function submitAccessCode() {
     }
 }
 
+// ===== Custom dropdown (pengganti select native agar rapi di Android) =====
+function refreshCusSel(sel) {
+    const wrap = sel.nextElementSibling;
+    if (!wrap || !wrap.classList.contains('cus-sel')) return;
+    const trigger = wrap.querySelector('.cus-sel-trigger');
+    const opts = Array.from(wrap.querySelectorAll('.cus-sel-opt'));
+    if (!trigger || opts.length === 0) return;
+    const cur = sel.value;
+    const match = opts.find(o => o.dataset.val === cur) || opts[0];
+    trigger.childNodes.forEach(n => n.remove());
+    trigger.appendChild(document.createTextNode(match ? match.textContent : String(cur)));
+    const caret = document.createElement('i');
+    caret.className = 'fa-solid fa-chevron-down cus-sel-caret';
+    trigger.appendChild(caret);
+    opts.forEach(o => {
+        const active = o.dataset.val === cur;
+        o.classList.toggle('active', active);
+        o.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+}
+
+function closeAllCusSel() {
+    document.querySelectorAll('.cus-sel').forEach(w => {
+        w.removeAttribute('data-open');
+        const panel = w.querySelector('.cus-sel-panel');
+        const trigger = w.querySelector('.cus-sel-trigger');
+        if (panel) panel.style.display = 'none';
+        if (trigger) trigger.setAttribute('aria-expanded', 'false');
+    });
+}
+
+function initCustomSelects() {
+    document.querySelectorAll('select[data-custom-select]').forEach(sel => {
+        if (sel.dataset.customInit) return;
+        sel.dataset.customInit = '1';
+        const wrap = document.createElement('div');
+        wrap.className = 'cus-sel';
+        const trigger = document.createElement('button');
+        trigger.type = 'button';
+        trigger.className = 'cus-sel-trigger';
+        trigger.setAttribute('aria-haspopup', 'listbox');
+        trigger.setAttribute('aria-expanded', 'false');
+        const panel = document.createElement('div');
+        panel.className = 'cus-sel-panel';
+        panel.setAttribute('role', 'listbox');
+        panel.style.display = 'none';
+        Array.from(sel.options).forEach(opt => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'cus-sel-opt';
+            b.setAttribute('role', 'option');
+            b.dataset.val = opt.value;
+            b.textContent = opt.textContent;
+            b.addEventListener('click', () => {
+                sel.value = opt.value;
+                sel.dispatchEvent(new Event('change', { bubbles: true }));
+                refreshCusSel(sel);
+                closeAllCusSel();
+            });
+            panel.appendChild(b);
+        });
+        trigger.addEventListener('click', e => {
+            e.stopPropagation();
+            const isOpen = panel.style.display !== 'none';
+            closeAllCusSel();
+            if (!isOpen) {
+                refreshCusSel(sel);
+                panel.style.display = 'block';
+                wrap.setAttribute('data-open', '');
+                trigger.setAttribute('aria-expanded', 'true');
+            }
+        });
+        wrap.appendChild(trigger);
+        wrap.appendChild(panel);
+        sel.parentNode.insertBefore(wrap, sel.nextSibling);
+        refreshCusSel(sel);
+    });
+}
+
+document.addEventListener('click', closeAllCusSel);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeAllCusSel(); });
+
 function loadPersonaSettings() {
     try {
         const p = JSON.parse(localStorage.getItem('senka_persona') || '{}');
@@ -1318,6 +1401,7 @@ async function saveAccessCode() {
 function openStoryModal() {
     loadPersonaSettings();
     renderStoryGrid();
+    document.querySelectorAll('select[data-custom-select]').forEach(refreshCusSel);
     document.getElementById('story-modal').style.display = 'flex';
 }
 
@@ -1393,8 +1477,14 @@ function renderStoryGrid() {
 
 function setModeBadge() {
     const badge = document.getElementById('mode-badge');
-    if (storyMode === 'normal') { badge.style.display = 'none'; return; }
-    badge.style.display = 'inline-block';
+    const continueBtn = document.getElementById('continue-btn');
+    if (storyMode === 'normal') {
+        if (badge) badge.style.display = 'none';
+        if (continueBtn) continueBtn.style.display = 'none';
+        return;
+    }
+    if (badge) badge.style.display = 'inline-block';
+    if (continueBtn) continueBtn.style.display = '';
     badge.innerText = storyMode === 'story' ? 'Cerita Bebas' : 'Cerita: ' + (activeStory ? activeStory.title.split('|')[0].trim() : 'All');
 }
 

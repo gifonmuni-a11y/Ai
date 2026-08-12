@@ -538,3 +538,70 @@ select.modal-select option { background: rgba(10, 14, 30, 0.98); color: #e2e8f0;
 .modal-btn.small { padding: 7px 12px; font-size: 0.75rem; }
 #continue-btn { border-color: rgba(255, 200, 210, 0.42); color: #FFC8D2; }
 #continue-btn:hover { background: rgba(255, 200, 210, 0.18); color: #fff; box-shadow: 0 0 14px rgba(255, 200, 210, 0.45); }
+
+/* ===== Custom dropdown (pengganti select native di mobile) ===== */
+select[data-custom-select] { display: none !important; }
+.cus-sel { position: relative; width: 100%; }
+.persona-row .cus-sel { flex: 1 1 130px; min-width: 130px; }
+.cus-sel-trigger {
+    width: 100%;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    background: rgba(10, 14, 30, 0.72);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #fff;
+    padding: 10px 14px;
+    border-radius: 10px;
+    outline: none;
+    font-size: 0.9rem;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 0.25s ease, background-color 0.25s ease, transform 0.15s ease;
+}
+.cus-sel-trigger:hover { border-color: rgba(255, 255, 255, 0.32); background-color: rgba(20, 28, 52, 0.85); }
+.cus-sel-trigger:active { transform: scale(0.99); }
+.cus-sel[data-open] .cus-sel-trigger { border-color: #FFC8D2; box-shadow: 0 0 0 3px rgba(255, 200, 210, 0.12); }
+.cus-sel-caret { color: #FFC8D2; font-size: 0.75rem; flex-shrink: 0; transition: transform 0.2s ease; }
+.cus-sel[data-open] .cus-sel-caret { transform: rotate(180deg); }
+.cus-sel-panel {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    z-index: 60;
+    background: rgba(8, 12, 26, 0.96);
+    backdrop-filter: blur(16px);
+    border: 1px solid rgba(139, 92, 246, 0.45);
+    border-radius: 12px;
+    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.55), 0 0 18px rgba(139, 92, 246, 0.18);
+    padding: 6px;
+    max-height: 220px;
+    overflow-y: auto;
+    animation: cusSelIn 0.16s ease;
+    -webkit-overflow-scrolling: touch;
+}
+@keyframes cusSelIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+.cus-sel-opt {
+    display: block;
+    width: 100%;
+    min-height: 42px;
+    background: transparent;
+    border: none;
+    color: #cbd5e1;
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+.cus-sel-opt:hover { background: rgba(139, 92, 246, 0.18); color: #fff; }
+.cus-sel-opt.active {
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.28), rgba(139, 92, 246, 0.35));
+    color: #fff;
+    border: 1px solid rgba(139, 92, 246, 0.5);
+}

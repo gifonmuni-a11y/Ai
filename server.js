@@ -1520,7 +1520,7 @@ const TIKTOK_TTS_URL = process.env.TIKTOK_TTS_URL || 'https://tiktok-tts.weilnet
 const TIKTOK_TTS_URL_OFFICIAL = process.env.TIKTOK_TTS_URL_OFFICIAL || 'https://api16-normal-c-useast1a.tiktokv.com/media/api/text/speech/invoke/';
 const TIKTOK_TTS_VOICE = process.env.TIKTOK_TTS_VOICE || 'jp_001';
 const TIKTOK_VOICES = { jpn: TIKTOK_TTS_VOICE, ind: process.env.TIKTOK_TTS_VOICE_ID || 'id_001', eng: (process.env.TIKTOK_TTS_VOICE_EN || 'en_001') };
-const TIKTOK_TTS_TIMEOUT = Number(process.env.TIKTOK_TTS_TIMEOUT) || 5000;
+const TIKTOK_TTS_TIMEOUT = Number(process.env.TIKTOK_TTS_TIMEOUT) || 25000;
 
 function detectTtsLang(text) {
     if (/[\u3040-\u30ff\u4e00-\u9faf\uac00-\ud7af]/.test(text)) return 'jpn';
@@ -1717,12 +1717,17 @@ async function tiktokTts(text, lang) {
     console.error(`[tts][tiktok] voice=${voice} chunk=${chunks.length} seg | teks=${String(text).length}char`);
     const segments = [];
     for (let i = 0; i < chunks.length; i++) {
-        if (i > 0) await new Promise(r => setTimeout(r, 150));
+        if (i > 0) await new Promise(r => setTimeout(r, 350));
         console.time(`[tts][tiktok] chunk-${i + 1}`);
-        const b64 = await tiktokRace(chunks[i], voice);
+        let b64 = await tiktokRace(chunks[i], voice);
+        if (!b64) {
+            await new Promise(r => setTimeout(r, 800));
+            console.error(`[tts][tiktok] chunk-${i + 1} gagal → retry 1`);
+            b64 = await tiktokRace(chunks[i], voice);
+        }
         console.timeEnd(`[tts][tiktok] chunk-${i + 1}`);
         if (!b64) {
-            console.error(`[tts][tiktok] chunk-${i + 1} GAGAL → fallback ke Edge`);
+            console.error(`[tts][tiktok] chunk-${i + 1} GAGAL 2x → fallback ke Edge`);
             console.timeEnd('[tts][tiktok] total');
             return null;
         }
