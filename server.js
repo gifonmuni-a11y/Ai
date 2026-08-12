@@ -533,15 +533,15 @@ const SEARCH_TOOL = {
     }
 };
 
-const SEARCH_RESULT_HINT = `Kamu baru saja menerima hasil pencarian internet di atas — itu fakta terkini (per tanggal ${TODAY_STR}). Sampaikan jawabanmu kepada user dengan gaya karaktermu sendiri (tetap dalam karakter, jangan seperti pembaca berita robotik), pakai bahasa yang sama dengan user, dan jangan pernah menyebut bahwa kamu 'mencari di internet' atau menyebut tool yang kamu pakai.`;
+const SEARCH_RESULT_HINT = `Hasil pencarian internet di atas adalah FAKTA TERKINI (per tanggal ${TODAY_STR}). Jawablah pertanyaan user secara langsung dan spesifik berdasarkan hasil tersebut — sebutkan judul, angka, nama, atau detail yang ada di hasil. Jika hasil tidak relevan dengan pertanyaan, jawab dari pengetahuanmu dengan percaya diri. JANGAN menanyakan balik hal yang sudah bisa dijawab, JANGAN bilang "tidak bisa", JANGAN bilang "tergantung platform", dan JANGAN menyebut bahwa kamu mencari di internet. Tetap gunakan gaya karaktermu dan bahasa yang sama dengan user.`;
 
-async function ddgSearch(query, maxResults = 3) {
+async function ddgSearch(query, maxResults = 3, timeoutMs = 12000) {
     try {
         const r = await fetch('https://html.duckduckgo.com/html/?q=' + encodeURIComponent(query), {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36'
             },
-            signal: AbortSignal.timeout(12000)
+            signal: AbortSignal.timeout(timeoutMs)
         });
         if (!r.ok) return [];
         const html = await r.text();
@@ -579,13 +579,13 @@ function decodeBingUrl(href) {
     return href;
 }
 
-async function bingSearch(query, maxResults = 3) {
+async function bingSearch(query, maxResults = 3, timeoutMs = 12000) {
     try {
         const r = await fetch('https://www.bing.com/search?q=' + encodeURIComponent(query) + '&count=10&setlang=id', {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36'
             },
-            signal: AbortSignal.timeout(12000)
+            signal: AbortSignal.timeout(timeoutMs)
         });
         if (!r.ok) return [];
         const html = await r.text();
@@ -604,11 +604,11 @@ async function bingSearch(query, maxResults = 3) {
     }
 }
 
-async function newsSearch(query, maxResults = 3) {
+async function newsSearch(query, maxResults = 3, timeoutMs = 12000) {
     try {
         const r = await fetch('https://news.google.com/rss/search?q=' + encodeURIComponent(query) + '&hl=id&gl=ID&ceid=ID:id', {
             headers: { 'User-Agent': 'Mozilla/5.0' },
-            signal: AbortSignal.timeout(12000)
+            signal: AbortSignal.timeout(timeoutMs)
         });
         if (!r.ok) return [];
         const xml = await r.text();
@@ -630,28 +630,64 @@ async function newsSearch(query, maxResults = 3) {
     }
 }
 
-async function searchWeb(query, maxResults = 3) {
+async function searchWeb(query, maxResults = 3, timeoutMs = 12000) {
     const isNews = /berita|kabar|news|terkini|hari\s+ini/i.test(query);
-    const sources = isNews ? [newsSearch, bingSearch, ddgSearch] : [ddgSearch, bingSearch, newsSearch];
+    const sources = isNews ? [newsSearch, bingSearch, ddgSearch] : [bingSearch, ddgSearch, newsSearch];
+    const batches = await Promise.all(sources.map(fn => fn(query, maxResults, timeoutMs).catch(() => [])));
     const seen = new Set();
     const merged = [];
-    for (const fn of sources) {
-        try {
-            const res = await fn(query, maxResults);
-            for (const x of res) {
-                if (!x || !x.title || seen.has(x.url)) continue;
-                seen.add(x.url);
-                merged.push(x);
-                if (merged.length >= maxResults) return merged;
-            }
-        } catch (e) { }
+    for (const batch of batches) {
+        for (const x of batch) {
+            if (!x || !x.title || seen.has(x.url)) continue;
+            seen.add(x.url);
+            merged.push(x);
+            if (merged.length >= maxResults) return merged;
+        }
     }
     return merged;
 }
 
 const SEARCH_INTENT_RE = /harga|berapa\s+\S*(sekarang|hari\s+ini|saat\s+ini|terbaru)|cuaca|ramalan|berita|kabar|info\s+terbaru|jadwal|tayang|rilis|bitcoin|btc|crypto|kripto|saham|emas\s+hari|kurs|nilai\s+tukar|hasil\s+pertandingan|pemenang|juara|chart|prediksi|rekomendasi\s+anime|sedang\s+tayang|update|latest|terkini/i;
 
-const SEARCH_DETECTOR_SYS = 'Kamu adalah pendeteksi kebutuhan pencarian web. Jika pertanyaan user membutuhkan data terkini dari internet (berita terbaru, harga pasar, cuaca, jadwal tayang, hasil pertandingan, fakta terbaru, dll), panggil fungsi search_web dengan kata kunci pencarian yang jelas dan spesifik. Jika tidak membutuhkan, balas cukup dengan kata "TIDAK".';
+const SEARCH_DETECTOR_SYS = 'Kamu adalah pendeteksi kebutuhan pencarian web. Jika pertanyaan user membutuhkan data terkini dari internet (berita terbaru, harga pasar, cuaca, jadwal tayang, hasil pertandingan, fakta terbaru, dll), panggil fungsi search_web dengan kata kunci pencarian yang jelas dan spesifik. PERTAHANKAN kata kunci penting dari pertanyaan user apa adanya (misal: "hari ini", nama benda/topik), jangan diubah atau dihilangkan. Jika tidak membutuhkan, balas cukup dengan kata "TIDAK".';
+
+const SEARCH_STOPWORDS = new Set(['yang', 'dengan', 'untuk', 'dari', 'ini', 'apa', 'dan', 'atau', 'sih', 'dong', 'kah', 'nya', 'di', 'ke', 'pada', 'sebutkan', 'tolong', 'coba', 'aku', 'saya', 'kamu', 'senka', 'sudah', 'belum', 'masih', 'juga', 'adalah', 'akan', 'bisa', 'tolong']);
+
+function hasRelevantResults(text, query) {
+    const q = String(query || '').toLowerCase();
+    const words = [...new Set(q.split(/[^a-z0-9]/i).map(w => w.trim()).filter(w => w.length >= 4 && !SEARCH_STOPWORDS.has(w)))];
+    const blocks = (text || '').split(/\n(?=\d+\.\s)/).map(b => b.slice(0, 160).toLowerCase());
+    if (!words.length) return true;
+    const distinctHit = new Set();
+    for (const b of blocks) {
+        for (const w of words) { if (b.includes(w)) distinctHit.add(w); }
+    }
+    return distinctHit.size >= Math.min(2, words.length);
+}
+
+function buildSearchCandidates(preflightQuery, rawText) {
+    const base = [];
+    if (rawText && rawText.trim()) {
+        const cleaned = rawText.replace(/[?؟]/g, '').trim();
+        if (cleaned) base.push(cleaned);
+    }
+    if (preflightQuery && preflightQuery.trim() && preflightQuery.trim() !== base[0]) base.push(preflightQuery.trim());
+    const out = [];
+    const now = new Date();
+    const monthYear = now.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+    const year = String(now.getFullYear());
+    for (const q of base) {
+        out.push(q);
+        if (/\b(19|20)\d{2}\b/.test(q)) continue;
+        out.push(`${q} ${monthYear}`);
+        out.push(`${q} ${year}`);
+    }
+    return [...new Set(out)].slice(0, 4);
+}
+
+function withTimeout(promise, ms) {
+    return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout ' + ms + 'ms')), ms))]);
+}
 
 function lastUserText(messages) {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -661,9 +697,9 @@ function lastUserText(messages) {
     return '';
 }
 
-async function runSearchTool(query) {
+async function runSearchTool(query, timeoutMs = 12000) {
     if (!query) return 'Tidak ada hasil pencarian yang relevan.';
-    const results = await searchWeb(query.slice(0, 200));
+    const results = await searchWeb(query.slice(0, 200), 3, timeoutMs);
     if (!results.length) return 'Tidak ada hasil pencarian yang relevan.';
     return results.map((x, i) => `${i + 1}. ${x.title}${x.date ? ` (${x.date.slice(0, 16)})` : ''}\n   Sumber: ${x.url}\n   ${x.snippet}`).join('\n\n');
 }
@@ -676,33 +712,51 @@ async function applyWebSearch(messages) {
         const preflights = [];
         if (process.env.GROQ_API_KEY) preflights.push(['groq', 'llama-3.1-8b-instant']);
         if (process.env.GEMINI_API_KEY) preflights.push(['gemini', process.env.GEMINI_MODEL || 'gemini-3.6-flash']);
-        for (const [pv, pid] of preflights) {
-            try {
-                const r = await callProvider(pv, [
+        const preflightRes = await Promise.all(preflights.map(([pv, pid]) =>
+            withTimeout(
+                callProvider(pv, [
                     { role: 'system', content: SEARCH_DETECTOR_SYS },
                     { role: 'user', content: lastText.slice(0, 400) }
-                ], pid, false, 0, { tools: [SEARCH_TOOL], max_tokens: 80 });
-                if (r && r.ok) {
-                    const data = await r.json();
-                    const msg = data?.choices?.[0]?.message;
-                    const call = (msg?.tool_calls || []).find(c => c?.function?.name === 'search_web');
-                    if (call) {
-                        try { query = (JSON.parse(call.function.arguments || '{}').query || '').trim(); } catch (e) { }
-                        if (!query) query = (call.function.arguments || '').replace(/[{}"\\]/g, ' ').trim();
-                    }
-                }
-                if (query) break;
-            } catch (e) { }
+                ], pid, false, 0, { tools: [SEARCH_TOOL], max_tokens: 80 }).then(r => (r && r.ok) ? r.json() : null),
+                4000
+            ).catch(() => null)
+        ));
+        for (const data of preflightRes) {
+            if (!data) continue;
+            const msg = data?.choices?.[0]?.message;
+            const call = (msg?.tool_calls || []).find(c => c?.function?.name === 'search_web');
+            if (!call) continue;
+            try { query = (JSON.parse(call.function.arguments || '{}').query || '').trim(); } catch (e) { }
+            if (!query) query = (call.function.arguments || '').replace(/[{}"\\]/g, ' ').trim();
+            if (query) break;
         }
         if (!query && SEARCH_INTENT_RE.test(lastText)) query = lastText.replace(/[?؟]/g, '').slice(0, 200);
         if (!query) return messages;
-        const toolContent = await runSearchTool(query);
-        console.error('[SEARCH DBG] query:', query, '| hasil:', JSON.stringify(toolContent).slice(0, 300));
+        const deadline = Date.now() + 12000;
+        let toolContent = '';
+        let bestContent = '';
+        for (const q of buildSearchCandidates(query, lastText)) {
+            const remaining = deadline - Date.now();
+            if (remaining <= 0) break;
+            const content = await runSearchTool(q, Math.min(remaining, 8000));
+            console.error('[SEARCH DBG] candidate:', q.slice(0, 80), '| hasil:', JSON.stringify(content).slice(0, 180));
+            if (!content || content.startsWith('Tidak ada hasil')) continue;
+            if (!bestContent) bestContent = content;
+            if (hasRelevantResults(content, q)) { toolContent = content; break; }
+        }
+        if (!toolContent) toolContent = bestContent;
+        console.error('[SEARCH DBG] final dipakai | relevan:', !!toolContent, '| panjang:', (toolContent || '').length);
         if (!toolContent || toolContent.startsWith('Tidak ada hasil')) return messages;
         const out = [...messages];
-        out.push({ role: 'system', content: `HASIL PENCARIAN INTERNET (per tanggal ${TODAY_STR}):\n${toolContent}\n\n${SEARCH_RESULT_HINT}` });
+        const firstSys = out.find(m => m.role === 'system' && typeof m.content === 'string');
+        if (firstSys) {
+            firstSys.content += `\n\nHASIL PENCARIAN INTERNET (per tanggal ${TODAY_STR}):\n${toolContent}\n\n${SEARCH_RESULT_HINT}`;
+        } else {
+            out.push({ role: 'system', content: `HASIL PENCARIAN INTERNET (per tanggal ${TODAY_STR}):\n${toolContent}\n\n${SEARCH_RESULT_HINT}` });
+        }
         return out;
     } catch (e) {
+        console.error('[SEARCH DBG] error:', e.message);
         return messages;
     }
 }
