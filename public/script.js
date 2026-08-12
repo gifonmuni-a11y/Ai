@@ -845,7 +845,7 @@ function buildMsgEl(m) {
     });
     addMsgActions(bubble, m.role === 'user' ? 'user' : 'senka');
     if (m.role === 'assistant') {
-        if (bubbleText.trim()) maybeAttachTranslate(bubble, bubbleText.trim());
+        if (bubbleText.trim()) attachCallTranslation(bubble, bubbleText.trim());
         attachAiActions(bubble, m, lastAssistantIdx() === memoryList.indexOf(m));
     }
     return bubble;
@@ -2609,7 +2609,7 @@ async function streamAssistantReply(payloadMessages) {
         msgDiv.innerHTML = formatReply(renderText);
         if (stk) appendStickerImg(msgDiv, stk);
         if (fileReq) msgDiv.appendChild(makeFileCard(fileReq.meta));
-        if (!fileReq && displayText.trim()) maybeAttachTranslate(msgDiv, displayText.trim());
+        if (!fileReq && displayText.trim()) attachCallTranslation(msgDiv, displayText.trim());
         addMsgActions(msgDiv, 'senka');
 
         memoryList.push({ role: 'assistant', content: [{ type: "text", text: displayText }] });
