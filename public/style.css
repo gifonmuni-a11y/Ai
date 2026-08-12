@@ -284,12 +284,13 @@ textarea.modal-input { resize: none; font-family: inherit; }
 .admin-code-row { display: flex; gap: 10px; }
 .admin-code-row .modal-input { flex: 1; }
 
-.avatar-wrap.admin-holding { animation: adminHoldPulse 1.2s ease-in-out infinite; }
+.avatar-wrap.admin-holding, #senka-model.admin-holding { animation: adminHoldPulse 1.2s ease-in-out infinite; }
 @keyframes adminHoldPulse {
     0%, 100% { filter: none; transform: scale(1); }
     50% { filter: drop-shadow(0 0 10px rgba(56, 189, 248, 0.9)); transform: scale(1.06); }
 }
 .avatar-wrap.admin-holding .avatar { cursor: progress; }
+#senka-model { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; cursor: pointer; }
 
 .search-results { display: flex; flex-direction: column; gap: 6px; max-height: 300px; overflow-y: auto; margin-top: 10px; scroll-behavior: smooth; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
 .search-results::-webkit-scrollbar { width: 4px; }

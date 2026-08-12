@@ -1182,34 +1182,65 @@ function savePersonaSettings() {
 document.getElementById('access-code-input').addEventListener('keydown', e => { if (e.key === 'Enter') submitAccessCode(); });
 
 let adminHoldTimer = null;
+let adminHoldWarned = false;
+let adminTapTimes = [];
 
 function startAdminHold(e) {
-    e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
+    if (e && e.cancelable !== false && e.cancelable) { try { e.preventDefault(); } catch (err) { } }
     if (adminHoldTimer) return;
-    try { if (e.target && e.target.setPointerCapture && e.pointerId != null) e.target.setPointerCapture(e.pointerId); } catch (err) { }
+    try { if (e && e.target && e.target.setPointerCapture && e.pointerId != null) e.target.setPointerCapture(e.pointerId); } catch (err) { }
     const wrap = document.querySelector('.avatar-wrap');
     if (wrap) wrap.classList.add('admin-holding');
+    if (e && e.target && e.target.classList) { try { e.target.classList.add('admin-holding'); } catch (err) { } }
+    adminHoldWarned = false;
     adminHoldTimer = setTimeout(() => {
         adminHoldTimer = null;
         if (wrap) wrap.classList.remove('admin-holding');
+        if (e && e.target && e.target.classList) { try { e.target.classList.remove('admin-holding'); } catch (err) { } }
         openAdminLogin();
     }, 10000);
+    setTimeout(() => {
+        if (adminHoldTimer && !adminHoldWarned) {
+            adminHoldWarned = true;
+            showToast('Lepaskan untuk membuka Admin Panel...');
+        }
+    }, 8000);
 }
 
 function cancelAdminHold() {
     clearTimeout(adminHoldTimer);
     adminHoldTimer = null;
+    adminHoldWarned = false;
     const wrap = document.querySelector('.avatar-wrap');
     if (wrap) wrap.classList.remove('admin-holding');
 }
 
-const adminAvatarEl = document.querySelector('.avatar-wrap .avatar');
-if (adminAvatarEl) {
-    adminAvatarEl.addEventListener('pointerdown', startAdminHold);
-    ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => adminAvatarEl.addEventListener(ev, cancelAdminHold));
-    adminAvatarEl.addEventListener('contextmenu', e => e.preventDefault());
-    adminAvatarEl.addEventListener('dragstart', e => e.preventDefault());
+function trackAdminTap() {
+    const now = Date.now();
+    adminTapTimes = adminTapTimes.filter(t => now - t < 2500);
+    adminTapTimes.push(now);
+    if (adminTapTimes.length >= 5) {
+        adminTapTimes = [];
+        openAdminLogin();
+    }
 }
+
+const ADMIN_HOLD_SELECTORS = ['.avatar-wrap .avatar', '#senka-model'];
+const adminHoldEls = document.querySelectorAll(ADMIN_HOLD_SELECTORS.join(','));
+adminHoldEls.forEach(el => {
+    try {
+        el.addEventListener('pointerdown', startAdminHold);
+        ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => el.addEventListener(ev, cancelAdminHold));
+        el.addEventListener('touchstart', startAdminHold);
+        ['touchend', 'touchcancel'].forEach(ev => el.addEventListener(ev, cancelAdminHold));
+        el.addEventListener('mousedown', startAdminHold);
+        el.addEventListener('mouseup', cancelAdminHold);
+        el.addEventListener('contextmenu', e => { try { e.preventDefault(); } catch (err) { } });
+        el.addEventListener('dragstart', e => { try { e.preventDefault(); } catch (err) { } });
+        el.addEventListener('click', trackAdminTap);
+    } catch (err) { }
+});
 
 function openAdminLogin() {
     document.getElementById('admin-login-modal').style.display = 'flex';

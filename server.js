@@ -633,11 +633,20 @@ async function newsSearch(query, maxResults = 3) {
 async function searchWeb(query, maxResults = 3) {
     const isNews = /berita|kabar|news|terkini|hari\s+ini/i.test(query);
     const sources = isNews ? [newsSearch, bingSearch, ddgSearch] : [ddgSearch, bingSearch, newsSearch];
+    const seen = new Set();
+    const merged = [];
     for (const fn of sources) {
-        const res = await fn(query, maxResults);
-        if (res.length) return res;
+        try {
+            const res = await fn(query, maxResults);
+            for (const x of res) {
+                if (!x || !x.title || seen.has(x.url)) continue;
+                seen.add(x.url);
+                merged.push(x);
+                if (merged.length >= maxResults) return merged;
+            }
+        } catch (e) { }
     }
-    return [];
+    return merged;
 }
 
 const SEARCH_INTENT_RE = /harga|berapa\s+\S*(sekarang|hari\s+ini|saat\s+ini|terbaru)|cuaca|ramalan|berita|kabar|info\s+terbaru|jadwal|tayang|rilis|bitcoin|btc|crypto|kripto|saham|emas\s+hari|kurs|nilai\s+tukar|hasil\s+pertandingan|pemenang|juara|chart|prediksi|rekomendasi\s+anime|sedang\s+tayang|update|latest|terkini/i;
@@ -687,9 +696,9 @@ async function applyWebSearch(messages) {
         }
         if (!query && SEARCH_INTENT_RE.test(lastText)) query = lastText.replace(/[?؟]/g, '').slice(0, 200);
         if (!query) return messages;
-
         const toolContent = await runSearchTool(query);
         console.error('[SEARCH DBG] query:', query, '| hasil:', JSON.stringify(toolContent).slice(0, 300));
+        if (!toolContent || toolContent.startsWith('Tidak ada hasil')) return messages;
         const out = [...messages];
         out.push({ role: 'system', content: `HASIL PENCARIAN INTERNET (per tanggal ${TODAY_STR}):\n${toolContent}\n\n${SEARCH_RESULT_HINT}` });
         return out;
@@ -770,6 +779,25 @@ app.post('/api/access-code', async (req, res) => {
         }
     } catch (e) { }
     res.json({ ok: true, saved, code: c });
+});
+
+app.get('/api/search-debug', async (req, res) => {
+    const q = String(req.query.q || '').trim().slice(0, 200);
+    if (!q) return res.json({ error: 'Parameter q wajib diisi' });
+    const report = { query: q, today: TODAY_STR, sources: {} };
+    const sources = { ddg: ddgSearch, bing: bingSearch, news: newsSearch };
+    for (const [name, fn] of Object.entries(sources)) {
+        const t0 = Date.now();
+        try {
+            const r = await fn(q, 3);
+            report.sources[name] = { ok: true, count: r.length, ms: Date.now() - t0, first: r[0] || null };
+        } catch (e) {
+            report.sources[name] = { ok: false, ms: Date.now() - t0, error: String(e.message || e).slice(0, 120) };
+        }
+    }
+    const all = await searchWeb(q, 3);
+    report.merged = all;
+    res.json(report);
 });
 
 app.post('/api/chat', async (req, res) => {
