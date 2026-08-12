@@ -617,10 +617,11 @@ async function newsSearch(query, maxResults = 3) {
             const block = item[1];
             const title = (block.match(/<title>(.*?)<\/title>/) || [])[1] || '';
             const link = (block.match(/<link>(.*?)<\/link>/) || [])[1] || '';
+            const pubDate = (block.match(/<pubDate>(.*?)<\/pubDate>/) || [])[1] || '';
             let desc = (block.match(/<description>(.*?)<\/description>/) || [])[1] || '';
             desc = desc.replace(/<!\[CDATA\[|\]\]>/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
             if (!title) continue;
-            results.push({ title: title.trim().slice(0, 200), url: link, snippet: desc.slice(0, 400) });
+            results.push({ title: title.trim().slice(0, 200), url: link, snippet: desc.slice(0, 400), date: pubDate });
             if (results.length >= maxResults) break;
         }
         return results;
@@ -630,7 +631,8 @@ async function newsSearch(query, maxResults = 3) {
 }
 
 async function searchWeb(query, maxResults = 3) {
-    const sources = [ddgSearch, bingSearch, newsSearch];
+    const isNews = /berita|kabar|news|terkini|hari\s+ini/i.test(query);
+    const sources = isNews ? [newsSearch, bingSearch, ddgSearch] : [ddgSearch, bingSearch, newsSearch];
     for (const fn of sources) {
         const res = await fn(query, maxResults);
         if (res.length) return res;
@@ -654,7 +656,7 @@ async function runSearchTool(query) {
     if (!query) return 'Tidak ada hasil pencarian yang relevan.';
     const results = await searchWeb(query.slice(0, 200));
     if (!results.length) return 'Tidak ada hasil pencarian yang relevan.';
-    return results.map((x, i) => `${i + 1}. ${x.title}\n   Sumber: ${x.url}\n   ${x.snippet}`).join('\n\n');
+    return results.map((x, i) => `${i + 1}. ${x.title}${x.date ? ` (${x.date.slice(0, 16)})` : ''}\n   Sumber: ${x.url}\n   ${x.snippet}`).join('\n\n');
 }
 
 async function applyWebSearch(messages) {
@@ -688,9 +690,8 @@ async function applyWebSearch(messages) {
 
         const toolContent = await runSearchTool(query);
         console.error('[SEARCH DBG] query:', query, '| hasil:', JSON.stringify(toolContent).slice(0, 300));
-        const out = [...messages, { role: 'assistant', content: ' ' }];
-        out.push({ role: 'tool', tool_call_id: 'call_search_' + Date.now().toString(36), content: toolContent });
-        out.push({ role: 'system', content: SEARCH_RESULT_HINT });
+        const out = [...messages];
+        out.push({ role: 'system', content: `HASIL PENCARIAN INTERNET (per tanggal ${TODAY_STR}):\n${toolContent}\n\n${SEARCH_RESULT_HINT}` });
         return out;
     } catch (e) {
         return messages;
