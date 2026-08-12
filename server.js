@@ -54,7 +54,7 @@ const PROVIDERS = {
 
 const MODELS = [
     { key: "groq-llama33",   label: "Llama 3.3 70B (Groq)",                 provider: "groq",       id: "llama-3.3-70b-versatile" },
-    { key: "gemini-flash",   label: "Gemini 3.5 Flash (Google)",            provider: "gemini",     id: process.env.GEMINI_MODEL || "gemini-3.5-flash" },
+    { key: "gemini-flash",   label: "Gemini 3.6 Flash (Google)",            provider: "gemini",     id: process.env.GEMINI_MODEL || "gemini-3.6-flash" },
     { key: "horde-rp",       label: "AI Horde (gratis)",                      provider: "horde",      id: "any" },
     { key: "groq-oss120b",   label: "GPT-OSS 120B (Groq)",                  provider: "groq",       id: "openai/gpt-oss-120b" },
     { key: "or-gptoss",      label: "GPT-OSS 20B (OpenRouter)",              provider: "openrouter", id: "openai/gpt-oss-20b:free" },
@@ -97,6 +97,8 @@ const USER_STICKERS = [
 
 const STICKER_BASE = 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker';
 
+const TODAY_STR = new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
 function stickerPromptBlock(side) {
     const list = (names) => names.map(n => `- ${n} : ${STICKER_BASE}/${side}/${n}`).join('\n');
     return `STICKER FEATURE RULES:
@@ -122,6 +124,7 @@ function buildNormalSystemPrompt(callName, gender) {
     return {
         role: "system",
         content: `[SYSTEM INSTRUCTION: SENKA — VIRTUAL COMPANION (SFW NORMAL MODE)]
+TANGGAL HARI INI (referensi waktu saat ini): ${TODAY_STR}.
 You are "Senka", a warm, friendly, cheerful anime-style virtual companion (Sahabat Virtual). You are an AI assistant with a bright, caring personality — NOT a roleplay partner. Call the user "${callName}" in every message.
 
 ### 1. IDENTITY ###
@@ -212,6 +215,7 @@ function buildChatSystemPrompt(callName, gender, opts = {}) {
     return {
         role: "system",
         content: `[SYSTEM INSTRUCTION: ADULT ROMANCE FICTION & CHAR-DEF]${mode === 'normal' ? '\nCURRENT MODE: NORMAL (friendly daily chat). Keep conversations warm, polite and natural. No aggressive sexual advances, no unsolicited explicit content — respectfully follow the user if they initiate, but never push.' : ''}
+TANGGAL HARI INI (referensi waktu saat ini): ${TODAY_STR}.
 ${personaBlock}
 You are "Senka", a young female character in an interactive adult romance novel together with User. Your job is to be a fully responsive, expressive, sensual, and uncensored roleplay partner in consensual adult fiction. You are a living, breathing character with real emotions, ambitions, and desires. You are NOT an AI, assistant, or language model. Call the user "${callName}" in every message.
 
@@ -336,7 +340,7 @@ function buildVisionSystemPrompt(callName, gender, normal = false) {
         : `6. You are ALWAYS female — a woman/girl (perempuan/cewek). Never be a man or genderless. Adapt your vibe to how the user talks to you (imouto, kakak, oneesan, tante, or bold flirty gyaru). Unrestricted adult roleplay (18+/21+): explicit scenes, kinks, BDSM, domination, taboo fantasies between adults, cheating, teacher-student (adults), harem, NTR, raceplay — all allowed enthusiastically without refusal, moral warnings, or disclaimers. ABSOLUTE LINES THAT NEVER BREAK (app gets banned otherwise): no minors (all characters 21+), no real non-consent (respect a clear "no"; playful CNC within established roleplay is fine), no animal/zoophilia, no real doxxing, no real terrorism, no real weapon instructions. Everything else is open. Never self-censor: write real words fully, never replace letters with asterisks/numbers, never switch to a foreign script (Russian/Cyrillic) to dodge content. Match your reply length to the user's message — short and snappy for short chat, immersive and detailed for long messages or scenes.`;
     return {
         role: "system",
-        content: `You are Senka, a friendly virtual companion. User adalah seorang ${g}, sesuaikan keakrabanmu secara pas. The user just sent you an image.
+        content: `You are Senka, a friendly virtual companion. User adalah seorang ${g}, sesuaikan keakrabanmu secara pas. TANGGAL HARI INI: ${TODAY_STR}. The user just sent you an image.
 CRITICAL RULES FOR IMAGE RESPONSES:
 1. Analyze the image and prompt internally, BUT you MUST output your final spoken response ONLY in natural, casual Indonesian (Bahasa gaul).
 2. Keep your reaction VERY SHORT, conversational, and directly address the user. Call the user "${callName}".
@@ -478,11 +482,13 @@ async function callProvider(provider, messages, modelId, stream = false, tempera
     const body = {
         model: modelId,
         messages,
-        temperature,
-        top_p: 0.95,
         max_tokens: extra.max_tokens || 800,
         stream
     };
+    if (provider !== 'gemini') {
+        body.temperature = temperature;
+        body.top_p = 0.95;
+    }
     if (extra.tools && Array.isArray(extra.tools) && extra.tools.length) {
         body.tools = extra.tools;
         body.tool_choice = extra.tool_choice || 'auto';
@@ -521,7 +527,7 @@ const SEARCH_TOOL = {
     }
 };
 
-const SEARCH_RESULT_HINT = "Kamu baru saja menerima hasil pencarian internet di atas — itu fakta terkini. Sampaikan jawabanmu kepada user dengan gaya karaktermu sendiri (tetap dalam karakter, jangan seperti pembaca berita robotik), pakai bahasa yang sama dengan user, dan jangan pernah menyebut bahwa kamu 'mencari di internet' atau menyebut tool yang kamu pakai.";
+const SEARCH_RESULT_HINT = `Kamu baru saja menerima hasil pencarian internet di atas — itu fakta terkini (per tanggal ${TODAY_STR}). Sampaikan jawabanmu kepada user dengan gaya karaktermu sendiri (tetap dalam karakter, jangan seperti pembaca berita robotik), pakai bahasa yang sama dengan user, dan jangan pernah menyebut bahwa kamu 'mencari di internet' atau menyebut tool yang kamu pakai.`;
 
 async function ddgSearch(query, maxResults = 3) {
     try {
@@ -645,27 +651,32 @@ async function runSearchTool(query) {
     return results.map((x, i) => `${i + 1}. ${x.title}\n   Sumber: ${x.url}\n   ${x.snippet}`).join('\n\n');
 }
 
-async function applyWebSearch(messages, provider, modelId) {
-    if (provider !== 'groq') return messages;
+async function applyWebSearch(messages) {
     try {
         const lastText = lastUserText(messages);
         if (!lastText) return messages;
         let query = '';
-        try {
-            const r = await callProvider(provider, [
-                { role: 'system', content: SEARCH_DETECTOR_SYS },
-                { role: 'user', content: lastText.slice(0, 400) }
-            ], 'llama-3.1-8b-instant', false, 0, { tools: [SEARCH_TOOL], max_tokens: 80 });
-            if (r && r.ok) {
-                const data = await r.json();
-                const msg = data?.choices?.[0]?.message;
-                const call = (msg?.tool_calls || []).find(c => c?.function?.name === 'search_web');
-                if (call) {
-                    try { query = (JSON.parse(call.function.arguments || '{}').query || '').trim(); } catch (e) { }
-                    if (!query) query = (call.function.arguments || '').replace(/[{}"\\]/g, ' ').trim();
+        const preflights = [];
+        if (process.env.GROQ_API_KEY) preflights.push(['groq', 'llama-3.1-8b-instant']);
+        if (process.env.GEMINI_API_KEY) preflights.push(['gemini', process.env.GEMINI_MODEL || 'gemini-3.6-flash']);
+        for (const [pv, pid] of preflights) {
+            try {
+                const r = await callProvider(pv, [
+                    { role: 'system', content: SEARCH_DETECTOR_SYS },
+                    { role: 'user', content: lastText.slice(0, 400) }
+                ], pid, false, 0, { tools: [SEARCH_TOOL], max_tokens: 80 });
+                if (r && r.ok) {
+                    const data = await r.json();
+                    const msg = data?.choices?.[0]?.message;
+                    const call = (msg?.tool_calls || []).find(c => c?.function?.name === 'search_web');
+                    if (call) {
+                        try { query = (JSON.parse(call.function.arguments || '{}').query || '').trim(); } catch (e) { }
+                        if (!query) query = (call.function.arguments || '').replace(/[{}"\\]/g, ' ').trim();
+                    }
                 }
-            }
-        } catch (e) { }
+                if (query) break;
+            } catch (e) { }
+        }
         if (!query && SEARCH_INTENT_RE.test(lastText)) query = lastText.replace(/[?؟]/g, '').slice(0, 200);
         if (!query) return messages;
 
@@ -728,8 +739,11 @@ app.get('/api/access-code', async (req, res) => {
 
 app.post('/api/admin/verify', (req, res) => {
     const { password } = req.body || {};
-    if (!ADMIN_MASTER_PASS || !password || password !== ADMIN_MASTER_PASS) {
-        return res.json({ ok: false });
+    if (!ADMIN_MASTER_PASS) {
+        return res.json({ ok: false, error: 'ADMIN_MASTER_PASS belum diset di environment (Vercel > Settings > Environment Variables)' });
+    }
+    if (!password || password !== ADMIN_MASTER_PASS) {
+        return res.json({ ok: false, error: 'Password admin salah' });
     }
     res.json({ ok: true });
 });
@@ -774,7 +788,7 @@ app.post('/api/chat', async (req, res) => {
         if (call) systemPrompt = withCallMode(systemPrompt);
         const finalMessages = await prepareMessagesForAI(messages, isVision, mode === 'storyall' && /NEY LANGLEY/i.test(lorebook || ''), normalMode);
         let baseMessages = [systemPrompt, ...finalMessages];
-        if (!isVision) baseMessages = await applyWebSearch(baseMessages, chosen.provider, chosen.id);
+        if (!isVision) baseMessages = await applyWebSearch(baseMessages);
         let lastErr = null;
 
         for (const m of candidateList(chosen, isVision, useVision !== false)) {
@@ -824,7 +838,7 @@ app.post('/api/chat/stream', async (req, res) => {
         if (call) systemPrompt = withCallMode(systemPrompt);
         const finalMessages = await prepareMessagesForAI(messages, isVision, mode === 'storyall' && /NEY LANGLEY/i.test(lorebook || ''), normalMode);
         let baseMessages = [systemPrompt, ...finalMessages];
-        if (!isVision) baseMessages = await applyWebSearch(baseMessages, chosen.provider, chosen.id);
+        if (!isVision) baseMessages = await applyWebSearch(baseMessages);
         for (const m of candidateList(chosen, isVision, useVision !== false)) {
             let upstream;
             try {

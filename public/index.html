@@ -218,7 +218,7 @@
                 <h3><i class="fa-solid fa-shield-halved"></i> Admin Login</h3>
                 <i class="fa-solid fa-xmark modal-close" onclick="closeAdminLogin()"></i>
             </div>
-            <p class="modal-hint">Masukkan Password Admin Utama untuk membuka panel developer.</p>
+            <p class="modal-hint">Masukkan Password Admin Utama (dari env <b>ADMIN_MASTER_PASS</b> di Vercel) untuk membuka panel developer.</p>
             <input type="password" id="admin-pass-input" class="modal-input" placeholder="Password Admin Utama" autocomplete="off" style="margin-top:14px;">
             <div class="modal-actions" style="margin-top:18px;display:flex;gap:10px;justify-content:flex-end;">
                 <button class="modal-btn ghost" onclick="closeAdminLogin()">Batal</button>

@@ -1142,7 +1142,11 @@ async function submitAccessCode() {
     const input = document.getElementById('access-code-input').value.trim();
     if (!input) return;
     const activeCode = await getActiveAccessCode();
-    if (activeCode && input === activeCode) {
+    if (!activeCode) {
+        showToast('Kode akses belum diatur — hubungi developer');
+        return;
+    }
+    if (input === activeCode) {
         localStorage.setItem('senka_story_access', 'true');
         closeAccessGate();
         openStoryModal();
@@ -1182,6 +1186,7 @@ let adminHoldTimer = null;
 function startAdminHold(e) {
     e.preventDefault();
     if (adminHoldTimer) return;
+    try { if (e.target && e.target.setPointerCapture && e.pointerId != null) e.target.setPointerCapture(e.pointerId); } catch (err) { }
     const wrap = document.querySelector('.avatar-wrap');
     if (wrap) wrap.classList.add('admin-holding');
     adminHoldTimer = setTimeout(() => {
@@ -1200,8 +1205,10 @@ function cancelAdminHold() {
 
 const adminAvatarEl = document.querySelector('.avatar-wrap .avatar');
 if (adminAvatarEl) {
-    ['touchstart', 'mousedown'].forEach(ev => adminAvatarEl.addEventListener(ev, startAdminHold));
-    ['touchend', 'touchcancel', 'mouseup', 'mouseleave', 'contextmenu'].forEach(ev => adminAvatarEl.addEventListener(ev, cancelAdminHold));
+    adminAvatarEl.addEventListener('pointerdown', startAdminHold);
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => adminAvatarEl.addEventListener(ev, cancelAdminHold));
+    adminAvatarEl.addEventListener('contextmenu', e => e.preventDefault());
+    adminAvatarEl.addEventListener('dragstart', e => e.preventDefault());
 }
 
 function openAdminLogin() {
@@ -1228,7 +1235,7 @@ async function submitAdminLogin() {
             closeAdminLogin();
             openAdminPanel();
         } else {
-            showToast('Password admin salah');
+            showToast(d.error || 'Password admin salah');
             document.getElementById('admin-pass-input').value = '';
         }
     } catch (e) {
