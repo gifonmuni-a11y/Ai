@@ -2391,6 +2391,52 @@ app.delete('/api/chats/:id', async (req, res) => {
     }
 });
 
+app.get('/api/profile', async (req, res) => {
+    try {
+        if (!supabase) return res.status(503).json({ error: 'Supabase belum dikonfigurasi.' });
+        const tok = decodeToken(req);
+        if (!tok || !tok.uid) return res.status(401).json({ error: 'Belum login.' });
+        const { data, error } = await clientFor(req)
+            .from('senka_profiles')
+            .select('*')
+            .eq('user_id', tok.uid)
+            .maybeSingle();
+        if (error) return res.status(500).json({ error: error.message });
+        res.json({ profile: data || null });
+    } catch (error) {
+        console.error('Error profile GET:', error);
+        res.status(500).json({ error: error.message || 'Gagal ambil profil.' });
+    }
+});
+
+app.post('/api/profile', async (req, res) => {
+    try {
+        if (!supabase) return res.status(503).json({ error: 'Supabase belum dikonfigurasi.' });
+        const tok = decodeToken(req);
+        if (!tok || !tok.uid) return res.status(401).json({ error: 'Belum login.' });
+        const b = req.body || {};
+        const row = {
+            user_id: tok.uid,
+            name: String(b.name ?? '').slice(0, 30),
+            avatar: String(b.avatar ?? ''),
+            avatar_source: String(b.avatar_source ?? '').slice(0, 20),
+            banner: String(b.banner ?? ''),
+            bio: String(b.bio ?? '').slice(0, 200),
+            decoration: String(b.decoration ?? ''),
+            updated_at: new Date().toISOString()
+        };
+        if (b.member_since) row.member_since = String(b.member_since);
+        const { error } = await clientFor(req)
+            .from('senka_profiles')
+            .upsert(row, { onConflict: 'user_id' });
+        if (error) return res.status(500).json({ error: error.message });
+        res.json({ ok: true });
+    } catch (error) {
+        console.error('Error profile POST:', error);
+        res.status(500).json({ error: error.message || 'Gagal simpan profil.' });
+    }
+});
+
 app.post('/api/upload', upload.single('file'), async (req, res) => {
     try {
         if (!supabase) return res.status(503).json({ error: 'Supabase belum dikonfigurasi.' });

@@ -133,6 +133,8 @@ async function startCloud(user) {
     } else {
         setDefaultAvatarForLogin(DEFAULT_GUEST_AVATAR, 'guest');
     }
+    await syncProfileFromCloud();
+    await pushProfileToCloud();
     renderSessionName();
     await loadCloudSessions();
 }
@@ -933,6 +935,53 @@ function setDefaultAvatarForLogin(url, source) {
     saveProfileState();
 }
 
+async function syncProfileFromCloud() {
+    if (!supabaseEnabled) return;
+    try {
+        const resp = await fetch('/api/profile', { headers: await authHeaders() });
+        const d = await resp.json().catch(() => ({}));
+        if (!resp.ok || !d.profile) return;
+        const p = d.profile;
+        if (p.name) userProfile.name = p.name;
+        if (p.avatar) { userProfile.avatar = p.avatar; userProfile.avatarSource = p.avatar_source || 'custom'; }
+        if (p.banner) userProfile.banner = p.banner;
+        if (p.bio) userProfile.bio = p.bio;
+        if (p.decoration) userProfile.decoration = p.decoration;
+        if (p.member_since) userProfile.memberSince = p.member_since;
+        saveProfileState();
+    } catch (e) { }
+}
+
+async function pushProfileToCloud() {
+    if (!supabaseEnabled) return;
+    try {
+        let avatar = userProfile.avatar;
+        let banner = userProfile.banner;
+        if (avatar && avatar.startsWith('data:')) {
+            avatar = await uploadDataUrl(avatar, 'jpg');
+            userProfile.avatar = avatar;
+        }
+        if (banner && banner.startsWith('data:')) {
+            banner = await uploadDataUrl(banner, 'jpg');
+            userProfile.banner = banner;
+        }
+        saveProfileState();
+        await fetch('/api/profile', {
+            method: 'POST',
+            headers: await authHeaders(),
+            body: JSON.stringify({
+                name: userProfile.name,
+                avatar,
+                avatar_source: userProfile.avatarSource,
+                banner,
+                bio: userProfile.bio,
+                decoration: userProfile.decoration,
+                member_since: userProfile.memberSince || null
+            })
+        });
+    } catch (e) { }
+}
+
 function renderProfileModal() {
     const banner = document.getElementById('profile-banner');
     banner.style.backgroundImage = 'url("' + getProfileBanner() + '")';
@@ -965,6 +1014,7 @@ function saveProfile() {
     saveProfileState();
     closeProfile();
     renderChat();
+    pushProfileToCloud();
     showToast('Profil berhasil disimpan');
 }
 
@@ -1037,6 +1087,7 @@ document.getElementById('avatar-upload').addEventListener('change', async (e) =>
         userProfile.avatarSource = 'custom';
         saveProfileState();
         renderProfileModal();
+        pushProfileToCloud();
         showToast('Foto profil diperbarui');
     } catch (err) {
         showToast('Gagal memuat foto profil');
@@ -1051,6 +1102,7 @@ document.getElementById('banner-upload').addEventListener('change', async (e) =>
         userProfile.banner = await compressImage(f, 900, 0.8);
         saveProfileState();
         renderProfileModal();
+        pushProfileToCloud();
         showToast('Banner profil diperbarui');
     } catch (err) {
         showToast('Gagal memuat banner');
