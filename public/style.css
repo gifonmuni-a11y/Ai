@@ -483,8 +483,9 @@ textarea.modal-input { resize: none; font-family: inherit; }
     border: 6px solid #1e1f22; position: relative; z-index: 1; display: block;
 }
 .profile-avatar-wrap .avatar-deco {
-    position: absolute; left: 50%; top: 50%; width: 150%; height: 150%;
-    transform: translate(-50%, -58%); pointer-events: none; z-index: 2;
+    position: absolute; inset: -9%; z-index: 2;
+    width: calc(100% + 18%); height: calc(100% + 18%);
+    pointer-events: none; object-fit: fill;
     animation: decoFloat 3s ease-in-out infinite;
 }
 .profile-avatar-edit {
@@ -533,13 +534,14 @@ textarea.modal-input { resize: none; font-family: inherit; }
     border: 2px solid rgba(255,255,255,0.18); position: relative; z-index: 1;
 }
 .mini-avatar-wrap .avatar-deco {
-    position: absolute; left: 50%; top: 50%; width: 150%; height: 150%;
-    transform: translate(-50%, -58%); pointer-events: none; z-index: 2;
+    position: absolute; inset: -9%; z-index: 2;
+    width: calc(100% + 18%); height: calc(100% + 18%);
+    pointer-events: none; object-fit: fill;
     animation: decoFloat 3s ease-in-out infinite;
 }
 @keyframes decoFloat {
-    0%, 100% { transform: translate(-50%, -58%); }
-    50% { transform: translate(-50%, -65%); }
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-3px); }
 }
 
 @media (max-width: 768px) {
