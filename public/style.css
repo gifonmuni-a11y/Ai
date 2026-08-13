@@ -483,7 +483,7 @@ textarea.modal-input { resize: none; font-family: inherit; }
     border: 6px solid #1e1f22; position: relative; z-index: 1; display: block;
 }
 .profile-avatar-wrap .avatar-deco {
-    position: absolute; left: 50%; top: 50%; width: 200%; height: 200%;
+    position: absolute; left: 50%; top: 50%; width: 150%; height: 150%;
     transform: translate(-50%, -58%); pointer-events: none; z-index: 2;
     animation: decoFloat 3s ease-in-out infinite;
 }
@@ -533,7 +533,7 @@ textarea.modal-input { resize: none; font-family: inherit; }
     border: 2px solid rgba(255,255,255,0.18); position: relative; z-index: 1;
 }
 .mini-avatar-wrap .avatar-deco {
-    position: absolute; left: 50%; top: 50%; width: 200%; height: 200%;
+    position: absolute; left: 50%; top: 50%; width: 150%; height: 150%;
     transform: translate(-50%, -58%); pointer-events: none; z-index: 2;
     animation: decoFloat 3s ease-in-out infinite;
 }
