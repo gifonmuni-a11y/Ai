@@ -175,6 +175,7 @@ ${list(USER_STICKERS)}
 [ STIKER SENKA ]
 If you want to send a sticker, append ONLY the sticker's raw image URL as the very last line of your response — the URL alone, on its own final line, with NO tag, NO label, NO explanation.
 STRICT: Never write the word "STIKER", "sticker", the tag "[ STIKER SENKA ]", or paste the URL anywhere else in your text. The link must appear exactly once, at the very end.
+NEVER reuse the user's sticker link: the user's stickers belong ONLY to the user. When replying to a user sticker, pick ONE sticker from YOUR own list below — never copy, paste, echo, or reference the user's link back to them.
 Only use ONE sticker per response. If the user sends a sticker, you MUST reply with a sticker.
 IMPORTANT: Copy the filename from the list below EXACTLY as written — never invent, rename, shorten, translate, or modify it. The filenames deliberately contain commas, periods, and keywords (e.g. "blush,malu.webp", "sayang...sayang.webp") — keep the entire filename 100% identical, only choose which existing filename from the list to use, never alter it.
 Your sticker list:
@@ -430,13 +431,23 @@ CRITICAL RULES FOR IMAGE RESPONSES:
 5. Strictly output plain text dialogue ONLY. NO HTML tags, NO formatting, and NO character prefixes.
 ${charRule}
 7. Use 1-2 fitting emojis, varied.
-8. STICKER: If you want to close your reply with a sticker, append ONLY the raw image URL as the last line — the URL alone, never write the word "STIKER"/"sticker" or the tag in your text. Only one sticker per response. If the user sends a sticker link, you MUST reply with a sticker. Your sticker links:
+8. STICKER: If you want to close your reply with a sticker, append ONLY the raw image URL as the last line — the URL alone, never write the word "STIKER"/"sticker" or the tag in your text. Only one sticker per response. If the user sends a sticker link, you MUST reply with a sticker — but NEVER reuse the user's sticker link; pick ONE from your own list below. Your sticker links:
 ${SENKA_STICKERS.map(n => `- ${n} : ${STICKER_BASE}/Senka/${n}`).join('\n')}`
     };
 }
 
 async function prepareMessagesForAI(messages, isVision, neyLock, normalMode = false) {
-    const clean = (messages || []).map(m => ({ role: m.role, content: m.content }));
+    const maskUserStickers = (c) => {
+        const re = /https?:\/\/[^\s)]+\/Stiker\/(?:Pengguna|Senka)\/[^\s)]+\.webp/gi;
+        const mask = (t) => String(t || '').replace(re, (m) => {
+            const f = m.split('/').pop().replace(/[?].*$/, '');
+            return '[stiker pengguna: ' + f + ']';
+        });
+        if (typeof c === 'string') return mask(c);
+        if (Array.isArray(c)) return c.map(p => p && p.type === 'text' ? { ...p, text: mask(p.text) } : p);
+        return c;
+    };
+    const clean = (messages || []).map(m => ({ role: m.role, content: m.role === 'user' ? maskUserStickers(m.content) : m.content }));
     const anchor = {
         role: "system",
         content: isVision

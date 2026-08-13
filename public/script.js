@@ -1456,9 +1456,13 @@ function normalizeStickerUrl(url) {
     try { u = decodeURIComponent(u); } catch (e) { }
     const m = u.match(/^(https?:\/\/[^\s]+?)\/Stiker\/(.+?\.webp)(?:\?[^\s]*)?$/i);
     if (!m) return null;
-    const file = m[2].split('/').pop();
-    if (SENKA_STICKER_FILES.includes(file)) return STICKER_BASE + '/Senka/' + file;
+    const path = m[2];
+    const file = path.split('/').pop();
+    const folder = /(^|\/)Pengguna\//.test(path) ? 'Pengguna' : /(^|\/)Senka\//.test(path) ? 'Senka' : null;
+    if (folder === 'Pengguna' && USER_STICKER_FILES.includes(file)) return STICKER_BASE + '/Pengguna/' + file;
+    if (folder === 'Senka' && SENKA_STICKER_FILES.includes(file)) return STICKER_BASE + '/Senka/' + file;
     if (USER_STICKER_FILES.includes(file)) return STICKER_BASE + '/Pengguna/' + file;
+    if (SENKA_STICKER_FILES.includes(file)) return STICKER_BASE + '/Senka/' + file;
     const fuzzy = fuzzyStickerFile(file);
     if (fuzzy) return STICKER_BASE + '/Senka/' + fuzzy;
     return null;
