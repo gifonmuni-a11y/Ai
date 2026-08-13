@@ -47,7 +47,7 @@
                         </button>
                         <button class="icon-btn" id="btn-new-session" onclick="newSession()" title="Sesi baru"><i class="fa-solid fa-plus"></i></button>
                         <button class="icon-btn" onclick="openSearch()" title="Cari di chat"><i class="fa-solid fa-magnifying-glass"></i></button>
-                        <button class="icon-btn" onclick="openExport()" title="Simpan chat (PDF/Word)"><i class="fa-solid fa-file-export"></i></button>
+                        <button class="icon-btn" onclick="openProfile()" title="User Profile"><i class="fa-solid fa-user"></i></button>
                         <button class="icon-btn gear-btn" onclick="openSettings()" title="Pengaturan"><i class="fa-solid fa-gear"></i></button>
                     </div>
                 </div>
@@ -313,14 +313,43 @@
         </div>
     </div>
 
-    <div id="export-modal" class="modal-overlay" style="display:none;">
-        <div class="modal">
-            <div class="modal-header">
-                <h3><i class="fa-solid fa-file-export"></i> Simpan Chat</h3>
-                <i class="fa-solid fa-xmark modal-close" onclick="closeExport()"></i>
+    <div id="profile-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeProfile()">
+        <div class="profile-card">
+            <div class="profile-banner" id="profile-banner">
+                <button class="profile-banner-edit" onclick="document.getElementById('banner-upload').click()" title="Ubah Banner"><i class="fa-solid fa-camera"></i></button>
             </div>
-            <button class="modal-btn" onclick="exportPDF()"><i class="fa-solid fa-file-pdf"></i> Simpan sebagai PDF</button>
-            <button class="modal-btn btn-secondary" onclick="exportDOC()"><i class="fa-solid fa-file-word"></i> Simpan sebagai Word (.doc)</button>
+            <div class="profile-avatar-zone">
+                <div class="profile-avatar-wrap">
+                    <img id="profile-avatar-img" class="profile-avatar" alt="Avatar">
+                    <img id="profile-avatar-deco" class="avatar-deco" alt="" aria-hidden="true" onerror="this.style.display='none'">
+                    <button class="profile-avatar-edit" onclick="document.getElementById('avatar-upload').click()" title="Ubah Foto Profil"><i class="fa-solid fa-camera"></i></button>
+                </div>
+                <button class="profile-deco-btn" onclick="openDecoPicker()"><i class="fa-solid fa-wand-magic-sparkles"></i> Ubah Dekorasi</button>
+            </div>
+            <div class="profile-body">
+                <input type="text" id="profile-name-input" class="modal-input" maxlength="30" placeholder="Nama kamu" autocomplete="off">
+                <p class="profile-member-since" id="profile-member-since"></p>
+                <label class="modal-label">Bio</label>
+                <textarea id="profile-bio-input" class="modal-input" rows="3" maxlength="200" placeholder="Tulis sedikit tentang dirimu..."></textarea>
+                <div class="profile-actions">
+                    <button class="modal-btn" onclick="saveProfile()"><i class="fa-solid fa-check"></i> Simpan Profil</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <input type="file" id="avatar-upload" accept="image/*" hidden>
+    <input type="file" id="banner-upload" accept="image/*" hidden>
+
+    <div id="deco-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeDecoPicker()">
+        <div class="modal wide-modal">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-wand-magic-sparkles"></i> Pilih Dekorasi Avatar</h3>
+                <i class="fa-solid fa-xmark modal-close" onclick="closeDecoPicker()"></i>
+            </div>
+            <div id="deco-grid" class="deco-grid"></div>
+            <div class="deco-footer">
+                <button class="modal-btn ghost" onclick="clearDecoration()"><i class="fa-solid fa-ban"></i> Hapus Dekorasi</button>
+            </div>
         </div>
     </div>
 

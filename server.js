@@ -176,6 +176,7 @@ ${list(USER_STICKERS)}
 If you want to send a sticker, append ONLY the sticker's raw image URL as the very last line of your response — the URL alone, on its own final line, with NO tag, NO label, NO explanation.
 STRICT: Never write the word "STIKER", "sticker", the tag "[ STIKER SENKA ]", or paste the URL anywhere else in your text. The link must appear exactly once, at the very end.
 Only use ONE sticker per response. If the user sends a sticker, you MUST reply with a sticker.
+IMPORTANT: Copy the filename from the list below EXACTLY as written — never invent, rename, shorten, translate, or modify it. The filenames deliberately contain commas, periods, and keywords (e.g. "blush,malu.webp", "sayang...sayang.webp") — keep the entire filename 100% identical, only choose which existing filename from the list to use, never alter it.
 Your sticker list:
 ${list(SENKA_STICKERS)}`;
 }
