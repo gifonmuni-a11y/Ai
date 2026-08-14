@@ -73,6 +73,7 @@ button:focus, button:focus-visible, a:focus, a:focus-visible, [tabindex]:focus-v
     -webkit-text-fill-color: transparent;
     display: inline-block;
     font-size: 1rem; line-height: 1.1; letter-spacing: 0.3px;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.65)) drop-shadow(0 0 3px rgba(77, 166, 255, 0.5));
 }
 .status { font-size: 0.7rem; color: #bae6fd; display: flex; align-items: center; gap: 5px; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 8px #4ade80; animation: pulse 2s infinite; }
@@ -349,7 +350,7 @@ button:focus, button:focus-visible, a:focus, a:focus-visible, [tabindex]:focus-v
     background: rgba(8,12,26,0.45);
     border: 1px solid rgba(96,165,250,0.3);
     color: #7dd3fc;
-    width: 42px; height: 42px; border-radius: 50%; cursor: pointer; font-size: 1rem;
+    width: 45px; height: 45px; border-radius: 50%; cursor: pointer; font-size: 1rem;
     display: flex; align-items: center; justify-content: center; transition: all 0.25s ease;
     flex-shrink: 0;
 }
