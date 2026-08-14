@@ -341,7 +341,8 @@ function remoteToLocal(m) {
         const t = decryptText(m.isi_pesan);
         content.push({ type: 'text', text: (t === null || t === '') ? '[pesan terenkripsi]' : t });
     }
-    return { role: m.pengirim === 'user' ? 'user' : 'assistant', cid: m.id, content };
+    const ts = m.waktu_kirim ? new Date(m.waktu_kirim).getTime() : undefined;
+    return { role: m.pengirim === 'user' ? 'user' : 'assistant', cid: m.id, content, ts, time: ts ? formatMsgTime(ts) : undefined };
 }
 
 function remoteSave(pengirim, tipePesan, isi, memItem) {
@@ -423,7 +424,8 @@ async function loadRemoteChat() {
         remoteHasMore = !!d.hasMore;
         if (!memoryList.length) {
             const greeting = getGreeting();
-            const item = { role: 'assistant', content: [{ type: 'text', text: greeting }] };
+            const gTs = Date.now();
+            const item = { role: 'assistant', content: [{ type: 'text', text: greeting }], ts: gTs, time: formatMsgTime(gTs) };
             memoryList.push(item);
             remoteSave('senka', 'text', greeting, item);
         }
@@ -487,7 +489,19 @@ function loadSessions() {
     const active = sessions.find(s => s.id === activeId);
     if (active) active.messages = cleanupOldImages(active.messages);
     memoryList = active ? active.messages : [];
+    backfillMessageTimes(memoryList);
     saveSessions();
+}
+
+function backfillMessageTimes(list) {
+    if (!Array.isArray(list)) return;
+    list.forEach((m, i) => {
+        if (m && !m.ts) {
+            const t = Date.now() - (list.length - i) * 60000;
+            m.ts = t;
+            m.time = formatMsgTime(t);
+        }
+    });
 }
 
 function saveSessions() {
@@ -691,8 +705,78 @@ function openProfile() {
     document.getElementById('profile-modal').style.display = 'flex';
 }
 function closeProfile() { document.getElementById('profile-modal').style.display = 'none'; }
+
+/* ===== Senka Profile (read-only) ===== */
+function openSenkaProfile() {
+    const banner = document.getElementById('senka-profile-banner');
+    if (banner) banner.style.backgroundImage = 'url("' + SENKA_PROFILE_BANNER + '")';
+    const av = document.getElementById('senka-profile-avatar-img');
+    if (av) av.src = SENKA_BUBBLE_AVATAR;
+    const deco = document.getElementById('senka-profile-avatar-deco');
+    if (deco) deco.src = SENKA_BUBBLE_DECO;
+    renderProfileEffect(document.querySelector('#senka-profile-modal .profile-effect-overlay'));
+    document.getElementById('senka-profile-modal').style.display = 'flex';
+}
+function closeSenkaProfile() { document.getElementById('senka-profile-modal').style.display = 'none'; }
+
+/* ===== Profile Effects (ala Discord Nitro) ===== */
+function getProfileEffect() {
+    try { return JSON.parse(localStorage.getItem(PROFILE_EFFECT_KEY) || 'null'); } catch (e) { return null; }
+}
+function setProfileEffect(id, url, label) {
+    localStorage.setItem(PROFILE_EFFECT_KEY, JSON.stringify({ id, url, label }));
+}
+function clearProfileEffect() {
+    localStorage.removeItem(PROFILE_EFFECT_KEY);
+}
+function renderProfileEffect(overlay) {
+    if (!overlay) return;
+    overlay.innerHTML = '';
+    const eff = getProfileEffect();
+    if (!eff || !eff.url) return;
+    const img = document.createElement('img');
+    img.src = eff.url;
+    img.alt = eff.label || 'Profile Effect';
+    img.loading = 'lazy';
+    img.onerror = () => { img.remove(); };
+    overlay.appendChild(img);
+}
+function openEffectPicker() {
+    const grid = document.getElementById('effect-grid');
+    grid.innerHTML = '';
+    const current = getProfileEffect();
+    PROFILE_EFFECTS.forEach(e => {
+        const item = document.createElement('div');
+        item.className = 'effect-item' + (current && current.id === e.id ? ' selected' : '');
+        const img = document.createElement('img');
+        img.src = e.url;
+        img.alt = e.label;
+        img.loading = 'lazy';
+        img.onerror = () => { item.classList.add('broken'); };
+        const lbl = document.createElement('span');
+        lbl.className = 'deco-label';
+        lbl.textContent = e.label;
+        item.appendChild(img);
+        item.appendChild(lbl);
+        item.onclick = () => {
+            setProfileEffect(e.id, e.url, e.label);
+            closeEffectPicker();
+            renderProfileModal();
+            showToast('Efek profil "' + e.label + '" dipasang');
+        };
+        grid.appendChild(item);
+    });
+    document.getElementById('effect-modal').style.display = 'flex';
+}
+function closeEffectPicker() { document.getElementById('effect-modal').style.display = 'none'; }
+function removeProfileEffect() {
+    clearProfileEffect();
+    closeEffectPicker();
+    renderProfileModal();
+    showToast('Efek profil dihapus');
+}
 function closeAllModals() {
-    ['settings-modal', 'image-modal', 'video-modal', 'sessions-modal', 'search-modal', 'confirm-delete-modal', 'profile-modal', 'deco-modal'].forEach(id => document.getElementById(id).style.display = 'none');
+    ['settings-modal', 'image-modal', 'video-modal', 'sessions-modal', 'search-modal', 'confirm-delete-modal', 'profile-modal', 'deco-modal', 'senka-profile-modal', 'effect-modal'].forEach(id => document.getElementById(id).style.display = 'none');
 }
 document.querySelectorAll('.modal-overlay').forEach(ov => ov.addEventListener('click', e => { if (e.target === ov) ov.style.display = 'none'; }));
 
@@ -896,6 +980,30 @@ const AVATAR_DECORATIONS = [
     { id: '1352699238735413403', url: 'https://cdn.discordapp.com/avatar-decoration-presets/a_fead934c894e95e070d8a0301f9f0b27.png?size=240&passthrough=true', label: "Autumn's Arbor", category: 'decorations' },
     { id: '1352699261078474864', url: 'https://cdn.discordapp.com/avatar-decoration-presets/a_fed43ab12698df65902ba06727e20c0e.png?size=240&passthrough=true', label: 'Futuristic UI', category: 'decorations' }
 ];
+const PROFILE_EFFECTS = [
+    { "id": "pe_001", "url": "https://i.gifer.com/origin/f5/f58f4a7c1b181db8ba91811eb23c2186_w200.gif", "label": "Sakura Fall" },
+    { "id": "pe_002", "url": "https://i.gifer.com/origin/17/173e34b92c42e562137bc44933a9235e_w200.gif", "label": "Magic Stars" },
+    { "id": "pe_003", "url": "https://i.gifer.com/origin/5d/5dfdb8122c151e39a3f290d981dc6766_w200.gif", "label": "Snowflakes" },
+    { "id": "pe_004", "url": "https://i.gifer.com/origin/e4/e48270ca8817290c0516fc989d311915_w200.gif", "label": "Floating Hearts" },
+    { "id": "pe_005", "url": "https://i.gifer.com/origin/14/149cf6791e84bf05cc281dddb914cd6e_w200.gif", "label": "Cyber Glitch" },
+    { "id": "pe_006", "url": "https://i.gifer.com/origin/9e/9e92d847c2dc4f89d592b23baec62ee5_w200.gif", "label": "Fire Embers" },
+    { "id": "pe_007", "url": "https://i.gifer.com/origin/41/418bd61517038cf56bc18fc1e04cf4c1_w200.gif", "label": "Rain Drops" },
+    { "id": "pe_008", "url": "https://i.gifer.com/origin/b4/b429581f18ebcc922b0c169234bbfbb1_w200.gif", "label": "Lightning Sparks" },
+    { "id": "pe_009", "url": "https://i.gifer.com/origin/f2/f23c915f7b0f6998d35f7959d29c87d4_w200.gif", "label": "Confetti Blast" },
+    { "id": "pe_010", "url": "https://i.gifer.com/origin/a3/a32b217f2bcbb0ddbba2553b306c5923_w200.gif", "label": "Matrix Rain" },
+    { "id": "pe_011", "url": "https://i.gifer.com/origin/87/8777e48b8b3bb9b7ecad5098ff6c8fa2_w200.gif", "label": "Purple Smoke" },
+    { "id": "pe_012", "url": "https://i.gifer.com/origin/20/2034e3eab3db415a7726af47321e06e3_w200.gif", "label": "Golden Dust" },
+    { "id": "pe_013", "url": "https://i.gifer.com/origin/c5/c547ce3905cf4db8b80153355209eeb7_w200.gif", "label": "Anime Speedlines" },
+    { "id": "pe_014", "url": "https://i.gifer.com/origin/d8/d8e124b80e4dd4486576856d35dc745e_w200.gif", "label": "Butterfly Swarm" },
+    { "id": "pe_015", "url": "https://i.gifer.com/origin/f4/f43ed5b10b427845f09623101bbf86eb_w200.gif", "label": "Angel Feathers" },
+    { "id": "pe_016", "url": "https://i.gifer.com/origin/3f/3f395b05df83df2d5d71c8411b0e3526_w200.gif", "label": "Bubbles" },
+    { "id": "pe_017", "url": "https://i.gifer.com/origin/f1/f154dbce6cbacfb479b122dd1d7e29ad_w200.gif", "label": "Shooting Stars" },
+    { "id": "pe_018", "url": "https://i.gifer.com/origin/8d/8ddba65293414ec31f62b2e5976b9f29_w200.gif", "label": "Neon Grid" },
+    { "id": "pe_019", "url": "https://i.gifer.com/origin/4e/4e844ee0cdb283d58de0d12e6bfda34e_w200.gif", "label": "Mystic Aura" },
+    { "id": "pe_020", "url": "https://i.gifer.com/origin/86/86b5b54cd6b6f001f357ff8e83344d9f_w200.gif", "label": "Cosmic Galaxy" }
+];
+const PROFILE_EFFECT_KEY = 'senka_profile_effect';
+const SENKA_PROFILE_BANNER = 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Profile/backgroundsenkabubblechat.webp';
 let userProfile = loadProfileState();
 
 function loadProfileState() {
@@ -1002,6 +1110,7 @@ function renderProfileModal() {
     document.getElementById('profile-member-since').innerHTML = ms
         ? 'Bergabung sejak <b>' + ms.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) + '</b>'
         : '';
+    renderProfileEffect(document.querySelector('#profile-modal .profile-effect-overlay'));
 }
 
 function saveProfile() {
@@ -1063,7 +1172,7 @@ function formatMsgTime(ts) {
     return h + ':' + String(m).padStart(2, '0') + ' ' + ap;
 }
 
-function makeMsgHeader(role, ts) {
+function makeMsgHeader(role, ts, timeStr) {
     const header = document.createElement('div');
     header.className = 'msg-header';
     const name = document.createElement('span');
@@ -1077,7 +1186,7 @@ function makeMsgHeader(role, ts) {
     icon.onerror = () => icon.remove();
     const time = document.createElement('span');
     time.className = 'msg-header-time';
-    time.textContent = formatMsgTime(ts);
+    time.textContent = timeStr || formatMsgTime(ts);
     header.appendChild(name);
     header.appendChild(icon);
     header.appendChild(time);
@@ -1087,6 +1196,8 @@ function makeMsgHeader(role, ts) {
 function makeSenkaAvatar() {
     const wrap = document.createElement('div');
     wrap.className = 'senka-avatar-wrap';
+    wrap.title = 'Lihat profil Senka';
+    wrap.addEventListener('click', (e) => { e.stopPropagation(); openSenkaProfile(); });
     const img = document.createElement('img');
     img.className = 'senka-avatar';
     img.src = SENKA_BUBBLE_AVATAR;
@@ -1145,10 +1256,10 @@ function assembleMsgRow(role, contentEl) {
     return row;
 }
 
-function makeMsgContent(role) {
+function makeMsgContent(role, ts, timeStr) {
     const content = document.createElement('div');
     content.className = 'msg-content ' + (role === 'user' ? 'content-user' : 'content-senka');
-    content.appendChild(makeMsgHeader(role, Date.now()));
+    content.appendChild(makeMsgHeader(role, ts, timeStr));
     return content;
 }
 
@@ -1163,6 +1274,8 @@ function clearDecoration() {
 function makeMiniUserAvatar() {
     const wrap = document.createElement('div');
     wrap.className = 'mini-avatar-wrap';
+    wrap.title = 'Lihat profilmu';
+    wrap.addEventListener('click', (e) => { e.stopPropagation(); openProfile(); });
     const img = document.createElement('img');
     img.className = 'mini-avatar';
     img.src = getProfileAvatar();
@@ -1325,7 +1438,7 @@ function buildMsgEl(m) {
     const role = m.role === 'user' ? 'user' : 'senka';
     const content = document.createElement('div');
     content.className = 'msg-content ' + (role === 'user' ? 'content-user' : 'content-senka');
-    content.appendChild(makeMsgHeader(role, m.ts));
+    content.appendChild(makeMsgHeader(role, m.ts, m.time));
     let bubble = null;
     let body = null;
     let media = null;
@@ -1426,7 +1539,7 @@ function renderChat() {
         const gItem = memoryList[memoryList.length - 1];
         if (!supabaseEnabled) saveSessions();
         else remoteSave('senka', 'text', greeting, gItem);
-        const gEl = appendMessage('senka', greeting);
+        const gEl = appendMessage('senka', greeting, false, gItem.ts, gItem.time);
         msgBodyOf(gEl).innerHTML = formatReply(greeting);
         gEl.dataset.greeting = '1';
         if (away) {
@@ -2117,16 +2230,18 @@ function startStory(key, opts) {
     if (!resume || memoryList.length === 0) {
         fresh = true;
         if (!reset) newSession();
-        const first = { role: 'assistant', content: [{ type: "text", text: s.firstMessage }] };
+        const first = { role: 'assistant', content: [{ type: "text", text: s.firstMessage }], ts: Date.now(), time: formatMsgTime(Date.now()) };
         memoryList.push(first);
         renderChat();
         if (supabaseEnabled) remoteSave('senka', 'text', s.firstMessage, first);
         else saveSessions();
 
         if (s.autoUser && s.autoReply) {
-            const usr = { role: 'user', content: [{ type: "text", text: s.autoUser }] };
+            const uTs = Date.now();
+            const usr = { role: 'user', content: [{ type: "text", text: s.autoUser }], ts: uTs, time: formatMsgTime(uTs) };
             memoryList.push(usr);
-            const ai = { role: 'assistant', content: [{ type: "text", text: s.autoReply }] };
+            const aTs = Date.now();
+            const ai = { role: 'assistant', content: [{ type: "text", text: s.autoReply }], ts: aTs, time: formatMsgTime(aTs) };
             memoryList.push(ai);
             renderChat();
             if (supabaseEnabled) {
@@ -2150,7 +2265,8 @@ function startFreeform() {
     activeStory = null;
     localStorage.removeItem('senka_story');
     setModeBadge();
-    const note = { role: 'assistant', content: [{ type: "text", text: `Mode Cerita Bebas aktif, ${panggilan}~ Ceritakan skenario yang kamu mau dan aku akan memainkannya sepenuhnya.` }] };
+    const nTs = Date.now();
+    const note = { role: 'assistant', content: [{ type: "text", text: `Mode Cerita Bebas aktif, ${panggilan}~ Ceritakan skenario yang kamu mau dan aku akan memainkannya sepenuhnya.` }], ts: nTs, time: formatMsgTime(nTs) };
     memoryList.push(note);
     if (supabaseEnabled) remoteSave('senka', 'text', note.content[0].text, note);
     else saveSessions();
@@ -2820,8 +2936,9 @@ function startCallRecognition() {
 function handleCallSpeech(text) {
     if (!callActive) return;
     setCallUI(true, 'Senka mikir...');
-    const bubble = appendMessage('user', text);
-    memoryList.push({ role: 'user', content: [{ type: 'text', text }] });
+    const cTs = Date.now();
+    const bubble = appendMessage('user', text, false, cTs, formatMsgTime(cTs));
+    memoryList.push({ role: 'user', content: [{ type: 'text', text }], ts: cTs, time: formatMsgTime(cTs) });
     const userItem = memoryList[memoryList.length - 1];
     if (!supabaseEnabled) saveSessions();
     else remoteSave('user', 'text', text, userItem);
@@ -2841,8 +2958,9 @@ async function sendCallMessage(text) {
         const raw = data.choices?.[0]?.message?.content || '';
         const clean = cleanCallText(raw);
         if (!clean) { afterCallSpeech(); return; }
-        const sb = appendMessage('senka', clean);
-        memoryList.push({ role: 'assistant', content: [{ type: 'text', text: clean }] });
+        const aTs = Date.now();
+        const sb = appendMessage('senka', clean, false, aTs, formatMsgTime(aTs));
+        memoryList.push({ role: 'assistant', content: [{ type: 'text', text: clean }], ts: aTs, time: formatMsgTime(aTs) });
         const aiItem = memoryList[memoryList.length - 1];
         if (!supabaseEnabled) saveSessions();
         else remoteSave('senka', 'text', clean, aiItem);
@@ -3084,15 +3202,16 @@ function scheduleReminder(text) {
     const sessId = activeId;
     const delay = r.fireAt.getTime() - Date.now();
     const timeStr = r.fireAt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-    memoryList.push({ role: 'user', content: [{ type: 'text', text: text }] });
+    const rTs = Date.now();
+    memoryList.push({ role: 'user', content: [{ type: 'text', text: text }], ts: rTs, time: formatMsgTime(rTs) });
     const userItem = memoryList[memoryList.length - 1];
     if (!supabaseEnabled) saveSessions();
     else remoteSave('user', 'text', text, userItem);
-    appendMessage('user', text);
+    appendMessage('user', text, false, rTs, formatMsgTime(rTs));
     const confirmMsg = `Oke, saya ingatkan jam ${timeStr}: ${r.what}.`;
-    const conf = appendMessage('senka', confirmMsg);
+    const conf = appendMessage('senka', confirmMsg, false, rTs, formatMsgTime(rTs));
     addMsgActions(conf, 'senka');
-    memoryList.push({ role: 'assistant', content: [{ type: 'text', text: confirmMsg }] });
+    memoryList.push({ role: 'assistant', content: [{ type: 'text', text: confirmMsg }], ts: rTs, time: formatMsgTime(rTs) });
     const confItem = memoryList[memoryList.length - 1];
     if (!supabaseEnabled) saveSessions();
     else remoteSave('senka', 'text', confirmMsg, confItem);
@@ -3108,9 +3227,10 @@ function scheduleReminder(text) {
         }
         if (activeId === sessId) {
             const msg = `Pengingat: ${r.what}`;
-            const b = appendMessage('senka', msg);
+            const mTs = Date.now();
+            const b = appendMessage('senka', msg, false, mTs, formatMsgTime(mTs));
             addMsgActions(b, 'senka');
-            memoryList.push({ role: 'assistant', content: [{ type: 'text', text: msg }] });
+            memoryList.push({ role: 'assistant', content: [{ type: 'text', text: msg }], ts: mTs, time: formatMsgTime(mTs) });
             const remItem = memoryList[memoryList.length - 1];
             if (!supabaseEnabled) saveSessions();
             else remoteSave('senka', 'text', msg, remItem);
@@ -3161,7 +3281,8 @@ async function sendToSenka() {
     if (base64Image) userMessageContent.push({ type: "image_url", image_url: { url: userImgUrl || base64Image } });
 
     const stickerOnly = extractSticker(text) && !stripStickerTag(text).trim();
-    const content = appendMessage('user', stickerOnly ? '' : (text || ''));
+    const uTs = Date.now();
+    const content = appendMessage('user', stickerOnly ? '' : (text || ''), false, uTs, formatMsgTime(uTs));
     if (extractSticker(text)) {
         appendStickerImg(msgMediaOf(content), extractSticker(text));
     }
@@ -3171,7 +3292,7 @@ async function sendToSenka() {
         img.classList.add('chat-img');
         msgMediaOf(content).appendChild(img);
     }
-    memoryList.push({ role: 'user', content: userMessageContent, ts: Date.now() });
+    memoryList.push({ role: 'user', content: userMessageContent, ts: uTs, time: formatMsgTime(uTs) });
     const userItem = memoryList[memoryList.length - 1];
     if (!supabaseEnabled) saveSessions();
     else {
@@ -3219,7 +3340,8 @@ async function getWebPayload(baseMessages, lastText) {
 }
 
 async function streamAssistantReply(payloadMessages) {
-    const msgContent = makeMsgContent('senka');
+    const createdTs = Date.now();
+    const msgContent = makeMsgContent('senka', createdTs, formatMsgTime(createdTs));
     const msgDiv = document.createElement('div');
     msgDiv.classList.add('message', 'msg-senka');
     const stb = document.createElement('div');
@@ -3312,7 +3434,7 @@ async function streamAssistantReply(payloadMessages) {
         if (!fileReq && displayText.trim()) attachCallTranslation(rb, displayText.trim());
         addMsgActions(msgContent, 'senka');
 
-        memoryList.push({ role: 'assistant', content: [{ type: "text", text: displayText }], ts: Date.now() });
+        memoryList.push({ role: 'assistant', content: [{ type: "text", text: displayText }], ts: createdTs, time: formatMsgTime(createdTs) });
         const aiItem = memoryList[memoryList.length - 1];
         attachAiActions(msgContent, aiItem, true);
         if (!supabaseEnabled) saveSessions();
@@ -3542,8 +3664,8 @@ function downloadImage(url, filename) {
     }
 }
 
-function appendMessage(role, text, isTypewriter = false) {
-    const content = makeMsgContent(role);
+function appendMessage(role, text, isTypewriter = false, ts, timeStr) {
+    const content = makeMsgContent(role, ts, timeStr);
     if (text) {
         const bubble = document.createElement('div');
         bubble.classList.add('message', role === 'user' ? 'msg-user' : 'msg-senka');
