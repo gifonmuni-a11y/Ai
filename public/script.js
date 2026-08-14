@@ -709,20 +709,12 @@ function openProfile(editable) {
 function closeProfile() { document.getElementById('profile-modal').style.display = 'none'; }
 
 function openLogoModal() {
-    const vid = document.getElementById('logo-pop-vid');
     const img = document.getElementById('logo-pop-img');
-    vid.style.display = '';
-    img.style.display = 'none';
-    vid.onerror = () => { vid.style.display = 'none'; img.onerror = null; img.src = LOGO_ICON_URL; img.style.display = ''; };
-    vid.currentTime = 0;
-    vid.play().catch(() => { });
+    img.onerror = () => { img.onerror = null; img.src = LOGO_ICON_URL; };
+    img.src = LOGO_GIF_URL;
     document.getElementById('logo-modal').style.display = 'flex';
 }
-function closeLogoModal() {
-    const vid = document.getElementById('logo-pop-vid');
-    if (vid) vid.pause();
-    document.getElementById('logo-modal').style.display = 'none';
-}
+function closeLogoModal() { document.getElementById('logo-modal').style.display = 'none'; }
 
 /* ===== Senka Profile (read-only) ===== */
 function openSenkaProfile() {
@@ -824,7 +816,8 @@ document.querySelectorAll('.modal-overlay').forEach(ov => ov.addEventListener('c
 const DEFAULT_BANNER = 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Profiledefaultanonym/backgrounddefaultgoogledananon.jpg';
 const DEFAULT_GUEST_AVATAR = 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Profiledefaultanonym/profiledefaultanon.webp';
 const LOGO_ICON_URL = 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Favicon/logoicon.png';
-const LOGO_WEBM_URL = '/assets/logoiconsenka.webm';
+const LOGO_GIF_URL = 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Profile/Logoiconsenka/logoiconsenka-ezgif.com-optimize%20(1).gif';
+const logoPreload = new Image(); logoPreload.src = LOGO_GIF_URL;
 const AVATAR_DECORATIONS = [
     { id: '1352687418418921532', url: 'https://cdn.discordapp.com/avatar-decoration-presets/a_0c0eeb351ae2cf48c6e1eee2cae49d40.png?size=240&passthrough=true', label: 'Hugh the Rainbow', category: 'decorations' },
     { id: '1352687448228106302', url: 'https://cdn.discordapp.com/avatar-decoration-presets/a_0e839cd79500e7b68e2bbbed54790c28.png?size=240&passthrough=true', label: 'Phoenix', category: 'decorations' },
