@@ -1159,7 +1159,7 @@ function openDecoPicker() {
 function closeDecoPicker() { document.getElementById('deco-modal').style.display = 'none'; }
 
 const ROLE_ICON_USER = 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Role/Pengguna/iconbubblechatpengguna.webp';
-const ROLE_ICON_SENKA = 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Role/Senka/iconbubblechatsenka.webp';
+const ROLE_ICON_SENKA = 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Role/Senka/senkaprofilebubble.webp';
 const SENKA_BUBBLE_AVATAR = 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Profile/profilebubblechatsenka.webp';
 const SENKA_BUBBLE_DECO = 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Boarder/Untitled%20folder/fresh_boardersenka.gif';
 

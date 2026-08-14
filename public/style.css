@@ -590,7 +590,20 @@ textarea.modal-input { resize: none; font-family: inherit; }
     width: 88px; height: 88px; object-fit: cover; border-radius: 10px;
     pointer-events: none; background: rgba(6,10,20,0.6);
 }
-.effect-item.broken { display: none; }
+.effect-item.broken img { display: none; }
+.effect-item.broken {
+    background: rgba(14,165,233,0.08);
+    border-style: dashed;
+}
+.effect-item.broken::before {
+    content: '\f72b';
+    font-family: 'Font Awesome 6 Free';
+    font-weight: 900;
+    width: 88px; height: 88px; border-radius: 10px;
+    background: rgba(6,10,20,0.6);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 2rem; color: #0ea5e9; flex-shrink: 0;
+}
 
 /* Kolom 1 = avatar wrap, Kolom 2 = .msg-content (header + bubble teks + media terpisah) */
 .msg-row { display: flex; flex-direction: row; align-items: flex-start; gap: 10px; max-width: 85%; min-width: 0; }
