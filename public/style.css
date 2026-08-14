@@ -563,8 +563,17 @@ textarea.modal-input { resize: none; font-family: inherit; }
 .content-user { align-items: flex-end; }
 .msg-content .message { max-width: 100%; }
 
-/* Header pesan ala Discord: Nama + Icon Role + Jam */
-.msg-header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+/* Header pesan ala Discord: Nama + Icon Role + Jam dalam kotak glassmorphism kecil */
+.msg-header {
+    display: flex; align-items: center; gap: 6px;
+    margin-bottom: 6px;
+    width: fit-content;
+    background: rgba(0, 0, 0, 0.35);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    border-radius: 8px;
+    padding: 4px 8px;
+}
 .msg-header-name { font-weight: 700; font-size: 0.78rem; line-height: 1.2; }
 .msg-header-name.user { color: #e2e8f0; }
 .msg-header-name.senka { color: #a78bfa; }
