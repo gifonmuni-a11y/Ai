@@ -2522,7 +2522,9 @@ async function ttsStreamTo(onSegment, body) {
 async function speak(text) {
     if (senkaAudio) stopSenkaAudio();
     try {
-        await ttsStreamTo((b64, type) => playSpeechBlob(b64, type), { text, mode: speakMode });
+        const cleanText = stripStickerTag(String(text || '')).trim();
+        if (!cleanText) return;
+        await ttsStreamTo((b64, type) => playSpeechBlob(b64, type), { text: cleanText, mode: speakMode });
     } catch (e) {
         // teks tetap tampil di chat; suara hanyalah bonus
     }
