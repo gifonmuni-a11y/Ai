@@ -17,6 +17,7 @@
     </script>
 </head>
 <body>
+    <div id="wallpaper" class="wallpaper"></div>
     <canvas id="sakura-canvas"></canvas>
 
     <div class="main-wrapper">
@@ -193,6 +194,11 @@
                     <span class="slider"></span>
                 </label>
                 <p class="modal-hint">Model "bisa baca gambar" dipakai otomatis saat kamu kirim foto.</p>
+            </div>
+            <div class="settings-block">
+                <label class="modal-label" for="bg-brightness-input">Kecerahan Wallpaper</label>
+                <input type="range" id="bg-brightness-input" min="10" max="100" value="50">
+                <p class="modal-hint">Geser untuk mengatur terang-gelapnya wallpaper latar (50% = normal, 100% = paling terang).</p>
             </div>
             <div class="settings-block" id="signout-block" style="display:none;">
                 <button class="modal-btn btn-danger" onclick="signOut()"><i class="fa-solid fa-right-from-bracket"></i> Keluar dari akun</button>

@@ -54,6 +54,7 @@ document.addEventListener('pointerdown', e => {
 
 window.onload = async () => {
     initSakura();
+    initBgBrightness();
     initCallPillDrag();
     document.getElementById('sakura-input').checked = window.sakuraRunning;
     const savedStory = localStorage.getItem('senka_story');
@@ -1069,7 +1070,7 @@ function makeMsgHeader(role, ts) {
     name.className = 'msg-header-name ' + (role === 'user' ? 'user' : 'senka');
     name.textContent = role === 'user' ? getProfileName() : 'Senka';
     const icon = document.createElement('img');
-    icon.className = 'msg-header-role';
+    icon.className = 'chat-role-icon';
     icon.src = role === 'user' ? ROLE_ICON_USER : ROLE_ICON_SENKA;
     icon.alt = '';
     icon.loading = 'lazy';
@@ -3527,6 +3528,27 @@ document.getElementById('image-prompt').addEventListener('keydown', e => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) generateImage();
 });
 document.getElementById('search-input').addEventListener('input', doSearch);
+
+const BG_BRIGHTNESS_KEY = 'senka_bg_brightness';
+
+function applyBgBrightness(v) {
+    const w = document.getElementById('wallpaper');
+    if (w) w.style.filter = 'brightness(' + v + '%)';
+}
+
+function initBgBrightness() {
+    const slider = document.getElementById('bg-brightness-input');
+    if (!slider) return;
+    const saved = localStorage.getItem(BG_BRIGHTNESS_KEY);
+    const val = saved !== null ? Math.max(10, Math.min(100, parseInt(saved, 10) || 50)) : 50;
+    slider.value = val;
+    applyBgBrightness(val);
+    slider.addEventListener('input', () => {
+        const v = parseInt(slider.value, 10);
+        applyBgBrightness(v);
+        localStorage.setItem(BG_BRIGHTNESS_KEY, String(v));
+    });
+}
 
 function initSakura() {
     const canvas = document.getElementById('sakura-canvas');
