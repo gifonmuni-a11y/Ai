@@ -487,11 +487,11 @@ textarea.modal-input { resize: none; font-family: inherit; }
 }
 .profile-effect-overlay {
     position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-    pointer-events: none; z-index: 50; overflow: hidden; border-radius: inherit;
+    pointer-events: none; z-index: 1; overflow: hidden; border-radius: inherit;
 }
 .profile-effect-overlay img {
-    width: 100%; height: 100%; object-fit: cover; opacity: 0.8;
-    mix-blend-mode: screen; pointer-events: none;
+    width: 100%; height: 100%; object-fit: cover; opacity: 1;
+    pointer-events: none; border-radius: inherit;
 }
 .profile-card::-webkit-scrollbar { width: 5px; }
 .profile-card::-webkit-scrollbar-thumb { background: rgba(56, 189, 248, 0.4); border-radius: 6px; }
@@ -507,7 +507,7 @@ textarea.modal-input { resize: none; font-family: inherit; }
     transition: all 0.2s ease; font-family: inherit;
 }
 .profile-banner-edit:hover { background: #38bdf8; transform: scale(1.08); }
-.profile-avatar-zone { position: relative; display: flex; flex-direction: column; align-items: center; margin-top: -46px; padding: 0 20px; z-index: 1; }
+.profile-avatar-zone { position: relative; display: flex; flex-direction: column; align-items: center; margin-top: -46px; padding: 0 20px; z-index: 2; }
 .profile-avatar-wrap { position: relative; width: 120px; height: 120px; overflow: visible; }
 .profile-avatar-wrap .profile-avatar {
     width: 100%; height: 100%; border-radius: 50%; object-fit: cover;
@@ -532,7 +532,7 @@ textarea.modal-input { resize: none; font-family: inherit; }
     transition: all 0.2s ease; font-family: inherit; z-index: 2;
 }
 .profile-deco-btn:hover { background: rgba(56,189,248,0.22); color: #fff; }
-.profile-body { padding: 12px 20px 22px; display: flex; flex-direction: column; }
+.profile-body { padding: 12px 20px 22px; display: flex; flex-direction: column; position: relative; z-index: 2; }
 .profile-body .modal-input { background: rgba(6,10,20,0.6); }
 .profile-member-since { color: #949ba4; font-size: 0.74rem; margin: 10px 0 0; }
 .profile-member-since b { color: #c4b5fd; }
