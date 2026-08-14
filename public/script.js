@@ -1142,8 +1142,9 @@ function renderProfileModal() {
     if (nameStatic) nameStatic.textContent = getProfileName();
     if (bioStatic) bioStatic.textContent = userProfile.bio || 'Belum ada bio.';
     const ms = userProfile.memberSince ? new Date(userProfile.memberSince) : null;
+    const sinceIcon = '<img class="profile-since-icon" src="https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Favicon/logoicon.png" alt="">';
     document.getElementById('profile-member-since').innerHTML = ms
-        ? 'Bergabung sejak <b>' + ms.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) + '</b>'
+        ? sinceIcon + 'Bergabung sejak <b>' + ms.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) + '</b>'
         : '';
     renderProfileEffect(getProfileEffect()?.id, document.querySelector('#profile-modal .profile-effect-overlay'));
 }
