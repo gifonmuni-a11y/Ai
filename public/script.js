@@ -1351,8 +1351,8 @@ function buildMsgEl(m) {
     const row = document.createElement('div');
     row.className = 'msg-row ' + (m.role === 'user' ? 'msg-row-user' : 'msg-row-senka');
     if (m.role === 'user') {
-        row.appendChild(bubble);
         row.appendChild(makeMiniUserAvatar());
+        row.appendChild(bubble);
     } else {
         row.appendChild(makeSenkaAvatar());
         row.appendChild(bubble);
@@ -3505,8 +3505,8 @@ function appendMessage(role, text, isTypewriter = false) {
     if (role === 'user') {
         container = document.createElement('div');
         container.className = 'msg-row msg-row-user';
-        container.appendChild(msgDiv);
         container.appendChild(makeMiniUserAvatar());
+        container.appendChild(msgDiv);
     } else {
         container = document.createElement('div');
         container.className = 'msg-row msg-row-senka';

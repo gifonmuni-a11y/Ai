@@ -93,10 +93,19 @@ button:focus, button:focus-visible, a:focus, a:focus-visible, [tabindex]:focus-v
 .load-more { margin: 8px auto; display: flex; padding: 8px 18px; border-radius: 999px; background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.35); color: #7dd3fc; font-size: 0.8rem; cursor: pointer; }
 .load-more:active { transform: scale(0.97); }
 
-.message { max-width: 85%; padding: 2px 0; font-size: 0.9rem; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: anywhere; min-width: 0; animation: msgIn 0.28s ease-out; color: #f1f5f9; text-shadow: 1px 1px 4px rgba(0,0,0,0.9); }
+.message {
+    max-width: 80%;
+    padding: 10px 14px;
+    background: rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    border-radius: 14px;
+    font-size: 0.9rem; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: anywhere; min-width: 0;
+    animation: msgIn 0.28s ease-out; color: #f1f5f9; text-shadow: 1px 1px 4px rgba(0,0,0,0.9);
+}
 @keyframes msgIn { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
-.msg-user { align-self: flex-end; margin-left: auto; background: transparent; border: none; box-shadow: none; }
-.msg-senka { align-self: flex-start; background: transparent; border: none; box-shadow: none; }
+.msg-user { align-self: flex-end; margin-left: auto; border-top-right-radius: 4px; }
+.msg-senka { align-self: flex-start; border-top-left-radius: 4px; }
 .em { color: #c084fc; font-weight: 700; }
 .q { color: #E8D1FF; font-weight: 400; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8); }
 .num { color: #c084fc; font-weight: 700; }
@@ -539,14 +548,13 @@ textarea.modal-input { resize: none; font-family: inherit; }
 .deco-footer { margin-top: 12px; }
 .deco-footer .modal-btn { margin-top: 0; }
 
-/* Mini avatar user + dekorasi di gelembung chat */
-.msg-row { display: flex; align-items: flex-end; gap: 8px; max-width: 85%; min-width: 0; }
-.msg-row-user { align-self: flex-end; margin-left: auto; }
-.msg-row-senka { align-self: flex-start; }
-.msg-row .message { max-width: 100%; }
+/* Kolom 1 = avatar wrap, Kolom 2 = .message (header + body) */
+.msg-row { display: flex; flex-direction: row; align-items: flex-start; gap: 10px; max-width: 85%; min-width: 0; }
+.msg-row-user { align-self: flex-end; margin-left: auto; flex-direction: row-reverse; }
+.msg-row-senka { align-self: flex-start; flex-direction: row; }
 
 /* Header pesan ala Discord: Nama + Icon Role + Jam */
-.msg-header { display: flex; align-items: center; gap: 5px; margin-bottom: 4px; }
+.msg-header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
 .msg-header-name { font-weight: 700; font-size: 0.78rem; line-height: 1.2; }
 .msg-header-name.user { color: #e2e8f0; }
 .msg-header-name.senka { color: #a78bfa; }
@@ -560,7 +568,7 @@ textarea.modal-input { resize: none; font-family: inherit; }
 .msg-body { min-width: 0; }
 
 /* Avatar Senka di chat bubble + dekorasi border */
-.senka-avatar-wrap { position: relative; width: 46px; height: 46px; flex-shrink: 0; align-self: flex-end; overflow: visible; }
+.senka-avatar-wrap { position: relative; width: 46px; height: 46px; flex-shrink: 0; align-self: flex-start; overflow: visible; }
 .senka-avatar-wrap .senka-avatar {
     width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block;
     position: relative; z-index: 1;
@@ -571,7 +579,7 @@ textarea.modal-input { resize: none; font-family: inherit; }
     pointer-events: none; object-fit: fill;
 }
 
-.mini-avatar-wrap { position: relative; width: 48px; height: 48px; flex-shrink: 0; align-self: flex-end; overflow: visible; }
+.mini-avatar-wrap { position: relative; width: 48px; height: 48px; flex-shrink: 0; align-self: flex-start; overflow: visible; }
 .mini-avatar-wrap .mini-avatar {
     width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block;
     position: relative; z-index: 1;
