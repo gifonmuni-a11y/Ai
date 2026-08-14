@@ -447,7 +447,13 @@ async function prepareMessagesForAI(messages, isVision, neyLock, normalMode = fa
         if (Array.isArray(c)) return c.map(p => p && p.type === 'text' ? { ...p, text: mask(p.text) } : p);
         return c;
     };
-    const clean = (messages || []).map(m => ({ role: m.role, content: m.role === 'user' ? maskUserStickers(m.content) : m.content }));
+    const clean = (messages || []).map(m => {
+        let content = m.role === 'user' ? maskUserStickers(m.content) : m.content;
+        if (Array.isArray(content)) {
+            content = content.filter(c => c && (c.type === 'text' || c.type === 'image_url'));
+        }
+        return { role: m.role, content };
+    });
     const anchor = {
         role: "system",
         content: isVision
@@ -2480,6 +2486,31 @@ app.post('/api/upload-json', async (req, res) => {
     } catch (error) {
         console.error('Error upload-json:', error);
         res.status(500).json({ error: error.message || 'Gagal upload media.' });
+    }
+});
+
+app.post('/api/transcribe', upload.single('audio'), async (req, res) => {
+    try {
+        if (!hasGroqKey()) return res.status(503).json({ error: 'STT belum dikonfigurasi.' });
+        if (!req.file || !req.file.buffer) return res.status(400).json({ error: 'File audio kosong.' });
+        const form = new FormData();
+        form.append('file', new Blob([req.file.buffer], { type: req.file.mimetype || 'audio/webm' }), req.file.originalname || 'voice.webm');
+        form.append('model', 'whisper-large-v3');
+        form.append('language', 'id');
+        const r = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+            method: 'POST',
+            headers: { Authorization: 'Bearer ' + groqKey() },
+            body: form
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+            markGroqKeyLimited(JSON.stringify(d).slice(0, 300));
+            return res.status(r.status).json({ error: d.error?.message || 'Transkripsi gagal.' });
+        }
+        res.json({ text: d.text || '' });
+    } catch (error) {
+        console.error('Error transcribe:', error);
+        res.status(500).json({ error: 'Gagal transkripsi audio.' });
     }
 });
 

@@ -56,6 +56,7 @@ window.onload = async () => {
     initSakura();
     initBgBrightness();
     initCallPillDrag();
+    updateSendMicToggle();
     document.getElementById('sakura-input').checked = window.sakuraRunning;
     const savedStory = localStorage.getItem('senka_story');
     if (savedStory) {
@@ -1393,6 +1394,7 @@ imageUpload.addEventListener('change', async (e) => {
         document.getElementById('file-name-preview').innerText = " " + file.name;
         previewContainer.style.display = 'flex';
         base64Image = await compressImage(file);
+        updateSendMicToggle();
     }
 });
 
@@ -1422,6 +1424,7 @@ function removeImage() {
     base64Image = null;
     imageUpload.value = '';
     previewContainer.style.display = 'none';
+    updateSendMicToggle();
 }
 
 function shrinkMemoryImages() {
@@ -1472,6 +1475,7 @@ function buildMsgEl(m) {
     (m.content || []).forEach(c => {
         if (!c) return;
         if (c.type === 'text') {
+            if (m.transcript) return;
             const stk = extractSticker(c.text);
             const p = document.createElement('div');
             const cleanText = stk ? stripStickerTag(c.text) : c.text;
@@ -1512,8 +1516,15 @@ function buildMsgEl(m) {
                 const a = document.createElement('audio');
                 a.src = c.url;
                 a.controls = true;
+                a.preload = 'metadata';
                 a.classList.add('chat-audio');
                 bodyOf().appendChild(a);
+                if (m.transcript) {
+                    const cap = document.createElement('div');
+                    cap.className = 'voice-transcript';
+                    cap.innerHTML = '<i class="fa-solid fa-microphone"></i>' + escapeHtml(m.transcript);
+                    bodyOf().appendChild(cap);
+                }
             } else {
                 const p = document.createElement('div');
                 p.innerText = '[suara]';
@@ -2519,14 +2530,185 @@ async function ttsStreamTo(onSegment, body) {
     return { error: false };
 }
 
-async function speak(text) {
+async function speak(text, targetEl) {
     if (senkaAudio) stopSenkaAudio();
+    const cleanText = stripStickerTag(String(text || '')).trim();
+    if (!cleanText) return;
+    if (targetEl) {
+        try {
+            const segs = [];
+            const res = await ttsStreamTo((b64, type) => segs.push({ b64, type }), { text: cleanText, mode: speakMode });
+            if (res.error || segs.length === 0) return;
+            const audio = document.createElement('audio');
+            audio.controls = true;
+            audio.preload = 'metadata';
+            audio.classList.add('chat-audio');
+            audio.src = await makeAudioUrl(segs);
+            targetEl.appendChild(audio);
+            scrollToBottom(true);
+        } catch (e) {
+            // teks tetap tampil di chat; suara hanyalah bonus
+        }
+        return;
+    }
     try {
-        const cleanText = stripStickerTag(String(text || '')).trim();
-        if (!cleanText) return;
         await ttsStreamTo((b64, type) => playSpeechBlob(b64, type), { text: cleanText, mode: speakMode });
     } catch (e) {
         // teks tetap tampil di chat; suara hanyalah bonus
+    }
+}
+
+async function makeAudioUrl(segs) {
+    const type = segs[0].type || 'audio/mpeg';
+    const parts = [];
+    let total = 0;
+    for (const s of segs) {
+        const buf = await base64ToBlob(s.b64, s.type || type).arrayBuffer();
+        total += buf.byteLength;
+        parts.push(buf);
+    }
+    const merged = new Uint8Array(total);
+    let off = 0;
+    for (const buf of parts) { merged.set(new Uint8Array(buf), off); off += buf.byteLength; }
+    return URL.createObjectURL(new Blob([merged], { type }));
+}
+
+// ====== Voice Note (Pesan Suara) ======
+let voiceRecorder = null;
+let voiceChunks = [];
+let voiceRecStream = null;
+let voiceCancelPending = false;
+let voicePointerDown = false;
+let voiceBusy = false;
+
+function pickVoiceMime() {
+    const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported) {
+        for (const c of candidates) {
+            if (MediaRecorder.isTypeSupported(c)) return c;
+        }
+    }
+    return candidates[0];
+}
+
+async function startVoiceNote() {
+    if (voiceRecorder || isStreaming) return;
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        voiceRecStream = stream;
+        const mime = pickVoiceMime();
+        let rec;
+        try { rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined); }
+        catch (e) { rec = new MediaRecorder(stream); }
+        voiceChunks = [];
+        voiceCancelPending = false;
+        rec.ondataavailable = e => { if (e.data && e.data.size > 0) voiceChunks.push(e.data); };
+        rec.onstop = () => {
+            voiceRecorder = null;
+            if (voiceRecStream) { voiceRecStream.getTracks().forEach(t => t.stop()); voiceRecStream = null; }
+            setVoiceRecUI(false);
+            if (voiceCancelPending) { voiceCancelPending = false; return; }
+            finalizeVoiceNote();
+        };
+        rec.start();
+        voiceRecorder = rec;
+        setVoiceRecUI(true);
+        if (!voicePointerDown) stopVoiceNote();
+    } catch (e) {
+        voicePointerDown = false;
+        showToast('Mic tidak diizinkan. Aktifkan izin mikrofon lalu coba lagi.');
+    }
+}
+
+function stopVoiceNote() {
+    if (voiceRecorder && voiceRecorder.state !== 'inactive') voiceRecorder.stop();
+}
+
+function cancelVoiceNote() {
+    if (!voiceRecorder) return;
+    voiceCancelPending = true;
+    if (voiceRecorder.state !== 'inactive') voiceRecorder.stop();
+}
+
+function setVoiceRecUI(recording) {
+    micBtn.classList.toggle('recording', recording);
+    micBtn.innerHTML = recording ? '<i class="fa-solid fa-stop"></i>' : '<i class="fa-solid fa-microphone"></i>';
+    voiceRecHint.style.display = recording ? 'flex' : 'none';
+}
+
+function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(fr.result);
+        fr.onerror = () => reject(fr.error);
+        fr.readAsDataURL(blob);
+    });
+}
+
+async function finalizeVoiceNote() {
+    const blob = new Blob(voiceChunks, { type: voiceChunks[0]?.type || 'audio/webm' });
+    if (blob.size < 1000) { showToast('Rekaman terlalu pendek.'); return; }
+    await sendVoiceNote(blob);
+}
+
+async function transcribeAudio(blob) {
+    const fd = new FormData();
+    fd.append('audio', blob, 'voice.webm');
+    const r = await fetch('/api/transcribe', { method: 'POST', body: fd });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || 'Transkripsi gagal.');
+    return String(d.text || '').trim();
+}
+
+async function sendVoiceNote(blob) {
+    while (voiceBusy) await new Promise(r => setTimeout(r, 250));
+    voiceBusy = true;
+    try {
+        let dataUrl;
+        try { dataUrl = await blobToDataUrl(blob); }
+        catch (e) { showToast('Gagal memproses rekaman.'); return; }
+
+        let audioUrl = dataUrl;
+        if (supabaseEnabled) {
+            try { audioUrl = await uploadDataUrl(dataUrl, 'webm'); }
+            catch (e) { audioUrl = dataUrl; }
+        }
+
+        const vTs = Date.now();
+        const content = appendMessage('user', '', false, vTs, formatMsgTime(vTs));
+        const media = msgMediaOf(content);
+        const a = document.createElement('audio');
+        a.src = audioUrl;
+        a.controls = true;
+        a.preload = 'metadata';
+        a.classList.add('chat-audio');
+        media.appendChild(a);
+        const caption = document.createElement('div');
+        caption.className = 'voice-transcript';
+        caption.innerHTML = '<i class="fa-solid fa-microphone"></i>Transkripsi...';
+        media.appendChild(caption);
+        scrollToBottom(true);
+
+        const item = { role: 'user', content: [{ type: 'audio_url', url: audioUrl }], transcript: '', ts: vTs, time: formatMsgTime(vTs) };
+        memoryList.push(item);
+        if (supabaseEnabled) remoteSave('user', 'voice', audioUrl, item);
+        else saveSessions();
+
+        let transcript = '';
+        try { transcript = await transcribeAudio(blob); }
+        catch (e) { transcript = ''; }
+
+        item.transcript = transcript;
+        item.content.push({ type: 'text', text: transcript || '[pesan suara]' });
+        caption.innerHTML = transcript
+            ? '<i class="fa-solid fa-microphone"></i>' + escapeHtml(transcript)
+            : '<i class="fa-solid fa-microphone"></i><span style="color:#64748b">Transkripsi gagal.</span>';
+        if (!supabaseEnabled) saveSessions();
+
+        while (isStreaming) await new Promise(r => setTimeout(r, 250));
+        await streamAssistantReply(await getWebPayload(memoryList, transcript));
+    } finally {
+        voiceBusy = false;
     }
 }
 
@@ -3314,6 +3496,7 @@ async function sendToSenka() {
 
     messageInput.value = '';
     removeImage();
+    updateSendMicToggle();
     scrollToBottom(true);
 
     await streamAssistantReply(await getWebPayload(memoryList, text));
@@ -3452,7 +3635,7 @@ async function streamAssistantReply(payloadMessages) {
         if (!supabaseEnabled) saveSessions();
         else remoteSave('senka', 'text', displayText, aiItem);
         shrinkMemoryImages();
-        if (autospeak && !fileReq) speak(displayText);
+        if (autospeak && !fileReq) speak(displayText, msgMediaOf(msgContent));
     } catch (error) {
         if (error.message === 'empty') {
             memoryList.pop();
@@ -3698,6 +3881,22 @@ function scrollToBottom(smooth = false) {
     chatHistoryDOM.scrollTo({ top: chatHistoryDOM.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
 }
 messageInput.addEventListener('keypress', e => { if (e.key === 'Enter') sendToSenka(); });
+
+const micBtn = document.getElementById('mic-btn');
+const voiceRecHint = document.getElementById('voice-rec-hint');
+
+function updateSendMicToggle() {
+    const hasInput = messageInput.value.trim().length > 0 || !!base64Image;
+    const recording = !!voiceRecorder;
+    micBtn.style.display = (hasInput && !recording) ? 'none' : 'flex';
+    document.getElementById('send-btn').style.display = (hasInput && !recording) ? 'flex' : 'none';
+}
+messageInput.addEventListener('input', updateSendMicToggle);
+micBtn.addEventListener('pointerdown', e => { e.preventDefault(); voicePointerDown = true; startVoiceNote(); });
+micBtn.addEventListener('pointerup', () => { voicePointerDown = false; stopVoiceNote(); });
+micBtn.addEventListener('pointercancel', () => { voicePointerDown = false; cancelVoiceNote(); });
+micBtn.addEventListener('pointerleave', () => { if (!voicePointerDown) return; voicePointerDown = false; stopVoiceNote(); });
+micBtn.addEventListener('contextmenu', e => e.preventDefault());
 document.getElementById('image-prompt').addEventListener('keydown', e => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) generateImage();
 });
