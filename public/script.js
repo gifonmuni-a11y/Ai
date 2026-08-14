@@ -714,6 +714,7 @@ function openLogoModal() {
     vid.style.display = '';
     img.style.display = 'none';
     vid.onerror = () => { vid.style.display = 'none'; img.onerror = null; img.src = LOGO_ICON_URL; img.style.display = ''; };
+    vid.currentTime = 0;
     vid.play().catch(() => { });
     document.getElementById('logo-modal').style.display = 'flex';
 }
