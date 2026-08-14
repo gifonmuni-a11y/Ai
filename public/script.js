@@ -700,9 +700,11 @@ function updateSpeakToggles(ev) {
 }
 function openImageModal() { document.getElementById('image-modal').style.display = 'flex'; setTimeout(() => document.getElementById('image-prompt').focus(), 100); }
 function closeImageModal() { document.getElementById('image-modal').style.display = 'none'; }
-function openProfile() {
+function openProfile(editable) {
     renderProfileModal();
-    document.getElementById('profile-modal').style.display = 'flex';
+    const modal = document.getElementById('profile-modal');
+    modal.classList.toggle('readonly', editable !== true);
+    modal.style.display = 'flex';
 }
 function closeProfile() { document.getElementById('profile-modal').style.display = 'none'; }
 
@@ -1135,6 +1137,10 @@ function renderProfileModal() {
     }
     document.getElementById('profile-name-input').value = getProfileName();
     document.getElementById('profile-bio-input').value = userProfile.bio || '';
+    const nameStatic = document.getElementById('profile-name-static');
+    const bioStatic = document.getElementById('profile-bio-static');
+    if (nameStatic) nameStatic.textContent = getProfileName();
+    if (bioStatic) bioStatic.textContent = userProfile.bio || 'Belum ada bio.';
     const ms = userProfile.memberSince ? new Date(userProfile.memberSince) : null;
     document.getElementById('profile-member-since').innerHTML = ms
         ? 'Bergabung sejak <b>' + ms.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) + '</b>'
@@ -1599,6 +1605,7 @@ function renderChat() {
         const STEP = 80;
         if (supabaseEnabled && remoteHasMore) {
             chatHistoryDOM.insertBefore(makeRemoteBtn(), chatHistoryDOM.firstChild);
+            memoryList.filter(m => !m.hidden).forEach(m => chatHistoryDOM.appendChild(buildMsgEl(m)));
         } else if (memoryList.length > STEP) {
             const hidden = memoryList.length - STEP;
             const btn = document.createElement('button');

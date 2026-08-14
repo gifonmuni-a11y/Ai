@@ -49,7 +49,7 @@
                         </button>
                         <button class="icon-btn" id="btn-new-session" onclick="newSession()" title="Sesi baru"><i class="fa-solid fa-plus"></i></button>
                         <button class="icon-btn" onclick="openSearch()" title="Cari di chat"><i class="fa-solid fa-magnifying-glass"></i></button>
-                        <button class="icon-btn" onclick="openProfile()" title="User Profile"><i class="fa-solid fa-user"></i></button>
+                        <button class="icon-btn" onclick="openProfile(true)" title="User Profile"><i class="fa-solid fa-user"></i></button>
                         <button class="icon-btn gear-btn" onclick="openSettings()" title="Pengaturan"><i class="fa-solid fa-gear"></i></button>
                     </div>
                 </div>
@@ -337,6 +337,7 @@
             </div>
             <div class="profile-body">
                 <input type="text" id="profile-name-input" class="modal-input" maxlength="30" placeholder="Nama kamu" autocomplete="off">
+                <div class="profile-static-name" id="profile-name-static"></div>
                 <p class="profile-member-since" id="profile-member-since"></p>
                 <div class="profile-roles">
                     <span class="profile-roles-label">Roles</span>
@@ -349,6 +350,7 @@
                 </div>
                 <label class="modal-label">Bio</label>
                 <textarea id="profile-bio-input" class="modal-input" rows="3" maxlength="200" placeholder="Tulis sedikit tentang dirimu..."></textarea>
+                <p class="profile-bio-static" id="profile-bio-static"></p>
                 <div class="profile-actions">
                     <button class="modal-btn ghost" onclick="openEffectPicker()"><i class="fa-solid fa-wand-magic-sparkles"></i> Ubah Efek Profil</button>
                     <button class="modal-btn" onclick="saveProfile()"><i class="fa-solid fa-check"></i> Simpan Profil</button>
