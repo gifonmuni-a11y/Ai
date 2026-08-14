@@ -344,25 +344,18 @@ button:focus, button:focus-visible, a:focus, a:focus-visible, [tabindex]:focus-v
 #message-input { flex: 1; min-width: 0; background: rgba(6, 10, 20, 0.5); border: 1px solid rgba(96, 165, 250, 0.32); color: #fff; padding: 12px 18px; border-radius: 25px; outline: none; transition: all 0.3s ease; }
 #message-input:focus { border-color: #38bdf8; box-shadow: 0 0 12px rgba(56, 189, 248, 0.3); }
 #message-input::placeholder { color: #8b7f9e; }
-/* Styling Tombol Kirim Glassmorphism dengan Icon Biru */
+/* Styling Tombol Kirim — samakan dengan tombol telepon (.tool-btn) */
 #send-btn {
-    background-color: rgba(30, 32, 40, 0.7) !important;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    border: 1px solid rgba(255, 255, 255, 0.15) !important;
-    color: #4da6ff !important; /* Warna icon diubah dari putih menjadi biru */
-    border-radius: 50%;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
-    transition: all 0.3s ease;
-    width: 45px; height: 45px; cursor: pointer; flex-shrink: 0;
+    background: rgba(8,12,26,0.45);
+    border: 1px solid rgba(96,165,250,0.3);
+    color: #7dd3fc;
+    width: 45px; height: 45px; border-radius: 50%; cursor: pointer; font-size: 1rem;
+    display: flex; align-items: center; justify-content: center; transition: all 0.25s ease;
+    flex-shrink: 0;
 }
 
-/* Efek saat tombol disentuh/ditekan */
-#send-btn:hover, #send-btn:active {
-    background-color: rgba(50, 52, 60, 0.85) !important;
-    border-color: rgba(255, 255, 255, 0.3) !important;
-    transform: scale(0.95);
-}
+#send-btn:hover { background: rgba(56, 189, 248, 0.3); color: #fff; box-shadow: 0 0 14px rgba(56, 189, 248, 0.5); }
+#send-btn:active { transform: scale(0.92); }
 #pm-mic.recording {
     background: linear-gradient(135deg, #f87171, #dc2626) !important;
     border-color: #ef4444 !important; color: #fff !important;
@@ -692,7 +685,7 @@ textarea.modal-input { resize: none; font-family: inherit; }
 .msg-header-name { font-weight: 700; font-size: 0.78rem; line-height: 1.2; }
 .msg-header-name.user { color: #e2e8f0; }
 /* Warna nama Senka di dalam bubble chat */
-.msg-header-name.senka { color: #b1eaff !important; }
+.msg-header-name.senka { color: #b1eaff !important; font-weight: 900; }
 .chat-role-icon {
     height: 16px !important;
     width: auto !important;
