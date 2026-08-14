@@ -648,8 +648,8 @@ textarea.modal-input { resize: none; font-family: inherit; }
 .logo-pop-diamond { width: 8px; height: 8px; background: #7dd3fc; transform: rotate(45deg); border-radius: 2px; box-shadow: 0 0 8px rgba(125, 211, 252, 0.8); }
 .logo-pop-img-wrap { display: flex; justify-content: center; }
 .logo-pop-img {
-    width: 130px; height: 130px; border-radius: 18px; object-fit: contain;
-    border: 2px solid rgba(125, 211, 252, 0.6);
+    width: 230px; height: auto; aspect-ratio: 16 / 9; object-fit: contain;
+    border-radius: 14px; border: 2px solid rgba(125, 211, 252, 0.6);
     box-shadow: 0 0 24px rgba(56, 189, 248, 0.5);
     animation: logoFloat 2.4s ease-in-out infinite;
 }
