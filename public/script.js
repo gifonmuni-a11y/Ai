@@ -1048,6 +1048,71 @@ function openDecoPicker() {
 
 function closeDecoPicker() { document.getElementById('deco-modal').style.display = 'none'; }
 
+const ROLE_ICON_USER = 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Role/Pengguna/iconbubblechatpengguna.webp';
+const ROLE_ICON_SENKA = 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Role/Senka/iconbubblechatsenka.webp';
+const SENKA_BUBBLE_AVATAR = 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Profile/profilebubblechatsenka.webp';
+const SENKA_BUBBLE_DECO = 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Boarder/Untitled%20folder/fresh_boardersenka.gif';
+
+function formatMsgTime(ts) {
+    const d = ts ? new Date(ts) : new Date();
+    let h = d.getHours();
+    const m = d.getMinutes();
+    const ap = h >= 12 ? 'PM' : 'AM';
+    h = h % 12 || 12;
+    return h + ':' + String(m).padStart(2, '0') + ' ' + ap;
+}
+
+function makeMsgHeader(role, ts) {
+    const header = document.createElement('div');
+    header.className = 'msg-header';
+    const name = document.createElement('span');
+    name.className = 'msg-header-name ' + (role === 'user' ? 'user' : 'senka');
+    name.textContent = role === 'user' ? getProfileName() : 'Senka';
+    const icon = document.createElement('img');
+    icon.className = 'msg-header-role';
+    icon.src = role === 'user' ? ROLE_ICON_USER : ROLE_ICON_SENKA;
+    icon.alt = '';
+    icon.loading = 'lazy';
+    icon.onerror = () => icon.remove();
+    const time = document.createElement('span');
+    time.className = 'msg-header-time';
+    time.textContent = formatMsgTime(ts);
+    header.appendChild(name);
+    header.appendChild(icon);
+    header.appendChild(time);
+    return header;
+}
+
+function makeSenkaAvatar() {
+    const wrap = document.createElement('div');
+    wrap.className = 'senka-avatar-wrap';
+    const img = document.createElement('img');
+    img.className = 'senka-avatar';
+    img.src = SENKA_BUBBLE_AVATAR;
+    img.alt = '';
+    img.loading = 'lazy';
+    img.onerror = () => { img.src = 'assets/avatarsenka.gif'; };
+    const deco = document.createElement('img');
+    deco.className = 'senka-avatar-deco';
+    deco.src = SENKA_BUBBLE_DECO;
+    deco.alt = '';
+    deco.loading = 'lazy';
+    deco.onerror = () => deco.remove();
+    wrap.appendChild(img);
+    wrap.appendChild(deco);
+    return wrap;
+}
+
+function msgBodyOf(bubble) {
+    let b = bubble.querySelector('.msg-body');
+    if (!b) {
+        b = document.createElement('div');
+        b.className = 'msg-body';
+        bubble.appendChild(b);
+    }
+    return b;
+}
+
 function clearDecoration() {
     userProfile.decoration = '';
     saveProfileState();
@@ -1220,6 +1285,10 @@ function shrinkMemoryImages() {
 function buildMsgEl(m) {
     const bubble = document.createElement('div');
     bubble.classList.add('message', m.role === 'user' ? 'msg-user' : 'msg-senka');
+    bubble.appendChild(makeMsgHeader(m.role === 'user' ? 'user' : 'senka', m.ts));
+    const body = document.createElement('div');
+    body.className = 'msg-body';
+    bubble.appendChild(body);
     let bubbleText = '';
     (m.content || []).forEach(c => {
         if (!c) return;
@@ -1232,18 +1301,18 @@ function buildMsgEl(m) {
                 if (m.role === 'assistant') bubbleText += ' ' + cleanText;
             }
             if (stk) appendStickerImg(p, stk);
-            bubble.appendChild(p);
+            body.appendChild(p);
         } else if (c.type === 'image_url') {
             if (typeof c.image_url.url === 'string' && c.image_url.url.startsWith('data:')) {
                 const p = document.createElement('div');
                 p.innerText = '[gambar]';
-                bubble.appendChild(p);
+                body.appendChild(p);
             } else {
                 const img = document.createElement('img');
                 img.src = c.image_url.url;
                 img.classList.add('chat-img');
-                img.onerror = () => { img.remove(); const p = document.createElement('div'); p.innerText = '[gambar tidak tersedia]'; bubble.appendChild(p); };
-                bubble.appendChild(img);
+                img.onerror = () => { img.remove(); const p = document.createElement('div'); p.innerText = '[gambar tidak tersedia]'; body.appendChild(p); };
+                body.appendChild(img);
             }
         } else if (c.type === 'video_url') {
             if (c.url) {
@@ -1252,12 +1321,12 @@ function buildMsgEl(m) {
                 v.controls = true;
                 v.preload = 'metadata';
                 v.classList.add('chat-video');
-                v.onerror = () => { v.remove(); const p = document.createElement('div'); p.innerText = '[video tidak tersedia]'; bubble.appendChild(p); };
-                bubble.appendChild(v);
+                v.onerror = () => { v.remove(); const p = document.createElement('div'); p.innerText = '[video tidak tersedia]'; body.appendChild(p); };
+                body.appendChild(v);
             } else {
                 const p = document.createElement('div');
                 p.innerText = '[video]';
-                bubble.appendChild(p);
+                body.appendChild(p);
             }
         } else if (c.type === 'audio_url') {
             if (c.url) {
@@ -1265,11 +1334,11 @@ function buildMsgEl(m) {
                 a.src = c.url;
                 a.controls = true;
                 a.classList.add('chat-audio');
-                bubble.appendChild(a);
+                body.appendChild(a);
             } else {
                 const p = document.createElement('div');
                 p.innerText = '[suara]';
-                bubble.appendChild(p);
+                body.appendChild(p);
             }
         }
     });
@@ -1278,14 +1347,16 @@ function buildMsgEl(m) {
         if (bubbleText.trim()) attachCallTranslation(bubble, bubbleText.trim());
         attachAiActions(bubble, m, lastAssistantIdx() === memoryList.indexOf(m));
     }
+    const row = document.createElement('div');
+    row.className = 'msg-row ' + (m.role === 'user' ? 'msg-row-user' : 'msg-row-senka');
     if (m.role === 'user') {
-        const row = document.createElement('div');
-        row.className = 'msg-row msg-row-user';
         row.appendChild(bubble);
         row.appendChild(makeMiniUserAvatar());
-        return row;
+    } else {
+        row.appendChild(makeSenkaAvatar());
+        row.appendChild(bubble);
     }
-    return bubble;
+    return row;
 }
 
 function renderChat() {
@@ -1302,19 +1373,19 @@ function renderChat() {
         let greeting;
         if (away) greeting = `Selamat kembali ${panggilan}!`;
         else greeting = getGreeting();
-        memoryList.push({ role: 'assistant', content: [{ type: 'text', text: greeting }] });
+        memoryList.push({ role: 'assistant', content: [{ type: 'text', text: greeting }], ts: Date.now() });
         const gItem = memoryList[memoryList.length - 1];
         if (!supabaseEnabled) saveSessions();
         else remoteSave('senka', 'text', greeting, gItem);
         const gEl = appendMessage('senka', greeting);
-        gEl.innerHTML = formatReply(greeting);
+        msgBodyOf(gEl).innerHTML = formatReply(greeting);
         gEl.dataset.greeting = '1';
         if (away) {
             setTimeout(() => {
                 const el = chatHistoryDOM.querySelector('.message[data-greeting="1"]');
                 if (!el) return;
                 const newG = getGreeting();
-                el.innerHTML = formatReply(newG);
+                msgBodyOf(el).innerHTML = formatReply(newG);
                 const idx = memoryList.findIndex(x => x.role === 'assistant' && x.content && x.content[0] && x.content[0].text === greeting);
                 if (idx !== -1) {
                     memoryList[idx].content[0].text = newG;
@@ -2080,7 +2151,8 @@ function editAiMessage(bubble, item) {
     const textParts = (item.content || []).filter(c => c.type === 'text');
     if (!textParts.length || extractSticker(textParts[0].text)) return;
     const cur = textParts[0].text;
-    bubble.innerHTML = '';
+    const eb = msgBodyOf(bubble);
+    eb.innerHTML = '';
     const box = document.createElement('div');
     box.className = 'edit-box';
     const ta = document.createElement('textarea');
@@ -2107,7 +2179,7 @@ function editAiMessage(bubble, item) {
     row.appendChild(cancel);
     box.appendChild(ta);
     box.appendChild(row);
-    bubble.appendChild(box);
+    eb.appendChild(box);
     ta.focus();
 }
 
@@ -2178,7 +2250,7 @@ async function regenerateLast() {
         authHeaders().then(h => fetch('/api/chats/' + item.cid, { method: 'DELETE', headers: h }).catch(() => { }));
     }
     const bubbles = chatHistoryDOM.querySelectorAll('.message.msg-senka');
-    if (bubbles.length) bubbles[bubbles.length - 1].remove();
+    if (bubbles.length) { const last = bubbles[bubbles.length - 1]; const r = last.closest('.msg-row'); if (r) r.remove(); else last.remove(); }
     if (!supabaseEnabled) saveSessions();
     scrollToBottom(true);
     await streamAssistantReply([...memoryList]);
@@ -2856,7 +2928,7 @@ function generateVideo() {
 async function generateVideoWithPrompt(prompt) {
     appendMessage('user', prompt);
     const loading = appendMessage('senka', '');
-    loading.innerHTML = 'Senka lagi bikin videomu<span class="tind"><i></i><i></i><i></i></span>';
+    msgBodyOf(loading).innerHTML = 'Senka lagi bikin videomu<span class="tind"><i></i><i></i><i></i></span>';
     scrollToBottom(true);
     try {
         const resp = await fetch('/api/video', {
@@ -2872,17 +2944,18 @@ async function generateVideoWithPrompt(prompt) {
             const sr = await fetch('/api/video/status?url=' + encodeURIComponent(data.statusUrl), { headers: await authHeaders() });
             const sd = await sr.json().catch(() => ({}));
             if (sd.status === 'COMPLETED' && sd.videoUrl) {
-                loading.innerHTML = '';
+                const vb = msgBodyOf(loading);
+                vb.innerHTML = '';
                 const tag = document.createElement('div');
                 tag.className = 'msg-tag';
                 tag.innerText = 'Video AI';
-                loading.appendChild(tag);
+                vb.appendChild(tag);
                 const v = document.createElement('video');
                 v.src = sd.videoUrl;
                 v.controls = true;
                 v.preload = 'metadata';
                 v.classList.add('chat-video');
-                loading.appendChild(v);
+                vb.appendChild(v);
                 const actions = document.createElement('div');
                 actions.className = 'msg-actions';
                 const dl = document.createElement('button');
@@ -2891,7 +2964,7 @@ async function generateVideoWithPrompt(prompt) {
                 dl.innerHTML = '<i class="fa-solid fa-download"></i>';
                 dl.onclick = () => downloadImage(sd.videoUrl, 'senka-video-' + Date.now() + '.mp4');
                 actions.appendChild(dl);
-                loading.appendChild(actions);
+                vb.appendChild(actions);
                 remoteSave('senka', 'video', sd.videoUrl);
                 scrollToBottom(true);
                 return;
@@ -2902,7 +2975,7 @@ async function generateVideoWithPrompt(prompt) {
         }
         throw new Error('Waktu render habis. Coba lagi ya.');
     } catch (e) {
-        loading.innerText = 'Gagal: ' + e.message;
+        msgBodyOf(loading).innerText = 'Gagal: ' + e.message;
         scrollToBottom(true);
     }
 }
@@ -3038,8 +3111,9 @@ async function sendToSenka() {
 
     const bubble = appendMessage('user', text || '');
     if (extractSticker(text)) {
-        bubble.innerHTML = '';
-        appendStickerImg(bubble, extractSticker(text));
+        const sb = msgBodyOf(bubble);
+        sb.innerHTML = '';
+        appendStickerImg(sb, extractSticker(text));
     }
     if (base64Image) {
         const img = document.createElement('img');
@@ -3047,7 +3121,7 @@ async function sendToSenka() {
         img.classList.add('chat-img');
         bubble.appendChild(img);
     }
-    memoryList.push({ role: 'user', content: userMessageContent });
+    memoryList.push({ role: 'user', content: userMessageContent, ts: Date.now() });
     const userItem = memoryList[memoryList.length - 1];
     if (!supabaseEnabled) saveSessions();
     else {
@@ -3097,8 +3171,16 @@ async function getWebPayload(baseMessages, lastText) {
 async function streamAssistantReply(payloadMessages) {
     const msgDiv = document.createElement('div');
     msgDiv.classList.add('message', 'msg-senka');
-    msgDiv.innerHTML = 'Senka ngetik<span class="tind"><i></i><i></i><i></i></span>';
-    chatHistoryDOM.appendChild(msgDiv);
+    msgDiv.appendChild(makeMsgHeader('senka', Date.now()));
+    const stb = document.createElement('div');
+    stb.className = 'msg-body';
+    stb.innerHTML = 'Senka ngetik<span class="tind"><i></i><i></i><i></i></span>';
+    msgDiv.appendChild(stb);
+    const srow = document.createElement('div');
+    srow.className = 'msg-row msg-row-senka';
+    srow.appendChild(makeSenkaAvatar());
+    srow.appendChild(msgDiv);
+    chatHistoryDOM.appendChild(srow);
     scrollToBottom(true);
     isStreaming = true;
 
@@ -3153,7 +3235,7 @@ async function streamAssistantReply(payloadMessages) {
                     if (delta) {
                         if (!started) { streamBuf = ''; started = true; }
                         streamBuf += delta;
-                        msgDiv.innerHTML = formatReply(streamBuf);
+                        msgBodyOf(msgDiv).innerHTML = formatReply(streamBuf);
                         if (chatHistoryDOM.scrollHeight - chatHistoryDOM.scrollTop - chatHistoryDOM.clientHeight < 200) {
                             chatHistoryDOM.scrollTop = chatHistoryDOM.scrollHeight;
                         }
@@ -3175,13 +3257,14 @@ async function streamAssistantReply(payloadMessages) {
         }
         const renderText = stk ? stripStickerTag(displayText) : displayText;
 
-        msgDiv.innerHTML = formatReply(renderText);
-        if (stk) appendStickerImg(msgDiv, stk);
-        if (fileReq) msgDiv.appendChild(makeFileCard(fileReq.meta));
-        if (!fileReq && displayText.trim()) attachCallTranslation(msgDiv, displayText.trim());
+        const rb = msgBodyOf(msgDiv);
+        rb.innerHTML = formatReply(renderText);
+        if (stk) appendStickerImg(rb, stk);
+        if (fileReq) rb.appendChild(makeFileCard(fileReq.meta));
+        if (!fileReq && displayText.trim()) attachCallTranslation(rb, displayText.trim());
         addMsgActions(msgDiv, 'senka');
 
-        memoryList.push({ role: 'assistant', content: [{ type: "text", text: displayText }] });
+        memoryList.push({ role: 'assistant', content: [{ type: "text", text: displayText }], ts: Date.now() });
         const aiItem = memoryList[memoryList.length - 1];
         attachAiActions(msgDiv, aiItem, true);
         if (!supabaseEnabled) saveSessions();
@@ -3192,13 +3275,20 @@ async function streamAssistantReply(payloadMessages) {
         if (error.message === 'empty') {
             memoryList.pop();
             saveSessions();
-            msgDiv.remove();
+            const sr = msgDiv.closest('.msg-row');
+            if (sr) sr.remove(); else msgDiv.remove();
             return;
         }
         const errBubble = document.createElement('div');
         errBubble.classList.add('message', 'msg-senka');
-        errBubble.innerHTML = `Waduh error: ${error.message.replace(/</g, '&lt;')} — <span class="retry-btn" onclick="retryLast()">coba lagi</span>`;
-        msgDiv.replaceWith(errBubble);
+        errBubble.appendChild(makeMsgHeader('senka', Date.now()));
+        const ebody = document.createElement('div');
+        ebody.className = 'msg-body';
+        ebody.innerHTML = `Waduh error: ${error.message.replace(/</g, '&lt;')} — <span class="retry-btn" onclick="retryLast()">coba lagi</span>`;
+        errBubble.appendChild(ebody);
+        const er = msgDiv.closest('.msg-row');
+        if (er) { msgDiv.remove(); er.appendChild(errBubble); }
+        else msgDiv.replaceWith(errBubble);
         scrollToBottom(true);
     } finally {
         isStreaming = false;
@@ -3341,16 +3431,17 @@ function generateImageWithPrompt(prompt) {
             const tag = document.createElement('div');
             tag.className = 'msg-tag';
             tag.innerText = data.model || 'Gambar AI';
-            loading.innerHTML = '';
-            loading.appendChild(tag);
+            const ib = msgBodyOf(loading);
+            ib.innerHTML = '';
+            ib.appendChild(tag);
             let imgSrc = data.url;
             const finishImage = () => {
                 const img = document.createElement('img');
                 img.src = imgSrc;
                 img.classList.add('chat-img');
                 img.alt = prompt;
-                img.onerror = () => { loading.innerText = 'Gagal memuat gambar. Coba lagi.'; };
-                loading.appendChild(img);
+                img.onerror = () => { msgBodyOf(loading).innerText = 'Gagal memuat gambar. Coba lagi.'; };
+                ib.appendChild(img);
                 const actions = document.createElement('div');
                 actions.className = 'msg-actions';
                 const dl = document.createElement('button');
@@ -3359,7 +3450,7 @@ function generateImageWithPrompt(prompt) {
                 dl.innerHTML = '<i class="fa-solid fa-download"></i>';
                 dl.onclick = () => downloadImage(imgSrc, 'senka-' + prompt.slice(0, 25).replace(/[^a-zA-Z0-9]+/g, '_') + '.jpg');
                 actions.appendChild(dl);
-                loading.appendChild(actions);
+                ib.appendChild(actions);
                 scrollToBottom(true);
             };
             if (supabaseEnabled && typeof data.url === 'string' && data.url.startsWith('data:')) {
@@ -3372,7 +3463,7 @@ function generateImageWithPrompt(prompt) {
             }
         })
         .catch((e) => {
-            loading.innerText = 'Gagal: ' + e.message;
+            msgBodyOf(loading).innerText = 'Gagal: ' + e.message;
             scrollToBottom(true);
         });
 }
@@ -3404,17 +3495,24 @@ function downloadImage(url, filename) {
 function appendMessage(role, text, isTypewriter = false) {
     const msgDiv = document.createElement('div');
     msgDiv.classList.add('message', role === 'user' ? 'msg-user' : 'msg-senka');
-    const container = role === 'user'
-        ? (() => {
-            const row = document.createElement('div');
-            row.className = 'msg-row msg-row-user';
-            row.appendChild(msgDiv);
-            row.appendChild(makeMiniUserAvatar());
-            return row;
-        })()
-        : msgDiv;
+    msgDiv.appendChild(makeMsgHeader(role, Date.now()));
+    const body = document.createElement('div');
+    body.className = 'msg-body';
+    body.innerText = text;
+    msgDiv.appendChild(body);
+    let container;
+    if (role === 'user') {
+        container = document.createElement('div');
+        container.className = 'msg-row msg-row-user';
+        container.appendChild(msgDiv);
+        container.appendChild(makeMiniUserAvatar());
+    } else {
+        container = document.createElement('div');
+        container.className = 'msg-row msg-row-senka';
+        container.appendChild(makeSenkaAvatar());
+        container.appendChild(msgDiv);
+    }
     if (!isTypewriter) {
-        msgDiv.innerText = text;
         chatHistoryDOM.appendChild(container);
         scrollToBottom(true);
     }
