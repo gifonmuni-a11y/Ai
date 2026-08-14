@@ -94,9 +94,9 @@ button:focus, button:focus-visible, a:focus, a:focus-visible, [tabindex]:focus-v
 .load-more:active { transform: scale(0.97); }
 
 .message {
-    max-width: 80%;
+    max-width: 100%;
     padding: 10px 14px;
-    background: rgba(0, 0, 0, 0.45);
+    background: rgba(0, 0, 0, 0.25);
     backdrop-filter: blur(3px);
     -webkit-backdrop-filter: blur(3px);
     border-radius: 14px;
@@ -106,6 +106,13 @@ button:focus, button:focus-visible, a:focus, a:focus-visible, [tabindex]:focus-v
 @keyframes msgIn { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .msg-user { align-self: flex-end; margin-left: auto; border-top-right-radius: 4px; }
 .msg-senka { align-self: flex-start; border-top-left-radius: 4px; }
+/* Media (gambar/foto/stiker/video) berdiri sendiri di luar bubble, transparan total */
+.msg-media { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; max-width: 100%; min-width: 0; background: none; border: none; box-shadow: none; }
+.content-user .msg-media { align-items: flex-end; }
+.msg-media .chat-img, .msg-media .chat-sticker, .msg-media .chat-video { display: block; max-width: 100%; margin-top: 0; border-radius: 12px; background: transparent; object-fit: contain; }
+.msg-media .chat-img { max-height: 320px; }
+.msg-media .chat-sticker { max-width: 150px; max-height: 180px; }
+.msg-media .chat-video { width: 280px; background: #000; }
 .em { color: #c084fc; font-weight: 700; }
 .q { color: #E8D1FF; font-weight: 400; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8); }
 .num { color: #c084fc; font-weight: 700; }
@@ -548,10 +555,13 @@ textarea.modal-input { resize: none; font-family: inherit; }
 .deco-footer { margin-top: 12px; }
 .deco-footer .modal-btn { margin-top: 0; }
 
-/* Kolom 1 = avatar wrap, Kolom 2 = .message (header + body) */
+/* Kolom 1 = avatar wrap, Kolom 2 = .msg-content (header + bubble teks + media terpisah) */
 .msg-row { display: flex; flex-direction: row; align-items: flex-start; gap: 10px; max-width: 85%; min-width: 0; }
 .msg-row-user { align-self: flex-end; margin-left: auto; flex-direction: row-reverse; }
 .msg-row-senka { align-self: flex-start; flex-direction: row; }
+.msg-content { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; max-width: 80%; min-width: 0; }
+.content-user { align-items: flex-end; }
+.msg-content .message { max-width: 100%; }
 
 /* Header pesan ala Discord: Nama + Icon Role + Jam */
 .msg-header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
