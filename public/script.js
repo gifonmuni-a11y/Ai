@@ -1142,7 +1142,8 @@ function renderProfileModal() {
     if (nameStatic) nameStatic.textContent = getProfileName();
     if (bioStatic) bioStatic.textContent = userProfile.bio || 'Belum ada bio.';
     const ms = userProfile.memberSince ? new Date(userProfile.memberSince) : null;
-    const sinceIcon = '<img class="profile-since-icon" src="https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Favicon/logoicon.png" alt="">';
+    const LOGO_ICON_URL = 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Favicon/logoicon.png';
+const sinceIcon = '<a class="profile-since-link" href="' + LOGO_ICON_URL + '" target="_blank" rel="noopener"><img class="profile-since-icon" src="' + LOGO_ICON_URL + '" alt="" onerror="this.onerror=null;this.src=\'' + LOGO_ICON_URL + '\'"></a>';
     document.getElementById('profile-member-since').innerHTML = ms
         ? sinceIcon + 'Bergabung sejak <b>' + ms.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) + '</b>'
         : '';
