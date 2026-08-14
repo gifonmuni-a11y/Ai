@@ -718,7 +718,11 @@ function openLogoModal() {
     vid.play().catch(() => { });
     document.getElementById('logo-modal').style.display = 'flex';
 }
-function closeLogoModal() { document.getElementById('logo-modal').style.display = 'none'; }
+function closeLogoModal() {
+    const vid = document.getElementById('logo-pop-vid');
+    if (vid) { vid.pause(); vid.removeAttribute('src'); vid.load(); }
+    document.getElementById('logo-modal').style.display = 'none';
+}
 
 /* ===== Senka Profile (read-only) ===== */
 function openSenkaProfile() {
