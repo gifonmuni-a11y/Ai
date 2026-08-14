@@ -361,6 +361,29 @@
     <input type="file" id="avatar-upload" accept="image/*" hidden>
     <input type="file" id="banner-upload" accept="image/*" hidden>
 
+    <div id="logo-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeLogoModal()">
+        <div class="logo-pop-card">
+            <div class="logo-pop-header">
+                <span class="logo-pop-title"><i class="fa-solid fa-star"></i> Logo Senka</span>
+                <i class="fa-solid fa-xmark modal-close" onclick="closeLogoModal()"></i>
+            </div>
+            <div class="logo-pop-divider">
+                <span class="logo-pop-line"></span>
+                <span class="logo-pop-diamond"></span>
+                <span class="logo-pop-line"></span>
+            </div>
+            <div class="logo-pop-img-wrap">
+                <img id="logo-pop-img" class="logo-pop-img" alt="Logo Senka">
+            </div>
+            <div class="logo-pop-divider">
+                <span class="logo-pop-line"></span>
+                <span class="logo-pop-diamond"></span>
+                <span class="logo-pop-line"></span>
+            </div>
+            <p class="logo-pop-caption">Ai Companion SENKA</p>
+        </div>
+    </div>
+
     <div id="senka-profile-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeSenkaProfile()">
         <div class="profile-card">
             <div class="profile-effect-overlay"></div>

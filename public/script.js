@@ -708,6 +708,14 @@ function openProfile(editable) {
 }
 function closeProfile() { document.getElementById('profile-modal').style.display = 'none'; }
 
+function openLogoModal() {
+    const img = document.getElementById('logo-pop-img');
+    img.onerror = () => { img.onerror = null; img.src = LOGO_ICON_URL; };
+    img.src = LOGO_ICON_URL;
+    document.getElementById('logo-modal').style.display = 'flex';
+}
+function closeLogoModal() { document.getElementById('logo-modal').style.display = 'none'; }
+
 /* ===== Senka Profile (read-only) ===== */
 function openSenkaProfile() {
     const banner = document.getElementById('senka-profile-banner');
@@ -807,6 +815,7 @@ document.querySelectorAll('.modal-overlay').forEach(ov => ov.addEventListener('c
 /* ===== USER PROFILE (Discord style) ===== */
 const DEFAULT_BANNER = 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Profiledefaultanonym/backgrounddefaultgoogledananon.jpg';
 const DEFAULT_GUEST_AVATAR = 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Profiledefaultanonym/profiledefaultanon.webp';
+const LOGO_ICON_URL = 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Favicon/logoicon.png';
 const AVATAR_DECORATIONS = [
     { id: '1352687418418921532', url: 'https://cdn.discordapp.com/avatar-decoration-presets/a_0c0eeb351ae2cf48c6e1eee2cae49d40.png?size=240&passthrough=true', label: 'Hugh the Rainbow', category: 'decorations' },
     { id: '1352687448228106302', url: 'https://cdn.discordapp.com/avatar-decoration-presets/a_0e839cd79500e7b68e2bbbed54790c28.png?size=240&passthrough=true', label: 'Phoenix', category: 'decorations' },
@@ -1142,8 +1151,7 @@ function renderProfileModal() {
     if (nameStatic) nameStatic.textContent = getProfileName();
     if (bioStatic) bioStatic.textContent = userProfile.bio || 'Belum ada bio.';
     const ms = userProfile.memberSince ? new Date(userProfile.memberSince) : null;
-    const LOGO_ICON_URL = 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Favicon/logoicon.png';
-const sinceIcon = '<a class="profile-since-link" href="' + LOGO_ICON_URL + '" target="_blank" rel="noopener"><img class="profile-since-icon" src="' + LOGO_ICON_URL + '" alt="" onerror="this.onerror=null;this.src=\'' + LOGO_ICON_URL + '\'"></a>';
+    const sinceIcon = '<a class="profile-since-link" href="javascript:void(0)" onclick="openLogoModal();return false;" title="Lihat Logo"><img class="profile-since-icon" src="' + LOGO_ICON_URL + '" alt="" onerror="this.onerror=null;this.src=\'' + LOGO_ICON_URL + '\'"></a>';
     document.getElementById('profile-member-since').innerHTML = ms
         ? sinceIcon + 'Bergabung sejak <b>' + ms.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) + '</b>'
         : '';
