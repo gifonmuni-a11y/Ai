@@ -65,7 +65,7 @@
                     <div class="plus-wrap">
                         <button class="tool-btn" id="plus-btn" onclick="togglePlusMenu()" title="Menu"><i class="fa-solid fa-plus"></i></button>
                         <div class="plus-menu" id="plus-menu">
-                            <button class="pm-item" id="pm-mic" onclick="toggleVoice()"><i class="fa-solid fa-microphone"></i> Bicara</button>
+                            <button class="pm-item" id="pm-mic" onclick="toggleVoiceNote()"><i class="fa-solid fa-microphone"></i> Bicara</button>
                             <button class="pm-item" onclick="closePlusMenu();openImageModal()"><i class="fa-solid fa-wand-magic-sparkles"></i> Gambar</button>
                             <button class="pm-item" onclick="closePlusMenu();openVideoModal()"><i class="fa-solid fa-clapperboard"></i> Video</button>
                             <button class="pm-item" onclick="closePlusMenu();document.getElementById('image-upload').click()"><i class="fa-solid fa-paperclip"></i> Foto</button>
@@ -77,8 +77,7 @@
                     <button class="tool-btn" id="continue-btn" onclick="continueNarration()" title="Lanjutkan (>>) — AI meneruskan narasi dari titik terakhir"><i class="fa-solid fa-forward"></i></button>
                     <button class="tool-btn call-btn" id="call-btn" onclick="toggleCall()" title="Panggilan suara (Sleep Call)"><i class="fa-solid fa-phone"></i></button>
                     <button id="send-btn" onclick="sendToSenka()"><i class="fa-solid fa-paper-plane"></i></button>
-                    <button id="mic-btn" title="Pesan suara — tahan untuk merekam"><i class="fa-solid fa-microphone"></i></button>
-                    <span class="voice-rec-hint" id="voice-rec-hint" style="display:none;"><i class="fa-solid fa-circle"></i> Merekam... lepas untuk kirim</span>
+                    <span class="voice-rec-hint" id="voice-rec-hint" style="display:none;"><i class="fa-solid fa-circle"></i> Merekam... klik Bicara untuk kirim</span>
                 </div>
             </div>
         </div>

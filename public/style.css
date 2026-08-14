@@ -340,15 +340,7 @@ button:focus, button:focus-visible, a:focus, a:focus-visible, [tabindex]:focus-v
 #send-btn { background: linear-gradient(135deg, #0ea5e9, #0284c7); border: none; color: #fff; width: 45px; height: 45px; border-radius: 50%; cursor: pointer; transition: all 0.3s ease; flex-shrink: 0; }
 #send-btn:hover { transform: scale(1.06); box-shadow: 0 0 16px rgba(56, 189, 248, 0.6); }
 #send-btn:active { transform: scale(0.92); }
-#mic-btn {
-    background: rgba(8,12,26,0.45); border: 1px solid rgba(96,165,250,0.3); color: #7dd3fc;
-    width: 45px; height: 45px; border-radius: 50%; cursor: pointer; font-size: 1rem;
-    display: flex; align-items: center; justify-content: center; transition: all 0.25s ease;
-    flex-shrink: 0; -webkit-user-select: none; user-select: none; touch-action: none;
-}
-#mic-btn:hover { background: rgba(56, 189, 248, 0.3); color: #fff; box-shadow: 0 0 14px rgba(56, 189, 248, 0.5); }
-#mic-btn:active { transform: scale(0.92); }
-#mic-btn.recording {
+#pm-mic.recording {
     background: linear-gradient(135deg, #f87171, #dc2626) !important;
     border-color: #ef4444 !important; color: #fff !important;
     animation: micRecPulse 1.2s ease-in-out infinite;

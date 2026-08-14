@@ -56,7 +56,6 @@ window.onload = async () => {
     initSakura();
     initBgBrightness();
     initCallPillDrag();
-    updateSendMicToggle();
     document.getElementById('sakura-input').checked = window.sakuraRunning;
     const savedStory = localStorage.getItem('senka_story');
     if (savedStory) {
@@ -1004,36 +1003,33 @@ const AVATAR_DECORATIONS = [
     { id: '1352699261078474864', url: 'https://cdn.discordapp.com/avatar-decoration-presets/a_fed43ab12698df65902ba06727e20c0e.png?size=240&passthrough=true', label: 'Futuristic UI', category: 'decorations' }
 ];
 const PROFILE_EFFECTS = [
-    {id: "pe_001", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2e46d5d2d9e/sakura/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2e46d5d2d9e/sakura/loop.png", label: "Sakura Dreams"},
-    {id: "pe_002", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-11-7/cyberspace/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-11-7/cyberspace/loop.png", label: "Cyberspace"},
-    {id: "pe_003", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2024-02-05/dragon-dance/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2024-02-05/dragon-dance/loop.png", label: "Dragon Dance"},
+    {id: "pe_001", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2e46d5d2d9e/sakura/loop.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2e46d5d2d9e/sakura/loop.png", label: "Sakura Dreams"},
     {id: "pe_004", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/b17d139f2e9/magic-girl/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/b17d139f2e9/magic-girl/loop.png", label: "Magic Hearts"},
     {id: "pe_005", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/b17d139f2e9/zombie-slime/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/b17d139f2e9/zombie-slime/loop.png", label: "Zombie Slime"},
-    {id: "pe_006", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-11-22/deck-the-halls/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-11-22/deck-the-halls/loop.png", label: "Deck the Halls"},
+    {id: "pe_006", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-11-22/deck-the-halls/loop.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-11-22/deck-the-halls/loop.png", label: "Deck the Halls"},
     {id: "pe_007", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2024-02-13/vortex/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2024-02-13/vortex/idle.png", label: "Vortex"},
     {id: "pe_008", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-10-11/vines/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-10-11/vines/loop.png", label: "Mystic Vines"},
-    {id: "pe_009", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-11-29/goozilla/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-11-29/goozilla/loop.png", label: "Goozilla"},
+    {id: "pe_009", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-11-29/goozilla/loop.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-11-29/goozilla/loop.png", label: "Goozilla"},
     {id: "pe_010", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2024-02-13/rock-slide/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2024-02-13/rock-slide/idle.png", label: "Rock Slide"},
     {id: "pe_011", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2024-02-13/mastery/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2024-02-13/mastery/idle.png", label: "Mastery"},
-    {id: "pe_012", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2024-02-02/fortune-flurry/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2024-02-02/fortune-flurry/loop.png", label: "Fortune Flurry"},
+    {id: "pe_012", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2024-02-02/fortune-flurry/loop.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2024-02-02/fortune-flurry/loop.png", label: "Fortune Flurry"},
     {id: "pe_013", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2024-02-01/midnight-celebration/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2024-02-01/midnight-celebration/fireworks.png", label: "Midnight Fireworks"},
-    {id: "pe_014", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2024-1-18/cyberpunk-nightrunner/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2024-1-18/cyberpunk-nightrunner/idle.png", label: "Nightrunner"},
-    {id: "pe_015", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2024-1-18/cyberpunk-uplinkerror/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2024-1-18/cyberpunk-uplinkerror/idle.png", label: "Uplink Error"},
-    {id: "pe_016", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-11-29/heartzilla/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-11-29/heartzilla/loop.png", label: "Heartzilla"},
-    {id: "pe_017", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-11-29/monster-pop/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-11-29/monster-pop/loop.png", label: "Monster Pop"},
-    {id: "pe_018", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-11-22/snowy-shenanigans/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-11-22/snowy-shenanigans/loop.png", label: "Snowy Shenanigans"},
+    {id: "pe_014", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2024-1-18/cyberpunk-nightrunner/idle.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2024-1-18/cyberpunk-nightrunner/idle.png", label: "Nightrunner"},
+    {id: "pe_015", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2024-1-18/cyberpunk-uplinkerror/idle.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2024-1-18/cyberpunk-uplinkerror/idle.png", label: "Uplink Error"},
+    {id: "pe_016", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-11-29/heartzilla/loop.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-11-29/heartzilla/loop.png", label: "Heartzilla"},
+    {id: "pe_017", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-11-29/monster-pop/loop.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-11-29/monster-pop/loop.png", label: "Monster Pop"},
+    {id: "pe_018", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-11-22/snowy-shenanigans/loop.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-11-22/snowy-shenanigans/loop.png", label: "Snowy Shenanigans"},
     {id: "pe_019", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-10-11/punk-girl/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-10-11/punk-girl/loop.png", label: "Ghoulish Graffiti"},
     {id: "pe_020", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/b17d139f2e9/ghost-skull/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/b17d139f2e9/ghost-skull/loop.png", label: "Dark Omens"},
-    {id: "pe_021", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-10-11/leaves/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-10-11/leaves/loop.png", label: "Fall Foliage"},
+    {id: "pe_021", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-10-11/leaves/loop.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-10-11/leaves/loop.png", label: "Fall Foliage"},
     {id: "pe_022", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-9-25/rain/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-9-25/rain/loop.png", label: "Lilypad Life"},
     {id: "pe_023", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/b17d139f2e9/splash/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/b17d139f2e9/splash/loop.png", label: "Hydro Blast"},
-    {id: "pe_024", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/b17d139f2e9/fairy/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/b17d139f2e9/fairy/loop.png", label: "Pixie Dust"},
+    {id: "pe_024", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/b17d139f2e9/fairy/loop.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/b17d139f2e9/fairy/loop.png", label: "Pixie Dust"},
     {id: "pe_025", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2e46d5d2d9e/earthquake/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2e46d5d2d9e/earthquake/loop.png", label: "Shatter"},
-    {id: "pe_026", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2e46d5d2d9e/shuriken/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2e46d5d2d9e/shuriken/loop.png", label: "Shuriken Strike"},
+    {id: "pe_026", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2e46d5d2d9e/shuriken/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2e46d5d2d9e/shuriken/intro.png", label: "Shuriken Strike"},
     {id: "pe_027", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-9-25/sayan/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-9-25/sayan/loop.png", label: "Power Surge"},
     {id: "pe_028", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-9-25/cereal/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-9-25/cereal/loop.png", label: "Discord-Os"},
-    {id: "pe_029", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-9-25/plate/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-9-25/plate/loop.png", label: "Breakfast Plate"},
-    {id: "pe_030", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-11-7/boost-relic/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-11-7/boost-relic/loop.png", label: "Boost Relic"}
+    {id: "pe_029", intro: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-9-25/plate/intro.png", loop: "https://cdn.discordapp.com/assets/profile_effects/effects/2023-9-25/plate/loop.png", label: "Breakfast Plate"}
 ];
 const PROFILE_EFFECT_KEY = 'senka_profile_effect';
 const SENKA_PROFILE_BANNER = 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Profile/backgroundsenkabubblechat.webp';
@@ -1416,7 +1412,6 @@ imageUpload.addEventListener('change', async (e) => {
         document.getElementById('file-name-preview').innerText = " " + file.name;
         previewContainer.style.display = 'flex';
         base64Image = await compressImage(file);
-        updateSendMicToggle();
     }
 });
 
@@ -1446,7 +1441,6 @@ function removeImage() {
     base64Image = null;
     imageUpload.value = '';
     previewContainer.style.display = 'none';
-    updateSendMicToggle();
 }
 
 function shrinkMemoryImages() {
@@ -2552,55 +2546,21 @@ async function ttsStreamTo(onSegment, body) {
     return { error: false };
 }
 
-async function speak(text, targetEl) {
+async function speak(text) {
     if (senkaAudio) stopSenkaAudio();
-    const cleanText = stripStickerTag(String(text || '')).trim();
-    if (!cleanText) return;
-    if (targetEl) {
-        try {
-            const segs = [];
-            const res = await ttsStreamTo((b64, type) => segs.push({ b64, type }), { text: cleanText, mode: speakMode });
-            if (res.error || segs.length === 0) return;
-            const audio = document.createElement('audio');
-            audio.controls = true;
-            audio.preload = 'metadata';
-            audio.classList.add('chat-audio');
-            audio.src = await makeAudioUrl(segs);
-            targetEl.appendChild(audio);
-            scrollToBottom(true);
-        } catch (e) {
-            // teks tetap tampil di chat; suara hanyalah bonus
-        }
-        return;
-    }
     try {
+        const cleanText = stripStickerTag(String(text || '')).trim();
+        if (!cleanText) return;
         await ttsStreamTo((b64, type) => playSpeechBlob(b64, type), { text: cleanText, mode: speakMode });
     } catch (e) {
         // teks tetap tampil di chat; suara hanyalah bonus
     }
 }
 
-async function makeAudioUrl(segs) {
-    const type = segs[0].type || 'audio/mpeg';
-    const parts = [];
-    let total = 0;
-    for (const s of segs) {
-        const buf = await base64ToBlob(s.b64, s.type || type).arrayBuffer();
-        total += buf.byteLength;
-        parts.push(buf);
-    }
-    const merged = new Uint8Array(total);
-    let off = 0;
-    for (const buf of parts) { merged.set(new Uint8Array(buf), off); off += buf.byteLength; }
-    return URL.createObjectURL(new Blob([merged], { type }));
-}
-
 // ====== Voice Note (Pesan Suara) ======
 let voiceRecorder = null;
 let voiceChunks = [];
 let voiceRecStream = null;
-let voiceCancelPending = false;
-let voicePointerDown = false;
 let voiceBusy = false;
 
 function pickVoiceMime() {
@@ -2613,8 +2573,14 @@ function pickVoiceMime() {
     return candidates[0];
 }
 
+function toggleVoiceNote() {
+    if (voiceRecorder) { stopVoiceNote(); return; }
+    if (isStreaming) { showToast('Tunggu Senka selesai bicara dulu ya.'); return; }
+    startVoiceNote();
+}
+
 async function startVoiceNote() {
-    if (voiceRecorder || isStreaming) return;
+    if (voiceRecorder) return;
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         voiceRecStream = stream;
@@ -2623,21 +2589,17 @@ async function startVoiceNote() {
         try { rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined); }
         catch (e) { rec = new MediaRecorder(stream); }
         voiceChunks = [];
-        voiceCancelPending = false;
         rec.ondataavailable = e => { if (e.data && e.data.size > 0) voiceChunks.push(e.data); };
         rec.onstop = () => {
             voiceRecorder = null;
             if (voiceRecStream) { voiceRecStream.getTracks().forEach(t => t.stop()); voiceRecStream = null; }
             setVoiceRecUI(false);
-            if (voiceCancelPending) { voiceCancelPending = false; return; }
             finalizeVoiceNote();
         };
         rec.start();
         voiceRecorder = rec;
         setVoiceRecUI(true);
-        if (!voicePointerDown) stopVoiceNote();
     } catch (e) {
-        voicePointerDown = false;
         showToast('Mic tidak diizinkan. Aktifkan izin mikrofon lalu coba lagi.');
     }
 }
@@ -2646,16 +2608,13 @@ function stopVoiceNote() {
     if (voiceRecorder && voiceRecorder.state !== 'inactive') voiceRecorder.stop();
 }
 
-function cancelVoiceNote() {
-    if (!voiceRecorder) return;
-    voiceCancelPending = true;
-    if (voiceRecorder.state !== 'inactive') voiceRecorder.stop();
-}
-
 function setVoiceRecUI(recording) {
-    micBtn.classList.toggle('recording', recording);
-    micBtn.innerHTML = recording ? '<i class="fa-solid fa-stop"></i>' : '<i class="fa-solid fa-microphone"></i>';
-    voiceRecHint.style.display = recording ? 'flex' : 'none';
+    const btn = document.getElementById('pm-mic');
+    if (!btn) return;
+    btn.classList.toggle('recording', recording);
+    btn.innerHTML = recording ? '<i class="fa-solid fa-stop"></i> Berhenti' : '<i class="fa-solid fa-microphone"></i> Bicara';
+    const hint = document.getElementById('voice-rec-hint');
+    if (hint) hint.style.display = recording ? 'flex' : 'none';
 }
 
 function blobToDataUrl(blob) {
@@ -3518,7 +3477,6 @@ async function sendToSenka() {
 
     messageInput.value = '';
     removeImage();
-    updateSendMicToggle();
     scrollToBottom(true);
 
     await streamAssistantReply(await getWebPayload(memoryList, text));
@@ -3657,7 +3615,7 @@ async function streamAssistantReply(payloadMessages) {
         if (!supabaseEnabled) saveSessions();
         else remoteSave('senka', 'text', displayText, aiItem);
         shrinkMemoryImages();
-        if (autospeak && !fileReq) speak(displayText, msgMediaOf(msgContent));
+        if (autospeak && !fileReq) speak(displayText);
     } catch (error) {
         if (error.message === 'empty') {
             memoryList.pop();
@@ -3903,22 +3861,6 @@ function scrollToBottom(smooth = false) {
     chatHistoryDOM.scrollTo({ top: chatHistoryDOM.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
 }
 messageInput.addEventListener('keypress', e => { if (e.key === 'Enter') sendToSenka(); });
-
-const micBtn = document.getElementById('mic-btn');
-const voiceRecHint = document.getElementById('voice-rec-hint');
-
-function updateSendMicToggle() {
-    const hasInput = messageInput.value.trim().length > 0 || !!base64Image;
-    const recording = !!voiceRecorder;
-    micBtn.style.display = (hasInput && !recording) ? 'none' : 'flex';
-    document.getElementById('send-btn').style.display = (hasInput && !recording) ? 'flex' : 'none';
-}
-messageInput.addEventListener('input', updateSendMicToggle);
-micBtn.addEventListener('pointerdown', e => { e.preventDefault(); voicePointerDown = true; startVoiceNote(); });
-micBtn.addEventListener('pointerup', () => { voicePointerDown = false; stopVoiceNote(); });
-micBtn.addEventListener('pointercancel', () => { voicePointerDown = false; cancelVoiceNote(); });
-micBtn.addEventListener('pointerleave', () => { if (!voicePointerDown) return; voicePointerDown = false; stopVoiceNote(); });
-micBtn.addEventListener('contextmenu', e => e.preventDefault());
 document.getElementById('image-prompt').addEventListener('keydown', e => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) generateImage();
 });
