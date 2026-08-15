@@ -333,18 +333,20 @@ function decryptText(s) {
 function remoteToLocal(m) {
     const content = [];
     const rawContent = m.isi_pesan;
+    const isEncrypted = typeof rawContent === 'string' && rawContent.startsWith('U2FsdGVkX1');
+    const fallbackText = isEncrypted ? '[Pesan lama tidak bisa dibaca]' : String(rawContent || '');
     if (m.tipe_pesan === 'image') {
         const u = decryptText(rawContent);
-        content.push({ type: 'image_url', image_url: { url: u || rawContent || '' } });
+        content.push({ type: 'image_url', image_url: { url: u ?? fallbackText } });
     } else if (m.tipe_pesan === 'video') {
         const u = decryptText(rawContent);
-        content.push({ type: 'video_url', url: u || rawContent || '' });
+        content.push({ type: 'video_url', url: u ?? fallbackText });
     } else if (m.tipe_pesan === 'voice') {
         const u = decryptText(rawContent);
-        content.push({ type: 'audio_url', url: u || rawContent || '' });
+        content.push({ type: 'audio_url', url: u ?? fallbackText });
     } else {
         const t = decryptText(rawContent);
-        content.push({ type: 'text', text: t ?? String(rawContent || '') });
+        content.push({ type: 'text', text: t ?? fallbackText });
     }
     const ts = m.waktu_kirim ? new Date(m.waktu_kirim).getTime() : undefined;
     return { role: m.pengirim === 'user' ? 'user' : 'assistant', cid: m.id, content, ts, time: ts ? formatMsgTime(ts) : undefined };
@@ -3640,7 +3642,7 @@ async function handleSenkaCommand(text) {
     }
 
     if (low.startsWith('/senkaplay ') || low === '/senkaplay') {
-        const query = text.slice('/senkaplay'.length).trim();
+        const query = low.slice('/senkaplay'.length).trim();
         const videoId = extractYouTubeId(query);
         if (!query || !videoId) {
             appendMessage('senka', 'Kirim link YouTube ya! Contoh: ' + colorCmd('/senkaplay') + ' https://youtu.be/fE9trKOuT3Q');
