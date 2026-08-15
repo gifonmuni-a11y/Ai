@@ -1586,7 +1586,7 @@ function buildMsgEl(m) {
 }
 
 function renderChat() {
-    console.log('DEBUG renderChat: memoryList.length =', memoryList.length, 'supabaseEnabled =', supabaseEnabled);
+    console.log('RENDERCHAT INVOKE: v' + Date.now() + '-' + Math.random().toString(36).slice(2, 8));
     chatHistoryDOM.innerHTML = '';
     if (!memoryList.length) {
         console.log('DEBUG renderChat: entering !memoryList.length branch');
