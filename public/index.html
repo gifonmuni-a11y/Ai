@@ -393,6 +393,7 @@
                     <img id="senka-profile-avatar-img" class="profile-avatar" alt="Senka" onerror="this.onerror=null;this.src='assets/avatarsenka.gif'">
                     <img id="senka-profile-avatar-deco" class="avatar-deco" alt="" aria-hidden="true" onerror="this.style.display='none'">
                 </div>
+                <button class="senka-cmd-btn" onclick="openCommandMenu()" title="Command List"><i class="fa-solid fa-terminal"></i></button>
             </div>
             <div class="profile-body">
                 <div class="profile-static-name">Senka</div>
@@ -409,6 +410,28 @@
                 <label class="modal-label">Bio</label>
                 <p class="profile-bio-static">Senka adalah Ai Companion yang hangat dan perhatian. Dia senang mendengarkan ceritamu, menemani malam-malammu, dan selalu siap menyemangati harimu. Jaga dia baik-baik, ya.</p>
             </div>
+        </div>
+    </div>
+
+    <div id="command-menu-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeCommandMenu()">
+        <div class="modal cmd-modal">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-terminal"></i> Command List</h3>
+                <i class="fa-solid fa-xmark modal-close" onclick="closeCommandMenu()"></i>
+            </div>
+            <p class="modal-hint">Perintah bot Senka — ketik langsung di kolom chat, atau tap salah satu di bawah.</p>
+            <button class="cmd-item" onclick="runCommandFromMenu('play')">
+                <span class="cmd-ico">🎵</span>
+                <span class="cmd-txt"><b>Play Musik</b><small>/senkaplay [judul lagu]</small></span>
+            </button>
+            <button class="cmd-item" onclick="runCommandFromMenu('game')">
+                <span class="cmd-ico">🎲</span>
+                <span class="cmd-txt"><b>Game Tebak</b><small>/senkagame — tebak angka 1-10</small></span>
+            </button>
+            <button class="cmd-item" onclick="runCommandFromMenu('image')">
+                <span class="cmd-ico">🎨</span>
+                <span class="cmd-txt"><b>Generate Gambar</b><small>Buka tool gambar AI</small></span>
+            </button>
         </div>
     </div>
 

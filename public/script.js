@@ -808,7 +808,7 @@ function removeProfileEffect() {
     showToast('Efek profil dihapus');
 }
 function closeAllModals() {
-    ['settings-modal', 'image-modal', 'video-modal', 'sessions-modal', 'search-modal', 'confirm-delete-modal', 'profile-modal', 'deco-modal', 'senka-profile-modal', 'effect-modal'].forEach(id => document.getElementById(id).style.display = 'none');
+    ['settings-modal', 'image-modal', 'video-modal', 'sessions-modal', 'search-modal', 'confirm-delete-modal', 'profile-modal', 'deco-modal', 'senka-profile-modal', 'effect-modal', 'command-menu-modal'].forEach(id => document.getElementById(id).style.display = 'none');
 }
 document.querySelectorAll('.modal-overlay').forEach(ov => ov.addEventListener('click', e => { if (e.target === ov) ov.style.display = 'none'; }));
 
@@ -3478,6 +3478,19 @@ async function sendToSenka() {
         return;
     }
 
+    if (tebakGame && !base64Image && /^\d{1,2}$/.test(text)) {
+        handleTebakGuess(parseInt(text, 10));
+        messageInput.value = '';
+        return;
+    }
+
+    if (text.toLowerCase().startsWith('/senka') && !base64Image) {
+        if (await handleSenkaCommand(text)) {
+            messageInput.value = '';
+            return;
+        }
+    }
+
     lastUserText = text;
     lastUserImage = base64Image;
     if (storyMode === 'storyall' && activeStory) {
@@ -3518,6 +3531,166 @@ async function sendToSenka() {
     scrollToBottom(true);
 
     await streamAssistantReply(await getWebPayload(memoryList, text));
+}
+
+/* ===== Bot Command Center (/senka*) ===== */
+let tebakGame = null;
+
+function checkPermission(command) {
+    const sensitive = ['clear'];
+    if (!sensitive.includes(command)) return true;
+    return localStorage.getItem('userRole') === 'admin';
+}
+
+function secretNote(note) {
+    memoryList.push({ role: 'user', hidden: true, content: [{ type: "text", text: note }] });
+    return memoryList;
+}
+
+async function handleSenkaCommand(text) {
+    const low = text.toLowerCase().trim();
+
+    if (low === '/senkaclear') {
+        if (!checkPermission('clear')) {
+            appendMessage('senka', 'Maaf, kamu tidak punya izin untuk perintah ini!');
+            scrollToBottom(true);
+            return true;
+        }
+        clearChat();
+        appendMessage('senka', 'Chat dibersihkan oleh admin. 🧹');
+        scrollToBottom(true);
+        return true;
+    }
+
+    if (low.startsWith('/senkaplay ')) {
+        const query = text.slice('/senkaplay'.length).trim();
+        if (!query) {
+            appendMessage('senka', 'Contoh: /senkaplay lagu anime rilakkuma. 🎵');
+            scrollToBottom(true);
+            return true;
+        }
+        renderMusicPlayer(query);
+        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote(`[System Note: User saat ini sedang memutar lagu/musik berjudul "${query}" melalui sistem command. Berikan komentar singkat, manis, atau nyambung tentang lagu tersebut seolah-olah kamu ikut mendengarkannya bersama user.]`), null));
+        return true;
+    }
+
+    if (low === '/senkagame') {
+        startTebakGame();
+        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System Note: User baru saja membuka mini-game. Ajak user bermain dengan antusias!]'), null));
+        return true;
+    }
+
+    if (low === '/senkahelp' || low === '/senka') {
+        showCommandListInChat();
+        return true;
+    }
+
+    return false;
+}
+
+function renderMusicPlayer(query) {
+    const content = appendMessage('senka', 'Senka Bot 🎵');
+    const media = msgMediaOf(content);
+    const info = document.createElement('div');
+    info.className = 'music-info';
+    info.innerHTML = '<i class="fa-solid fa-music"></i> Memutar: <b>' + escapeHtml(query) + '</b>';
+    media.appendChild(info);
+    const frame = document.createElement('div');
+    frame.className = 'music-frame';
+    const iframe = document.createElement('iframe');
+    iframe.src = 'https://www.youtube.com/embed?listType=search&list=' + encodeURIComponent(query) + '&autoplay=1';
+    iframe.allow = 'autoplay; encrypted-media; picture-in-picture';
+    iframe.setAttribute('frameborder', '0');
+    iframe.setAttribute('allowfullscreen', '');
+    iframe.setAttribute('referrerpolicy', 'no-referrer-when-downgrade');
+    frame.appendChild(iframe);
+    media.appendChild(frame);
+    scrollToBottom(true);
+}
+
+function startTebakGame() {
+    tebakGame = { answer: 1 + Math.floor(Math.random() * 10), tries: 0 };
+    appendMessage('senka', '🎲 Aku lagi mikirin angka rahasia dari 1 sampai 10. Coba tebak, sayang! (kirim angkanya)');
+    scrollToBottom(true);
+}
+
+function handleTebakGuess(n) {
+    if (!tebakGame) return;
+    tebakGame.tries++;
+    let msg;
+    if (n === tebakGame.answer) {
+        msg = `🎉 Benar! Angkanya ${tebakGame.answer}! Kamu jago banget, ${panggilan}! (tebakan ke-${tebakGame.tries})`;
+        tebakGame = null;
+    } else if (n < tebakGame.answer) {
+        msg = `⬆️ Hmm, angkanya lebih besar dari ${n}. Coba lagi!`;
+    } else {
+        msg = `⬇️ Wah, angkanya lebih kecil dari ${n}. Coba lagi!`;
+    }
+    appendMessage('senka', msg);
+    scrollToBottom(true);
+}
+
+function clearChat() {
+    if (supabaseEnabled) {
+        authHeaders().then(h => {
+            memoryList.forEach(m => { if (m.cid) fetch('/api/chats/' + m.cid, { method: 'DELETE', headers: h }).catch(() => { }); });
+        });
+    }
+    memoryList = [];
+    tebakGame = null;
+    chatHistoryDOM.innerHTML = '';
+    if (!supabaseEnabled) saveSessions();
+}
+
+function showCommandListInChat() {
+    appendMessage('senka', '🤖 Command List:\n/senkaplay [judul lagu] — putar musik\n/senkagame — mini-game tebak angka\n/senkahelp — daftar command');
+    scrollToBottom(true);
+}
+
+function addContextShortcuts(body, text) {
+    if (!body || !text) return;
+    if (!/[?？]|\b(apa|mana|mau yang|pilih|lebih suka|suka yang|minum apa|makan apa|kopi|teh)\b/i.test(String(text))) return;
+    const bar = document.createElement('div');
+    bar.className = 'context-bar';
+    const mk = (emoji, label) => {
+        const b = document.createElement('button');
+        b.className = 'context-btn';
+        b.innerHTML = emoji + ' ' + label;
+        b.onclick = () => sendMessageFromBtn(label);
+        return b;
+    };
+    bar.appendChild(mk('☕', 'Kopi'));
+    bar.appendChild(mk('🍵', 'Teh'));
+    body.appendChild(bar);
+}
+
+function sendMessageFromBtn(text) {
+    messageInput.value = text;
+    messageInput.focus();
+    sendToSenka();
+}
+
+/* ===== Command List Modal ===== */
+function openCommandMenu() {
+    document.getElementById('command-menu-modal').style.display = 'flex';
+}
+
+function closeCommandMenu() {
+    document.getElementById('command-menu-modal').style.display = 'none';
+}
+
+function runCommandFromMenu(kind) {
+    closeCommandMenu();
+    closeSenkaProfile();
+    if (kind === 'play') {
+        messageInput.value = '/senkaplay ';
+        messageInput.focus();
+    } else if (kind === 'game') {
+        messageInput.value = '/senkagame';
+        sendToSenka();
+    } else if (kind === 'image') {
+        openImageModal();
+    }
 }
 
 async function continueNarration() {
@@ -3645,6 +3818,7 @@ async function streamAssistantReply(payloadMessages) {
         if (stk) appendStickerImg(msgMediaOf(msgContent), stk);
         if (fileReq) rb.appendChild(makeFileCard(fileReq.meta));
         if (!fileReq && displayText.trim()) attachCallTranslation(rb, displayText.trim());
+        if (!fileReq) addContextShortcuts(rb, renderText);
         addMsgActions(msgContent, 'senka');
 
         memoryList.push({ role: 'assistant', content: [{ type: "text", text: displayText }], ts: createdTs, time: formatMsgTime(createdTs) });

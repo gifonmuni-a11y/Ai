@@ -137,6 +137,15 @@ button:focus, button:focus-visible, a:focus, a:focus-visible, [tabindex]:focus-v
 .msg-action:active { transform: scale(0.93); }
 .msg-tag { font-size: 0.66rem; color: #a5b4fc; margin-bottom: 5px; letter-spacing: 0.3px; }
 
+.context-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 5px; }
+.context-btn { background: rgba(255, 255, 255, 0.15); border: 1px solid rgba(255, 255, 255, 0.3); color: white; padding: 6px 12px; border-radius: 15px; margin-right: 8px; margin-top: 5px; cursor: pointer; transition: 0.3s; font-family: inherit; font-size: 0.8rem; }
+.context-btn:hover { background: rgba(14, 165, 233, 0.5); }
+
+.music-info { display: flex; align-items: center; gap: 6px; font-size: 0.82rem; color: #e2e8f0; margin-bottom: 6px; }
+.music-info i { color: #7dd3fc; }
+.music-frame { width: 100%; max-width: 360px; height: 150px; border-radius: 10px; overflow: hidden; background: rgba(0,0,0,0.4); box-shadow: 0 4px 18px rgba(0,0,0,0.4); }
+.music-frame iframe { width: 100%; height: 100%; border: 0; display: block; }
+
 .tind i { display: inline-block; width: 5px; height: 5px; margin-left: 3px; border-radius: 50%; background: #c084fc; animation: blink 1.2s infinite; }
 .tind i:nth-child(2) { animation-delay: 0.2s; }
 .tind i:nth-child(3) { animation-delay: 0.4s; }
@@ -355,17 +364,18 @@ button:focus, button:focus-visible, a:focus, a:focus-visible, [tabindex]:focus-v
 #message-input { flex: 1; min-width: 0; background: rgba(6, 10, 20, 0.5); border: 1px solid rgba(96, 165, 250, 0.32); color: #fff; padding: 12px 18px; border-radius: 25px; outline: none; transition: all 0.3s ease; }
 #message-input:focus { border-color: #38bdf8; box-shadow: 0 0 12px rgba(56, 189, 248, 0.3); }
 #message-input::placeholder { color: #8b7f9e; }
-/* Styling Tombol Kirim — samakan dengan tombol telepon (.tool-btn) */
+/* Styling Tombol Kirim — tema biru laut (ocean blue) */
 #send-btn {
-    background: rgba(8,12,26,0.45);
-    border: 1px solid rgba(96,165,250,0.3);
-    color: #7dd3fc;
+    background: linear-gradient(135deg, #0ea5e9, #0284c7);
+    border: none;
+    color: #fff;
     width: 45px; height: 45px; border-radius: 50%; cursor: pointer; font-size: 1rem;
     display: flex; align-items: center; justify-content: center; transition: all 0.25s ease;
     flex-shrink: 0;
+    box-shadow: 0 4px 14px rgba(14, 165, 233, 0.45);
 }
 
-#send-btn:hover { background: rgba(56, 189, 248, 0.3); color: #fff; box-shadow: 0 0 14px rgba(56, 189, 248, 0.5); }
+#send-btn:hover { transform: scale(1.07); box-shadow: 0 0 18px rgba(56, 189, 248, 0.7); }
 #send-btn:active { transform: scale(0.92); }
 #pm-mic.recording {
     background: linear-gradient(135deg, #f87171, #dc2626) !important;
@@ -419,6 +429,21 @@ textarea.modal-input { resize: none; font-family: inherit; }
     border-radius: 0 0 18px 18px;
 }
 .modal-actions .modal-btn { margin-top: 0; }
+
+.cmd-modal { width: 400px; }
+.cmd-item {
+    display: flex; align-items: center; gap: 12px; width: 100%;
+    margin-top: 10px; padding: 12px 14px; text-align: left; cursor: pointer;
+    background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(96, 165, 250, 0.3);
+    border-radius: 14px; color: #fff; font-family: inherit;
+    transition: all 0.25s ease;
+}
+.cmd-item:hover { background: rgba(14, 165, 233, 0.22); border-color: rgba(14, 165, 233, 0.6); box-shadow: 0 0 14px rgba(14, 165, 233, 0.35); transform: translateY(-1px); }
+.cmd-item:active { transform: scale(0.97); }
+.cmd-ico { font-size: 1.3rem; flex-shrink: 0; width: 34px; text-align: center; }
+.cmd-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cmd-txt b { font-size: 0.88rem; }
+.cmd-txt small { color: #a5b4fc; font-size: 0.72rem; }
 
 .cdm-overlay { background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
 .cdm-card { width: 340px; animation: cdmIn 0.18s ease; }
@@ -577,6 +602,18 @@ textarea.modal-input { resize: none; font-family: inherit; }
 }
 .profile-banner-edit:hover { background: #38bdf8; transform: scale(1.08); }
 .profile-avatar-zone { position: relative; display: flex; flex-direction: column; align-items: center; margin-top: -46px; padding: 0 20px; z-index: 2; }
+.senka-cmd-btn {
+    position: absolute; right: 34px; top: 6px;
+    cursor: pointer; font-size: 1.2rem; color: #fff;
+    width: 42px; height: 42px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #0ea5e9, #0284c7);
+    border: 1px solid rgba(255,255,255,0.35);
+    box-shadow: 0 4px 14px rgba(14,165,233,0.45);
+    transition: all 0.25s ease;
+}
+.senka-cmd-btn:hover { transform: scale(1.1); box-shadow: 0 0 18px rgba(14,165,233,0.7); }
+.senka-cmd-btn:active { transform: scale(0.94); }
 .profile-avatar-wrap { position: relative; width: 120px; height: 120px; overflow: visible; }
 .profile-avatar-wrap .profile-avatar {
     width: 100%; height: 100%; border-radius: 50%; object-fit: cover;
