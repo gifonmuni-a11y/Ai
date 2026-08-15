@@ -1593,38 +1593,38 @@ function renderChat() {
             scrollToBottom(true);
             return;
         }
-        const lastVisit = parseInt(localStorage.getItem('senka_last_visit') || '0', 10);
-        localStorage.setItem('senka_last_visit', String(Date.now()));
-        const away = lastVisit > 0 && (Date.now() - lastVisit) > 5 * 60 * 60 * 1000;
-        let greeting;
-        if (away) greeting = `Selamat kembali ${panggilan}!`;
-        else greeting = getGreeting();
-        memoryList.push({ role: 'assistant', content: [{ type: 'text', text: greeting }], ts: Date.now() });
-        const gItem = memoryList[memoryList.length - 1];
-        if (!supabaseEnabled) saveSessions();
-        else remoteSave('senka', 'text', greeting, gItem);
-        const gEl = appendMessage('senka', greeting, false, gItem.ts, gItem.time);
-        const bubble = gEl.querySelector('.message');
-        if (bubble) {
-            bubble.querySelector('.msg-body').innerHTML = formatReply(greeting);
-        }
-        gEl.dataset.greeting = '1';
-        if (away) {
-            setTimeout(() => {
-                const el = chatHistoryDOM.querySelector('.msg-content[data-greeting="1"]');
-                if (!el) return;
-                const newG = getGreeting();
-                msgBodyOf(el).innerHTML = formatReply(newG);
-                const idx = memoryList.findIndex(x => x.role === 'assistant' && x.content && x.content[0] && x.content[0].text === greeting);
-                if (idx !== -1) {
-                    memoryList[idx].content[0].text = newG;
-                    if (!supabaseEnabled) saveSessions();
-                }
-            }, 60000);
-        }
-        if (!modelKey) {
-            appendMessage('senka', 'Sebelum ngobrol, pilih dulu model AI-nya lewat tombol pengaturan di atas.');
-        }
+        const greetingContainer = document.createElement('div');
+        greetingContainer.className = 'message msg-senka';
+        greetingContainer.style.maxWidth = '100%';
+        greetingContainer.style.padding = '10px 14px';
+        greetingContainer.style.background = 'rgba(0, 0, 0, 0.25)';
+        greetingContainer.style.backdropFilter = 'blur(3px)';
+        greetingContainer.style.borderRadius = '14px';
+        greetingContainer.style.fontSize = '0.9rem';
+        greetingContainer.style.lineHeight = '1.6';
+        greetingContainer.style.whiteSpace = 'pre-wrap';
+        greetingContainer.style.wordWrap = 'break-word';
+        greetingContainer.style.minWidth = '0';
+        greetingContainer.style.animation = 'msgIn 0.28s ease-out';
+        const greetingText = document.createElement('div');
+        greetingText.className = 'msg-body';
+        const now = new Date();
+        const t = now.getHours() + now.getMinutes() / 60;
+        let selamat;
+        if (t >= 0 && t < 4) selamat = 'Selamat pagi';
+        else if (t >= 4 && t <= 6) selamat = 'Bangun dan waktunya bersinar';
+        else if (t > 6 && t <= 10) selamat = 'Selamat pagi';
+        else if (t > 10 && t <= 11) selamat = 'Selamat siang';
+        else if (t > 11 && t <= 13) selamat = 'Selamat istirahat siang';
+        else if (t > 13 && t < 15) selamat = 'Selamat siang semangat hari ini';
+        else if (t >= 15 && t <= 18) selamat = 'Selamat sore';
+        else if (t > 18 && t <= 22) selamat = 'Selamat malam';
+        else if (t > 22 && t <= 22.99) selamat = 'Selamat beristirahat';
+        else selamat = 'Belom tidur';
+        panggilan = localStorage.getItem('senka_panggilan') || 'pengguna';
+        greetingText.textContent = `${selamat} ${panggilan}! Senka di sini`;
+        greetingContainer.appendChild(greetingText);
+        chatHistoryDOM.appendChild(greetingContainer);
     } else {
         const STEP = 80;
         if (supabaseEnabled && remoteHasMore) {
@@ -3621,6 +3621,12 @@ async function sendToSenka() {
     messageInput.value = '';
     removeImage();
     scrollToBottom(true);
+
+    // Remove greeting container after user sends first message
+    const greetingContainer = chatHistoryDOM.querySelector('.message.msg-senka');
+    if (greetingContainer) {
+        greetingContainer.remove();
+    }
 
     const jpnMode = speakMode === 'jpn';
     const sendText = jpnMode ? await toJp(text) : text;
