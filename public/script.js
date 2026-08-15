@@ -1604,7 +1604,10 @@ function renderChat() {
         if (!supabaseEnabled) saveSessions();
         else remoteSave('senka', 'text', greeting, gItem);
         const gEl = appendMessage('senka', greeting, false, gItem.ts, gItem.time);
-        msgBodyOf(gEl).innerHTML = formatReply(greeting);
+        const bubble = gEl.querySelector('.message');
+        if (bubble) {
+            bubble.querySelector('.msg-body').innerHTML = formatReply(greeting);
+        }
         gEl.dataset.greeting = '1';
         if (away) {
             setTimeout(() => {
