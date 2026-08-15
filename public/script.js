@@ -1514,7 +1514,7 @@ function buildMsgEl(m) {
             const p = document.createElement('div');
             const cleanText = stk ? stripStickerTag(c.text) : c.text;
             if (cleanText) {
-                p.innerHTML = formatReply(cleanText);
+                p.innerHTML = m.role === 'assistant' ? mdToHtml(cleanText) : formatReply(cleanText);
                 if (m.role === 'assistant') bubbleText += ' ' + cleanText;
                 bodyOf().appendChild(p);
             }
@@ -2482,6 +2482,25 @@ function formatReply(raw) {
     if (!raw) return '';
     let s = String(raw).replace(/([0-9])[\uFE0F\u20D0-\u20FF]+\s*/g, '$1. ');
     return s.split('\n').map(formatLine).join('\n').replace(/\{\{pos\}\}|\{\{neg\}\}|\{\{\/pos\}\}|\{\{\/neg\}\}/g, '');
+}
+
+const MD_DETECT_RE = /```|`[^`\n]+`|^#{1,6}\s|\*\*[^*\n]+\*\*|^\s*[-+*]\s+|^\s*\d+\.\s+|^\s*\|.*\|/m;
+
+function mdToHtml(raw) {
+    if (!raw) return '';
+    let s = String(raw).replace(/([0-9])[\uFE0F\u20D0-\u20FF]+\s*/g, '$1. ');
+    if (!window.marked || !MD_DETECT_RE.test(s)) return formatReply(s);
+    const sumberLines = [];
+    s = s.replace(/^(Sumber|Source)\s*:\s*(.*)$/gmi, (m, p, rest) => {
+        const idx = sumberLines.length;
+        sumberLines.push(p + ': ' + rest);
+        return '\uE000SRC' + idx + '\uE001';
+    });
+    marked.setOptions({ breaks: true, gfm: true });
+    let out = marked.parse(escapeHtml(s));
+    out = out.replace(/(<br>\s*)?\uE000SRC(\d+)\uE001(\s*<br>)?/g, (m, b1, i) => formatSumberLine(sumberLines[+i]));
+    out = out.replace(/<p>\s*<\/p>/g, '');
+    return out;
 }
 
 function getGreeting() {
@@ -3599,7 +3618,7 @@ async function streamAssistantReply(payloadMessages) {
                     if (delta) {
                         if (!started) { streamBuf = ''; started = true; }
                         streamBuf += delta;
-                        msgBodyOf(msgDiv).innerHTML = formatReply(streamBuf);
+                        msgBodyOf(msgDiv).innerHTML = mdToHtml(streamBuf);
                         if (chatHistoryDOM.scrollHeight - chatHistoryDOM.scrollTop - chatHistoryDOM.clientHeight < 200) {
                             chatHistoryDOM.scrollTop = chatHistoryDOM.scrollHeight;
                         }
@@ -3622,7 +3641,7 @@ async function streamAssistantReply(payloadMessages) {
         const renderText = stk ? stripStickerTag(displayText) : displayText;
 
         const rb = msgBodyOf(msgContent);
-        rb.innerHTML = formatReply(renderText);
+        rb.innerHTML = mdToHtml(renderText);
         if (stk) appendStickerImg(msgMediaOf(msgContent), stk);
         if (fileReq) rb.appendChild(makeFileCard(fileReq.meta));
         if (!fileReq && displayText.trim()) attachCallTranslation(rb, displayText.trim());
@@ -3679,69 +3698,120 @@ function parseFileRequest(reply) {
 function makeFileCard(meta) {
     const type = (meta.type || 'txt').toLowerCase();
     const name = (meta.name || 'file-senka').trim();
-    const sizeKb = Math.max(1, Math.round((meta.content || '').length / 1024));
+    const content = meta.content || '';
+    const sizeKb = Math.max(1, Math.round(content.length / 1024));
+    const isTable = looksLikeTable(content);
     const card = document.createElement('div');
     card.className = 'file-card';
-    const iconMap = { txt: 'fa-file-lines', csv: 'fa-table', xlsx: 'fa-file-excel', doc: 'fa-file-word', pdf: 'fa-file-pdf' };
+    const iconMap = { txt: 'fa-file-lines', csv: 'fa-table', xlsx: 'fa-file-excel', excel: 'fa-file-excel', doc: 'fa-file-word', docx: 'fa-file-word', pdf: 'fa-file-pdf' };
+    const btns = [
+        { fmt: 'pdf', icon: 'fa-file-pdf', label: 'Download PDF' },
+        { fmt: 'doc', icon: 'fa-file-word', label: 'Download Word' }
+    ];
+    if (isTable || ['csv', 'xlsx', 'excel'].includes(type)) {
+        btns.push({ fmt: 'xlsx', icon: 'fa-file-excel', label: 'Download Excel' });
+    }
+    btns.push({ fmt: 'txt', icon: 'fa-file-lines', label: 'Download TXT' });
     card.innerHTML = `<div class="fc-icon"><i class="fa-solid ${iconMap[type] || 'fa-file'}"></i></div>
         <div class="fc-info">
             <div class="fc-name"></div>
-            <div class="fc-meta">${type.toUpperCase()} · ${sizeKb} KB · siap diunduh</div>
-        </div>
-        <button class="fc-dl"><i class="fa-solid fa-download"></i></button>`;
+            <div class="fc-meta">${type.toUpperCase()} · ${sizeKb} KB · ${isTable ? 'berisi tabel' : 'siap diunduh'}</div>
+            <div class="fc-actions">${btns.map(b => `<button class="fc-btn" data-fmt="${b.fmt}"><i class="fa-solid ${b.icon}"></i> ${b.label}</button>`).join('')}</div>
+        </div>`;
     card.querySelector('.fc-name').innerText = name;
-    card.querySelector('.fc-dl').onclick = () => downloadGeneratedFile(meta);
+    card.querySelectorAll('.fc-btn').forEach(b => {
+        b.onclick = () => downloadGeneratedFile(meta, b.dataset.fmt);
+    });
     return card;
 }
 
-function downloadGeneratedFile(meta) {
+function nameWithoutExt(n) {
+    return String(n).replace(/\.(txt|csv|xlsx|excel|doc|docx|pdf)$/i, '');
+}
+
+function looksLikeTable(content) {
+    const s = String(content || '').replace(/```[\s\S]*?```/g, '');
+    const lines = s.split('\n').filter(l => l.trim());
+    if (lines.length < 2) return false;
+    const sepRe = /^\s*\|?\s*:?-{2,}\s*(\|\s*:?-{2,}\s*)+\|?\s*$/;
+    if (lines.some(l => sepRe.test(l))) return true;
+    const pipeLines = lines.filter(l => l.includes('|'));
+    return pipeLines.length >= 2 && pipeLines.length / lines.length >= 0.8;
+}
+
+function parseTableRows(content) {
+    const rows = [];
+    const sepRe = /^\s*\|?\s*:?-{2,}\s*(\|\s*:?-{2,}\s*)+\|?\s*$/;
+    for (const line of String(content || '').split('\n')) {
+        const t = line.trim();
+        if (!t || sepRe.test(t)) continue;
+        if (!t.includes('|')) {
+            if (rows.length) rows.push([t]);
+            continue;
+        }
+        rows.push(t.replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim()));
+    }
+    return rows;
+}
+
+function downloadGeneratedFile(meta, format) {
     const type = (meta.type || 'txt').toLowerCase();
-    let name = (meta.name || 'file-senka').trim();
+    const name = (meta.name || 'file-senka').trim();
     const content = meta.content || '';
     const hasCJK = /[\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af]/.test(content);
+    const fmt = (format || type).toLowerCase();
 
-    if (type === 'pdf' && !hasCJK) {
-        if (!window.jspdf) return;
+    if (fmt === 'pdf') {
+        if (!window.jspdf) { showToast('Library PDF belum siap, coba lagi.'); return; }
+        if (hasCJK) {
+            downloadWord(name, content);
+            return;
+        }
         const doc = new window.jspdf.jsPDF();
         const lines = doc.splitTextToSize(content, 185);
         let y = 14;
-        lines.forEach((l, i) => {
+        lines.forEach(l => {
             if (y > 282) { doc.addPage(); y = 14; }
-            doc.setFontSize(i === 0 && content.includes('\n') ? 13 : 11);
+            doc.setFontSize(11);
             doc.text(l, 10, y);
             y += 6;
         });
-        if (!name.includes('.')) name += '.pdf';
-        doc.save(name);
+        doc.save(nameWithoutExt(name) + '.pdf');
         return;
     }
 
-    if (type === 'xlsx' || type === 'excel' || type === 'csv') {
-        const rows = content.split('\n').map(l => l.split(',')).filter(r => r.some(c => c.trim() !== ''));
-        if (type === 'xlsx' || type === 'excel') {
-            loadSheetJS(() => {
-                const ws = XLSX.utils.aoa_to_sheet(rows);
-                const wb = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
-                XLSX.writeFile(wb, name.includes('.') ? name : name + '.xlsx');
-            });
-            return;
-        }
+    if (fmt === 'xlsx' || fmt === 'excel') {
+        const rows = looksLikeTable(content) ? parseTableRows(content) : content.split('\n').map(l => l.split(',')).filter(r => r.some(c => c.trim() !== ''));
+        loadSheetJS(() => {
+            const ws = XLSX.utils.aoa_to_sheet(rows);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+            XLSX.writeFile(wb, nameWithoutExt(name) + '.xlsx');
+        });
+        return;
+    }
+
+    if (fmt === 'csv') {
+        const rows = looksLikeTable(content) ? parseTableRows(content) : content.split('\n').map(l => l.split(',')).filter(r => r.some(c => c.trim() !== ''));
         const blob = new Blob(['\ufeff' + rows.map(r => r.join(',')).join('\n')], { type: 'text/csv;charset=utf-8' });
-        saveBlob(blob, name.includes('.') ? name : name + '.csv');
+        saveBlob(blob, nameWithoutExt(name) + '.csv');
         return;
     }
 
-    if (type === 'doc' || type === 'docx' || hasCJK) {
-        const safe = content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        const html = `<html><head><meta charset="utf-8"><title>${name}</title></head><body>${safe.split('\n').map(l => `<p>${l}</p>`).join('')}</body></html>`;
-        const blob = new Blob(['\ufeff' + html], { type: 'application/msword' });
-        saveBlob(blob, name.includes('.') ? name : name + '.doc');
+    if (fmt === 'doc' || fmt === 'docx') {
+        downloadWord(name, content);
         return;
     }
 
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-    saveBlob(blob, name.includes('.') ? name : name + '.txt');
+    saveBlob(blob, nameWithoutExt(name) + '.txt');
+}
+
+function downloadWord(name, content) {
+    const safe = content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const html = `<html><head><meta charset="utf-8"><title>${name}</title></head><body>${safe.split('\n').map(l => `<p>${l}</p>`).join('')}</body></html>`;
+    const blob = new Blob(['\ufeff' + html], { type: 'application/msword' });
+    saveBlob(blob, nameWithoutExt(name) + '.doc');
 }
 
 function loadSheetJS(cb) {

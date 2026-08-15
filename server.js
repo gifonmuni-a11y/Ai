@@ -259,6 +259,7 @@ CONTENT:
 - Japanese content REQUIRES TYPE txt or doc, NEVER pdf.
 - NAME must end with the correct extension for the TYPE.
 - Never add a ###SENKA_FILE### block outside of file-creation context.
+- If the user just wants information in chat (tables, lists, code snippets), render it as normal Markdown directly in the reply — NEVER wrap it into a ###SENKA_FILE### block. Use the file block ONLY when the user explicitly asks for a downloadable file.
 
 ${stickerPromptBlock('Senka')}`
     };
@@ -410,6 +411,7 @@ CONTENT:
 - Japanese content REQUIRES TYPE txt or doc, NEVER pdf.
 - NAME must end with the correct extension for the TYPE.
 - Never add a ###SENKA_FILE### block outside of file-creation context.
+- If the user just wants information in chat (tables, lists, code snippets), render it as normal Markdown directly in the reply — NEVER wrap it into a ###SENKA_FILE### block. Use the file block ONLY when the user explicitly asks for a downloadable file.
 
 ${stickerPromptBlock('Senka')}`
     };
