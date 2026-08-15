@@ -3790,7 +3790,6 @@ function maximizePlayer() {
 }
 
 function makeDraggable(el) {
-    const handle = el.querySelector('.drag-handle') || el;
     let dragging = false;
     let startX = 0, startY = 0, baseLeft = 0, baseTop = 0;
 
@@ -3812,7 +3811,6 @@ function makeDraggable(el) {
         startY = t.clientY;
         baseLeft = rect.left;
         baseTop = rect.top;
-        if (e.cancelable) e.preventDefault();
     }
 
     function move(e) {
@@ -3829,16 +3827,15 @@ function makeDraggable(el) {
     }
 
     function end() {
-        if (!dragging) return;
         dragging = false;
     }
 
-    handle.addEventListener('mousedown', begin);
+    el.addEventListener('mousedown', begin);
     document.addEventListener('mousemove', move);
     document.addEventListener('mouseup', end);
-    handle.addEventListener('touchstart', begin, { passive: false });
-    handle.addEventListener('touchmove', move, { passive: false });
-    handle.addEventListener('touchend', end);
+    el.addEventListener('touchstart', begin, { passive: false });
+    el.addEventListener('touchmove', move, { passive: false });
+    el.addEventListener('touchend', end);
 }
 
 makeDraggable(document.getElementById('floating-music-player'));
