@@ -440,11 +440,17 @@ async function loadRemoteChat() {
         remoteHasMore = !!d.hasMore;
         if (!memoryList.length) {
             const greeting = getGreeting();
-            console.log('[GREETING DEBUG] Generated greeting for new session:', greeting);
+            // DEBUG: Show greeting in alert
+            alert('Greeting Generated: ' + greeting);
             const gTs = Date.now();
             const item = { role: 'assistant', content: [{ type: 'text', text: greeting }], ts: gTs, time: formatMsgTime(gTs) };
             memoryList.push(item);
-            remoteSave('senka', 'text', greeting, item);
+            // DEBUG: Show save status
+            remoteSave('senka', 'text', greeting, item).then(() => {
+                alert('Greeting saved to database successfully');
+            }).catch((e) => {
+                alert('Greeting save failed: ' + e.message);
+            });
         }
         renderChat();
         if (!chatHistoryDOM.dataset.scrollWatch) {
@@ -1608,12 +1614,22 @@ function renderChat() {
     chatHistoryDOM.innerHTML = '';
     if (!memoryList.length) {
         const greeting = getGreeting();
-        console.log('[GREETING DEBUG] Generated greeting (renderChat):', greeting);
+        // DEBUG: Show greeting in alert
+        alert('Greeting Generated (renderChat): ' + greeting);
         const gTs = Date.now();
         const item = { role: 'assistant', content: [{ type: 'text', text: greeting }], ts: gTs, time: formatMsgTime(gTs) };
         memoryList.push(item);
-        if (!supabaseEnabled) saveSessions();
-        else remoteSave('senka', 'text', greeting, item);
+        // DEBUG: Show save status
+        if (!supabaseEnabled) {
+            saveSessions();
+            alert('Greeting saved locally');
+        } else {
+            remoteSave('senka', 'text', greeting, item).then(() => {
+                alert('Greeting saved to database successfully');
+            }).catch((e) => {
+                alert('Greeting save failed: ' + e.message);
+            });
+        }
         memoryList.filter(m => !m.hidden).forEach(m => chatHistoryDOM.appendChild(buildMsgEl(m)));
         if (!modelKey) {
             appendMessage('senka', 'Sebelum ngobrol, pilih dulu model AI-nya lewat tombol pengaturan di atas.');
