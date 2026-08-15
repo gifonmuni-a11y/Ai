@@ -67,11 +67,6 @@ window.onload = async () => {
     document.getElementById('panggilan-input').value = panggilan;
     document.getElementById('autospeak-input').checked = autospeak;
 
-    // DEBUG: Check greeting generation
-    console.log('=== GREETING DEBUG ===');
-    console.log('panggilan:', panggilan);
-    console.log('window.supabase:', !!window.supabase);
-
     try {
         const resp = await fetch('/api/config');
         const cfg = await resp.json();
@@ -89,30 +84,27 @@ window.onload = async () => {
     try {
         const sr = await fetch('/api/supabase-status');
         const sd = await sr.json().catch(() => ({}));
-        console.log('supabase-status:', sd);
         if (sd.enabled && window.supabase && sd.url && sd.anonKey) {
             sbAuth = window.supabase.createClient(sd.url, sd.anonKey, {
                 auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
             });
             const { data: sessData } = await sbAuth.auth.getSession();
-            console.log('sessData.session:', !!sessData.session);
             if (sessData.session) {
                 await startCloud(sessData.session.user);
+                return;
             }
+            document.getElementById('login-modal').style.display = 'flex';
+            return;
         }
     } catch (e) { }
 
-    // For non-Supabase (local) sessions, render chat immediately
-    // For Supabase users, loadRemoteChat() (called from startCloud) will call renderChat()
-    if (!sd.enabled || !window.supabase) {
-        if (!userProfile.memberSince) {
-            userProfile.memberSince = new Date().toISOString();
-            saveProfileState();
-        }
-        loadSessions();
-        renderSessionName();
-        renderChat();
+    if (!userProfile.memberSince) {
+        userProfile.memberSince = new Date().toISOString();
+        saveProfileState();
     }
+    loadSessions();
+    renderSessionName();
+    renderChat();
 };
 
 async function authHeaders() {
@@ -191,7 +183,6 @@ async function handleAuthFail() {
 }
 
 async function newSessionCloud() {
-    if (isStreaming) { showToast('Tunggu Senka selesai bicara dulu ya, biar jawabannya nggak hilang.'); return; }
     const id = 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const nama = 'Sesi ' + (cloudSessions.length + 1);
     cloudSessions.push({ id, nama });
@@ -210,7 +201,6 @@ async function newSessionCloud() {
 }
 
 async function switchSessionCloud(id) {
-    if (isStreaming) { showToast('Tunggu Senka selesai bicara dulu ya, biar jawabannya nggak hilang.'); return; }
     const target = cloudSessions.find(s => s.id === id);
     if (!target) return;
     cloudSid = id;
@@ -320,7 +310,7 @@ function getUserId() {
 }
 
 function encKey() {
-    return CryptoJS.SHA256('senka:masterkey').toString();
+    return CryptoJS.SHA256('senka:' + getUserId()).toString();
 }
 
 function encryptText(s) {
@@ -330,31 +320,26 @@ function encryptText(s) {
 
 function decryptText(s) {
     if (typeof CryptoJS === 'undefined' || !s) return s;
-    const str = String(s);
-    if (!str.startsWith('U2FsdGVkX1')) return str;
     try {
-        const t = CryptoJS.AES.decrypt(str, encKey()).toString(CryptoJS.enc.Utf8);
+        const t = CryptoJS.AES.decrypt(String(s), encKey()).toString(CryptoJS.enc.Utf8);
         return t || null;
     } catch (e) { return null; }
 }
 
 function remoteToLocal(m) {
     const content = [];
-    const rawContent = m.isi_pesan;
-    const isEncrypted = typeof rawContent === 'string' && rawContent.startsWith('U2FsdGVkX1');
-    const fallbackText = isEncrypted ? '[Pesan lama tidak bisa dibaca]' : String(rawContent || '');
     if (m.tipe_pesan === 'image') {
-        const u = decryptText(rawContent);
-        content.push({ type: 'image_url', image_url: { url: u ?? fallbackText } });
+        const u = decryptText(m.isi_pesan);
+        content.push({ type: 'image_url', image_url: { url: u || '' } });
     } else if (m.tipe_pesan === 'video') {
-        const u = decryptText(rawContent);
-        content.push({ type: 'video_url', url: u ?? fallbackText });
+        const u = decryptText(m.isi_pesan);
+        content.push({ type: 'video_url', url: u || '' });
     } else if (m.tipe_pesan === 'voice') {
-        const u = decryptText(rawContent);
-        content.push({ type: 'audio_url', url: u ?? fallbackText });
+        const u = decryptText(m.isi_pesan);
+        content.push({ type: 'audio_url', url: u || '' });
     } else {
-        const t = decryptText(rawContent);
-        content.push({ type: 'text', text: t ?? fallbackText });
+        const t = decryptText(m.isi_pesan);
+        content.push({ type: 'text', text: (t === null || t === '') ? '[pesan terenkripsi]' : t });
     }
     const ts = m.waktu_kirim ? new Date(m.waktu_kirim).getTime() : undefined;
     return { role: m.pengirim === 'user' ? 'user' : 'assistant', cid: m.id, content, ts, time: ts ? formatMsgTime(ts) : undefined };
@@ -427,7 +412,6 @@ function cleanupDuplicateGreetings() {
 }
 
 async function loadRemoteChat() {
-    console.log('[GREETING DEBUG] loadRemoteChat start: supabaseEnabled=', supabaseEnabled, 'cloudSid=', cloudSid, 'memoryList.length=', memoryList.length);
     try {
         const q = new URLSearchParams({ limit: '50' });
         if (cloudSid) q.set('sesiId', cloudSid);
@@ -440,17 +424,10 @@ async function loadRemoteChat() {
         remoteHasMore = !!d.hasMore;
         if (!memoryList.length) {
             const greeting = getGreeting();
-            // DEBUG: Show greeting in alert
-            alert('Greeting Generated: ' + greeting);
             const gTs = Date.now();
             const item = { role: 'assistant', content: [{ type: 'text', text: greeting }], ts: gTs, time: formatMsgTime(gTs) };
             memoryList.push(item);
-            // DEBUG: Show save status
-            remoteSave('senka', 'text', greeting, item).then(() => {
-                alert('Greeting saved to database successfully');
-            }).catch((e) => {
-                alert('Greeting save failed: ' + e.message);
-            });
+            remoteSave('senka', 'text', greeting, item);
         }
         renderChat();
         if (!chatHistoryDOM.dataset.scrollWatch) {
@@ -547,7 +524,6 @@ function renderSessionName() {
 
 function newSession() {
     if (supabaseEnabled) { newSessionCloud(); return; }
-    if (isStreaming) { showToast('Tunggu Senka selesai bicara dulu ya, biar jawabannya nggak hilang.'); return; }
     const n = sessions.length + 1;
     const id = 's' + Date.now();
     sessions.push({ id, name: 'Sesi ' + n, messages: [] });
@@ -589,7 +565,6 @@ function confirmDeleteSession() {
 
 function switchSession(id) {
     if (supabaseEnabled) { switchSessionCloud(id); return; }
-    if (isStreaming) { showToast('Tunggu Senka selesai bicara dulu ya, biar jawabannya nggak hilang.'); return; }
     const active = sessions.find(s => s.id === activeId);
     if (active) active.messages = memoryList;
     activeId = id;
@@ -1613,33 +1588,44 @@ function buildMsgEl(m) {
 function renderChat() {
     chatHistoryDOM.innerHTML = '';
     if (!memoryList.length) {
-        const greeting = getGreeting();
-        // DEBUG: Show greeting in alert
-        alert('Greeting Generated (renderChat): ' + greeting);
-        const gTs = Date.now();
-        const item = { role: 'assistant', content: [{ type: 'text', text: greeting }], ts: gTs, time: formatMsgTime(gTs) };
-        memoryList.push(item);
-        // DEBUG: Show save status
-        if (!supabaseEnabled) {
-            saveSessions();
-            alert('Greeting saved locally');
-        } else {
-            remoteSave('senka', 'text', greeting, item).then(() => {
-                alert('Greeting saved to database successfully');
-            }).catch((e) => {
-                alert('Greeting save failed: ' + e.message);
-            });
+        if (supabaseEnabled) {
+            chatHistoryDOM.appendChild(document.createElement('div'));
+            scrollToBottom(true);
+            return;
         }
-        memoryList.filter(m => !m.hidden).forEach(m => chatHistoryDOM.appendChild(buildMsgEl(m)));
+        const lastVisit = parseInt(localStorage.getItem('senka_last_visit') || '0', 10);
+        localStorage.setItem('senka_last_visit', String(Date.now()));
+        const away = lastVisit > 0 && (Date.now() - lastVisit) > 5 * 60 * 60 * 1000;
+        let greeting;
+        if (away) greeting = `Selamat kembali ${panggilan}!`;
+        else greeting = getGreeting();
+        memoryList.push({ role: 'assistant', content: [{ type: 'text', text: greeting }], ts: Date.now() });
+        const gItem = memoryList[memoryList.length - 1];
+        if (!supabaseEnabled) saveSessions();
+        else remoteSave('senka', 'text', greeting, gItem);
+        const gEl = appendMessage('senka', greeting, false, gItem.ts, gItem.time);
+        msgBodyOf(gEl).innerHTML = formatReply(greeting);
+        gEl.dataset.greeting = '1';
+        if (away) {
+            setTimeout(() => {
+                const el = chatHistoryDOM.querySelector('.msg-content[data-greeting="1"]');
+                if (!el) return;
+                const newG = getGreeting();
+                msgBodyOf(el).innerHTML = formatReply(newG);
+                const idx = memoryList.findIndex(x => x.role === 'assistant' && x.content && x.content[0] && x.content[0].text === greeting);
+                if (idx !== -1) {
+                    memoryList[idx].content[0].text = newG;
+                    if (!supabaseEnabled) saveSessions();
+                }
+            }, 60000);
+        }
         if (!modelKey) {
             appendMessage('senka', 'Sebelum ngobrol, pilih dulu model AI-nya lewat tombol pengaturan di atas.');
         }
     } else {
         const STEP = 80;
         if (supabaseEnabled && remoteHasMore) {
-            chatHistoryDOM.appendChild(makeRemoteBtn());
-            memoryList.filter(m => !m.hidden).forEach(m => chatHistoryDOM.appendChild(buildMsgEl(m)));
-        } else if (supabaseEnabled && memoryList.length > 0) {
+            chatHistoryDOM.insertBefore(makeRemoteBtn(), chatHistoryDOM.firstChild);
             memoryList.filter(m => !m.hidden).forEach(m => chatHistoryDOM.appendChild(buildMsgEl(m)));
         } else if (memoryList.length > STEP) {
             const hidden = memoryList.length - STEP;
@@ -3669,7 +3655,7 @@ async function handleSenkaCommand(text) {
     }
 
     if (low.startsWith('/senkaplay ') || low === '/senkaplay') {
-        const query = low.slice('/senkaplay'.length).trim();
+        const query = text.slice('/senkaplay'.length).trim();
         const videoId = extractYouTubeId(query);
         if (!query || !videoId) {
             appendMessage('senka', 'Kirim link YouTube ya! Contoh: ' + colorCmd('/senkaplay') + ' https://youtu.be/fE9trKOuT3Q');
