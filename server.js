@@ -2553,7 +2553,7 @@ app.post('/api/chats', async (req, res) => {
         if (error) return res.status(500).json({ error: error.message });
         if (sesiId) {
             await client.from('senka_sessions').upsert(
-                { id: String(sesiId), user_id: tok.uid, nama: null, waktu_update: new Date().toISOString() },
+                { id: String(sesiId), user_id: tok.uid, nama: String(sesiId).slice(0, 40) || 'Sesi Baru', waktu_update: new Date().toISOString() },
                 { onConflict: 'id', ignoreDuplicates: false }
             ).eq('user_id', tok.uid).then(({ error: upErr }) => {
                 if (upErr) console.error('Sesi touch error:', upErr.message);
