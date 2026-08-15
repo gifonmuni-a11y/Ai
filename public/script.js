@@ -1590,12 +1590,6 @@ function renderChat() {
     chatHistoryDOM.innerHTML = '';
     if (!memoryList.length) {
         console.log('DEBUG renderChat: entering !memoryList.length branch');
-        if (supabaseEnabled) {
-            console.log('DEBUG renderChat: Supabase branch, appending empty div');
-            chatHistoryDOM.appendChild(document.createElement('div'));
-            scrollToBottom(true);
-            return;
-        }
         const greetingContainer = document.createElement('div');
         greetingContainer.className = 'message msg-senka';
         greetingContainer.style.maxWidth = '100%';
@@ -1627,8 +1621,15 @@ function renderChat() {
         panggilan = localStorage.getItem('senka_panggilan') || 'pengguna';
         greetingText.textContent = `${selamat} ${panggilan}! Senka di sini`;
         greetingContainer.appendChild(greetingText);
+        
+        if (!supabaseEnabled) {
+            saveSessions();
+        } else {
+            remoteSave('senka', 'text', greetingText.textContent, null);
+        }
+        
         chatHistoryDOM.appendChild(greetingContainer);
-        console.log('DEBUG: greeting div created and appended. innerHTML =', greetingContainer.innerHTML.substring(0, 200));
+        console.log('DEBUG: greeting div created and appended for', supabaseEnabled ? 'Supabase' : 'local', 'session. innerHTML =', greetingContainer.innerHTML.substring(0, 200));
     } else {
         const STEP = 80;
         if (supabaseEnabled && remoteHasMore) {
