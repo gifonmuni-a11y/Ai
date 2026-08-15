@@ -1595,39 +1595,13 @@ function buildMsgEl(m) {
 function renderChat() {
     chatHistoryDOM.innerHTML = '';
     if (!memoryList.length) {
-        if (supabaseEnabled) {
-            const greeting = getGreeting();
-            const gTs = Date.now();
-            const item = { role: 'assistant', content: [{ type: 'text', text: greeting }], ts: gTs, time: formatMsgTime(gTs) };
-            memoryList.push(item);
-            remoteSave('senka', 'text', greeting, item);
-        }
-        const lastVisit = parseInt(localStorage.getItem('senka_last_visit') || '0', 10);
-        localStorage.setItem('senka_last_visit', String(Date.now()));
-        const away = lastVisit > 0 && (Date.now() - lastVisit) > 5 * 60 * 60 * 1000;
-        let greeting;
-        if (away) greeting = `Selamat kembali ${panggilan}!`;
-        else greeting = getGreeting();
-        memoryList.push({ role: 'assistant', content: [{ type: 'text', text: greeting }], ts: Date.now() });
-        const gItem = memoryList[memoryList.length - 1];
+        const greeting = getGreeting();
+        const gTs = Date.now();
+        const item = { role: 'assistant', content: [{ type: 'text', text: greeting }], ts: gTs, time: formatMsgTime(gTs) };
+        memoryList.push(item);
         if (!supabaseEnabled) saveSessions();
-        else remoteSave('senka', 'text', greeting, gItem);
-        const gEl = appendMessage('senka', greeting, false, gItem.ts, gItem.time);
-        msgBodyOf(gEl).innerHTML = formatReply(greeting);
-        gEl.dataset.greeting = '1';
-        if (away) {
-            setTimeout(() => {
-                const el = chatHistoryDOM.querySelector('.msg-content[data-greeting="1"]');
-                if (!el) return;
-                const newG = getGreeting();
-                msgBodyOf(el).innerHTML = formatReply(newG);
-                const idx = memoryList.findIndex(x => x.role === 'assistant' && x.content && x.content[0] && x.content[0].text === greeting);
-                if (idx !== -1) {
-                    memoryList[idx].content[0].text = newG;
-                    if (!supabaseEnabled) saveSessions();
-                }
-            }, 60000);
-        }
+        else remoteSave('senka', 'text', greeting, item);
+        memoryList.filter(m => !m.hidden).forEach(m => chatHistoryDOM.appendChild(buildMsgEl(m)));
         if (!modelKey) {
             appendMessage('senka', 'Sebelum ngobrol, pilih dulu model AI-nya lewat tombol pengaturan di atas.');
         }
