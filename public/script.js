@@ -2491,12 +2491,22 @@ function formatReply(raw) {
     return s.split('\n').map(formatLine).join('\n').replace(/\{\{pos\}\}|\{\{neg\}\}|\{\{\/pos\}\}|\{\{\/neg\}\}/g, '');
 }
 
-const MD_DETECT_RE = /```|`[^`\n]+`|^#{1,6}\s|\*\*[^*\n]+\*\*|^\s*[-+*]\s+|^\s*\d+\.\s+|^\s*\|.*\|/m;
+const MD_DETECT_RE = /```|`[^`\n]+`|^#{1,6}\s|\*\*[^*\n]+\*\*|^\s*[-+*]\s+|^\s*\d+\.\s+|^\s*\|.*\||<span style="color:/m;
+
+function protectColorSpans(s, arr) {
+    return String(s).replace(/<span style="color:\s*(#[0-9A-Fa-f]{6});[^"]*">([\s\S]*?)<\/span>/gi, (m, c, inner) => {
+        const idx = arr.length;
+        arr.push('<span style="color:' + c.toLowerCase() + ';font-weight:bold;">' + escapeHtml(inner) + '</span>');
+        return '\uE000CLR' + idx + '\uE001';
+    });
+}
 
 function mdToHtml(raw) {
     if (!raw) return '';
     let s = String(raw).replace(/([0-9])[\uFE0F\u20D0-\u20FF]+\s*/g, '$1. ');
     if (!window.marked || !MD_DETECT_RE.test(s)) return formatReply(s);
+    const colorSpans = [];
+    s = protectColorSpans(s, colorSpans);
     const sumberLines = [];
     s = s.replace(/^(Sumber|Source)\s*:\s*(.*)$/gmi, (m, p, rest) => {
         const idx = sumberLines.length;
@@ -2506,6 +2516,7 @@ function mdToHtml(raw) {
     marked.setOptions({ breaks: true, gfm: true });
     let out = marked.parse(escapeHtml(s));
     out = out.replace(/(<br>\s*)?\uE000SRC(\d+)\uE001(\s*<br>)?/g, (m, b1, i) => formatSumberLine(sumberLines[+i]));
+    out = out.replace(/\uE000CLR(\d+)\uE001/g, (m, i) => colorSpans[+i]);
     out = out.replace(/<p>\s*<\/p>/g, '');
     return out;
 }
@@ -3573,7 +3584,7 @@ async function handleSenkaCommand(text) {
         const query = text.slice('/senkaplay'.length).trim();
         const videoId = extractYouTubeId(query);
         if (!query || !videoId) {
-            appendMessage('senka', 'Kirim link YouTube ya! Contoh: /senkaplay https://youtu.be/fE9trKOuT3Q');
+            appendMessage('senka', 'Kirim link YouTube ya! Contoh: ' + colorCmd('/senkaplay') + ' https://youtu.be/fE9trKOuT3Q');
             scrollToBottom(true);
             return true;
         }
@@ -3588,7 +3599,7 @@ async function handleSenkaCommand(text) {
         const query = text.slice('/senkaadd'.length).trim();
         const videoId = extractYouTubeId(query);
         if (!query || !videoId) {
-            appendMessage('senka', 'Kirim link YouTube untuk ditambahkan ya! Contoh: /senkaadd https://youtu.be/fE9trKOuT3Q');
+            appendMessage('senka', 'Kirim link YouTube untuk ditambahkan ya! Contoh: ' + colorCmd('/senkaadd') + ' https://youtu.be/fE9trKOuT3Q');
             scrollToBottom(true);
             return true;
         }
@@ -3603,15 +3614,15 @@ async function handleSenkaCommand(text) {
 
     if (low === '/senkalist') {
         if (!musicQueue.length) {
-            appendMessage('senka', '📭 Antrean musik masih kosong. Coba **/senkaplay [link YouTube]** dulu ya.');
+            appendMessage('senka', '📭 Antrean musik masih kosong. Coba ' + colorCmd('/senkaplay') + ' [link YouTube] dulu ya.');
             scrollToBottom(true);
             return true;
         }
         const lines = musicQueue.map((t, i) => {
-            const mark = i === currentTrackIndex ? ' *(Sedang diputar)*' : '';
-            return 'Lagu ' + (i + 1) + ': ' + t.url + mark;
+            const mark = i === currentTrackIndex ? ' (Sedang diputar)' : '';
+            return colorLag(i + 1) + ': ' + t.url + mark;
         }).join('\n');
-        appendMessage('senka', '🎵 **Playlist Antrean:**\n' + lines);
+        appendMessage('senka', '🎵 Playlist Antrean:\n' + lines);
         scrollToBottom(true);
         return true;
     }
@@ -3621,6 +3632,64 @@ async function handleSenkaCommand(text) {
         appendMessage('senka', turnedOn ? '🎵 Playlist berhasil diacak!' : '🔀 Shuffle dimatikan, urutan awal dikembalikan.');
         scrollToBottom(true);
         if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User mengacak antrean musik. Berikan respon asik. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu]'), null));
+        return true;
+    }
+
+    if (low.startsWith('/senkasave')) {
+        const name = text.slice('/senkasave'.length).trim() || 'Playlist ' + new Date().toLocaleDateString('id-ID');
+        if (!musicQueue.length) {
+            appendMessage('senka', '📭 Antrean masih kosong. Isi dulu dengan ' + colorCmd('/senkaplay') + ' atau ' + colorCmd('/senkaadd') + ', baru bisa disimpan.');
+            scrollToBottom(true);
+            return true;
+        }
+        const lists = loadPlaylists();
+        lists[name] = musicQueue.slice();
+        savePlaylists(lists);
+        appendMessage('senka', '💾 Playlist "' + name + '" disimpan (' + musicQueue.length + ' lagu).');
+        scrollToBottom(true);
+        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User menyimpan playlist musik. Berikan respon asik. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu]'), null));
+        return true;
+    }
+
+    if (low.startsWith('/senkaplaylist')) {
+        const name = text.slice('/senkaplaylist'.length).trim();
+        const lists = loadPlaylists();
+        if (!name) {
+            const names = Object.keys(lists);
+            if (!names.length) {
+                appendMessage('senka', '📚 Belum ada playlist tersimpan. Simpan antrean dulu dengan ' + colorCmd('/senkasave') + ' [nama] ya.');
+                scrollToBottom(true);
+                return true;
+            }
+            appendMessage('senka', '📚 Playlist Tersimpan:\n' + names.map(n => '▪ ' + n + ' (' + lists[n].length + ' lagu)').join('\n') + '\n\nPutar dengan ' + colorCmd('/senkaplaylist') + ' [nama]');
+            scrollToBottom(true);
+            return true;
+        }
+        if (!lists[name]) {
+            appendMessage('senka', 'Playlist "' + name + '" tidak ditemukan. Ketik ' + colorCmd('/senkaplaylist') + ' untuk lihat daftarnya.');
+            scrollToBottom(true);
+            return true;
+        }
+        resetShuffleState();
+        musicQueue = lists[name].slice();
+        currentTrackIndex = 0;
+        playTrack(0);
+        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User memutar playlist tersimpan. Berikan respon asik. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu]'), null));
+        return true;
+    }
+
+    if (low.startsWith('/senkadel')) {
+        const name = text.slice('/senkadel'.length).trim();
+        const lists = loadPlaylists();
+        if (!name || !lists[name]) {
+            appendMessage('senka', 'Playlist tidak ditemukan. Contoh: ' + colorCmd('/senkadel') + ' [nama]');
+            scrollToBottom(true);
+            return true;
+        }
+        delete lists[name];
+        savePlaylists(lists);
+        appendMessage('senka', '🗑️ Playlist "' + name + '" dihapus.');
+        scrollToBottom(true);
         return true;
     }
 
@@ -3705,12 +3774,45 @@ function showFloatingPlayer(videoId) {
     if (!player) return;
     player.style.display = 'flex';
     document.getElementById('floating-thumb').src = 'https://img.youtube.com/vi/' + videoId + '/hqdefault.jpg';
-    document.getElementById('floating-title').innerText = 'Memuat musik...';
+    setFloatingTitle('Memuat musik...');
     document.getElementById('play-pause-btn').innerHTML = '<i class="fas fa-pause"></i>';
+    const fallback = () => setFloatingTitle('Lagu ' + (currentTrackIndex + 1) + ' dari ' + musicQueue.length);
+    const applyTitle = d => {
+        if (d && d.title) setFloatingTitle(d.title);
+        else fallback();
+    };
     fetch('https://www.youtube.com/oembed?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3D' + videoId + '&format=json')
-        .then(r => r.json())
-        .then(d => { if (d && d.title) document.getElementById('floating-title').innerText = d.title; })
-        .catch(() => { });
+        .then(r => { if (!r.ok) throw 0; return r.json(); })
+        .then(applyTitle)
+        .catch(() => fetch('https://noembed.com/embed?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3D' + videoId)
+            .then(r => { if (!r.ok) throw 0; return r.json(); })
+            .then(applyTitle)
+            .catch(fallback));
+}
+
+function setFloatingTitle(text) {
+    const title = document.getElementById('floating-title');
+    if (!title) return;
+    title.innerText = text;
+    const over = title.scrollWidth - title.clientWidth;
+    title.style.setProperty('--shift', '-' + Math.max(over, 0) + 'px');
+    title.classList.toggle('marquee-anim', over > 0);
+}
+
+const PLAYLIST_KEY = 'senka_playlists';
+
+function loadPlaylists() {
+    try { return JSON.parse(localStorage.getItem(PLAYLIST_KEY)) || {}; } catch (e) { return {}; }
+}
+
+function savePlaylists(lists) {
+    try { localStorage.setItem(PLAYLIST_KEY, JSON.stringify(lists)); } catch (e) { }
+}
+
+function resetShuffleState() {
+    shuffleActive = false;
+    queueBackup = [];
+    document.getElementById('shuffle-btn').classList.remove('active');
 }
 
 function onPlayerStateChange(e) {
@@ -3875,8 +3977,25 @@ function clearChat() {
     if (!supabaseEnabled) saveSessions();
 }
 
+function colorCmd(cmd) {
+    return '<span style="color: #778899; font-weight: bold;">' + cmd + '</span>';
+}
+
+function colorLag(n) {
+    return '<span style="color: #B0C4DE; font-weight: bold;">Lagu ' + n + '</span>';
+}
+
 function showCommandListInChat() {
-    appendMessage('senka', '🤖 Command List:\n/senkaplay [link YouTube] — putar musik (full durasi)\n/senkaadd [link YouTube] — tambah ke antrean\n/senkalist — lihat daftar antrean\n/senkashuffle — acak urutan playlist\n/senkagame — mini-game tebak angka\n/senkahelp — daftar command');
+    appendMessage('senka', '🤖 Command List:\n' +
+        colorCmd('/senkaplay') + ' [link YouTube] — putar musik (full durasi)\n' +
+        colorCmd('/senkaadd') + ' [link YouTube] — tambah ke antrean\n' +
+        colorCmd('/senkalist') + ' — lihat daftar antrean\n' +
+        colorCmd('/senkashuffle') + ' — acak urutan playlist\n' +
+        colorCmd('/senkasave') + ' [nama] — simpan antrean jadi playlist\n' +
+        colorCmd('/senkaplaylist') + ' [nama] — putar playlist tersimpan\n' +
+        colorCmd('/senkadel') + ' [nama] — hapus playlist tersimpan\n' +
+        colorCmd('/senkagame') + ' — mini-game tebak angka\n' +
+        colorCmd('/senkahelp') + ' — daftar command');
     scrollToBottom(true);
 }
 
@@ -4355,6 +4474,13 @@ function downloadImage(url, filename) {
     }
 }
 
+function renderRich(text) {
+    if (!text) return '';
+    const spans = [];
+    const s = protectColorSpans(text, spans);
+    return escapeHtml(s).replace(/\uE000CLR(\d+)\uE001/g, (m, i) => spans[+i]);
+}
+
 function appendMessage(role, text, isTypewriter = false, ts, timeStr) {
     const content = makeMsgContent(role, ts, timeStr);
     if (text) {
@@ -4362,7 +4488,7 @@ function appendMessage(role, text, isTypewriter = false, ts, timeStr) {
         bubble.classList.add('message', role === 'user' ? 'msg-user' : 'msg-senka');
         const body = document.createElement('div');
         body.className = 'msg-body';
-        body.innerText = text;
+        body.innerHTML = renderRich(text);
         bubble.appendChild(body);
         content.appendChild(bubble);
     }
