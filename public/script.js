@@ -3569,15 +3569,35 @@ async function handleSenkaCommand(text) {
         return true;
     }
 
-    if (low.startsWith('/senkaplay ')) {
+    if (low.startsWith('/senkaplay ') || low === '/senkaplay') {
         const query = text.slice('/senkaplay'.length).trim();
-        if (!query) {
-            appendMessage('senka', 'Contoh: /senkaplay lagu anime rilakkuma. 🎵');
+        const videoId = extractYouTubeId(query);
+        if (!query || !videoId) {
+            appendMessage('senka', 'Kirim link YouTube ya! Contoh: /senkaplay https://youtu.be/fE9trKOuT3Q');
             scrollToBottom(true);
             return true;
         }
-        await renderMusicPlayer(query);
-        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote(`[System Note: User saat ini sedang memutar lagu/musik berjudul "${query}" melalui sistem command. Berikan komentar singkat, manis, atau nyambung tentang lagu tersebut seolah-olah kamu ikut mendengarkannya bersama user.]`), null));
+        musicQueue = [videoId];
+        currentTrackIndex = 0;
+        playTrack(0);
+        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User memutar lagu. Berikan respon asik. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu]'), null));
+        return true;
+    }
+
+    if (low.startsWith('/senkaadd ')) {
+        const query = text.slice('/senkaadd'.length).trim();
+        const videoId = extractYouTubeId(query);
+        if (!query || !videoId) {
+            appendMessage('senka', 'Kirim link YouTube untuk ditambahkan ya! Contoh: /senkaadd https://youtu.be/fE9trKOuT3Q');
+            scrollToBottom(true);
+            return true;
+        }
+        const wasEmpty = musicQueue.length === 0;
+        musicQueue.push(videoId);
+        appendMessage('senka', 'Ditambahkan ke antrean musik 🎵');
+        scrollToBottom(true);
+        if (wasEmpty) playTrack(0);
+        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User menambahkan lagu ke antrean musik. Berikan respon asik. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu]'), null));
         return true;
     }
 
@@ -3600,52 +3620,106 @@ function extractYouTubeId(url) {
     return m ? m[1] : null;
 }
 
-async function renderMusicPlayer(query) {
-    const content = appendMessage('senka', 'Senka Bot 🎵');
-    const media = msgMediaOf(content);
-    const isLink = /youtube\.com|youtu\.be/i.test(String(query));
-    const info = document.createElement('div');
-    info.className = 'music-info';
-    info.innerHTML = '<i class="fa-solid fa-music"></i> Memutar: <b>' + escapeHtml(isLink ? 'lagu YouTube (full durasi)' : query) + '</b>';
-    media.appendChild(info);
-    const videoId = extractYouTubeId(query);
-    if (videoId) {
-        const frame = document.createElement('iframe');
-        frame.className = 'music-youtube';
-        frame.src = 'https://www.youtube.com/embed/' + videoId + '?autoplay=1';
-        frame.setAttribute('frameborder', '0');
-        frame.setAttribute('allow', 'autoplay; encrypted-media');
-        media.appendChild(frame);
-        scrollToBottom(true);
-        return;
+/* ===== Floating Music Player (YouTube Iframe API + Queue) ===== */
+let musicQueue = [];
+let currentTrackIndex = 0;
+let isLooping = false;
+let ytPlayer = null;
+let ytApiReady = false;
+let ytApiInjected = false;
+let pendingVideoId = null;
+
+window.onYouTubeIframeAPIReady = function () {
+    ytApiReady = true;
+    if (pendingVideoId && !ytPlayer) {
+        const id = pendingVideoId;
+        pendingVideoId = null;
+        createYtPlayer(id);
     }
-    const holder = document.createElement('div');
-    holder.className = 'music-loading';
-    holder.innerHTML = 'Mencari lagu...<span class="tind"><i></i><i></i><i></i></span>';
-    media.appendChild(holder);
-    scrollToBottom(true);
-    try {
-        const r = await fetch('https://itunes.apple.com/search?term=' + encodeURIComponent(query) + '&entity=song&limit=1');
-        if (!r.ok) throw new Error('itunes ' + r.status);
-        const data = await r.json();
-        const track = data.results && data.results[0];
-        if (!track) {
-            holder.innerHTML = 'Lagu "<b>' + escapeHtml(query) + '</b>" tidak ditemukan. Coba judul lain ya.';
-            scrollToBottom(true);
-            return;
+};
+
+function ensureYtApi() {
+    if (window.YT && window.YT.Player) return;
+    if (ytApiInjected) return;
+    ytApiInjected = true;
+    const s = document.createElement('script');
+    s.src = 'https://www.youtube.com/iframe_api';
+    document.head.appendChild(s);
+}
+
+function createYtPlayer(videoId) {
+    ytPlayer = new YT.Player('yt-player-engine', {
+        videoId,
+        playerVars: { autoplay: 1, controls: 0, disablekb: 1, fs: 0, rel: 0, playsinline: 1 },
+        events: {
+            onReady: e => { try { e.target.playVideo(); } catch (err) { } },
+            onStateChange: onPlayerStateChange,
+            onError: () => {
+                showToast('Video tidak bisa diputar. Coba link lain.');
+                if (musicQueue.length > 1) playNext();
+            }
         }
-        holder.remove();
-        const card = document.createElement('div');
-        card.className = 'music-player-glass';
-        card.innerHTML = '<img src="' + escapeHtml(track.artworkUrl100 || '') + '" alt=""><div class="mp-info"><div class="mp-track"></div><div class="mp-artist"></div></div><audio controls preload="none" src="' + escapeHtml(track.previewUrl || '') + '"></audio>';
-        card.querySelector('.mp-track').innerText = track.trackName || 'Tanpa judul';
-        card.querySelector('.mp-artist').innerText = track.artistName || '';
-        media.appendChild(card);
-        scrollToBottom(true);
-    } catch (e) {
-        holder.innerHTML = 'Gagal mencari lagu. Cek koneksi lalu coba lagi ya.';
-        scrollToBottom(true);
+    });
+}
+
+function playTrack(index) {
+    if (!musicQueue.length) return;
+    currentTrackIndex = ((index % musicQueue.length) + musicQueue.length) % musicQueue.length;
+    const videoId = musicQueue[currentTrackIndex];
+    if (ytPlayer) {
+        ytPlayer.loadVideoById(videoId);
+    } else if (window.YT && ytApiReady) {
+        createYtPlayer(videoId);
+    } else {
+        pendingVideoId = videoId;
+        ensureYtApi();
     }
+    showFloatingPlayer(videoId);
+}
+
+function showFloatingPlayer(videoId) {
+    const player = document.getElementById('floating-music-player');
+    if (!player) return;
+    player.style.display = 'flex';
+    document.getElementById('floating-thumb').src = 'https://img.youtube.com/vi/' + videoId + '/hqdefault.jpg';
+    document.getElementById('floating-title').innerText = 'Memuat musik...';
+    document.getElementById('play-pause-btn').innerHTML = '<i class="fas fa-pause"></i>';
+    fetch('https://www.youtube.com/oembed?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3D' + videoId + '&format=json')
+        .then(r => r.json())
+        .then(d => { if (d && d.title) document.getElementById('floating-title').innerText = d.title; })
+        .catch(() => { });
+}
+
+function onPlayerStateChange(e) {
+    const playBtn = document.getElementById('play-pause-btn');
+    if (e.data === YT.PlayerState.PLAYING) {
+        if (playBtn) playBtn.innerHTML = '<i class="fas fa-pause"></i>';
+    } else if (e.data === YT.PlayerState.PAUSED) {
+        if (playBtn) playBtn.innerHTML = '<i class="fas fa-play"></i>';
+    } else if (e.data === YT.PlayerState.ENDED) {
+        if (isLooping) ytPlayer.playVideo();
+        else playNext();
+    }
+}
+
+function togglePlay() {
+    if (!ytPlayer || !musicQueue.length) return;
+    const st = ytPlayer.getPlayerState();
+    if (st === YT.PlayerState.PLAYING) ytPlayer.pauseVideo();
+    else ytPlayer.playVideo();
+}
+
+function playNext() {
+    if (musicQueue.length) playTrack(currentTrackIndex + 1);
+}
+
+function playPrev() {
+    if (musicQueue.length) playTrack(currentTrackIndex - 1);
+}
+
+function toggleLoop() {
+    isLooping = !isLooping;
+    document.getElementById('loop-btn').classList.toggle('active', isLooping);
 }
 
 function startTebakGame() {
@@ -3683,7 +3757,7 @@ function clearChat() {
 }
 
 function showCommandListInChat() {
-    appendMessage('senka', '🤖 Command List:\n/senkaplay [judul lagu] — putar musik\n/senkagame — mini-game tebak angka\n/senkahelp — daftar command');
+    appendMessage('senka', '🤖 Command List:\n/senkaplay [link YouTube] — putar musik (full durasi)\n/senkaadd [link YouTube] — tambah ke antrean\n/senkagame — mini-game tebak angka\n/senkahelp — daftar command');
     scrollToBottom(true);
 }
 
