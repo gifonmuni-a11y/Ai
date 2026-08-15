@@ -1516,10 +1516,12 @@ function buildMsgEl(m) {
             if (cleanText) {
                 if (m.role === 'assistant') {
                     const opsi = extractOpsi(cleanText);
-                    p.innerHTML = mdToHtml(opsi.clean);
+                    if (speakMode === 'jpn') localizeBubble(p, opsi.clean);
+                    else p.innerHTML = mdToHtml(opsi.clean);
                     if (m.role === 'assistant') bubbleText += ' ' + cleanText;
                     bodyOf().appendChild(p);
                     appendOpsiButtons(bodyOf(), opsi.options);
+                    if (speakMode === 'jpn') localizeOptions(bodyOf(), opsi.options);
                 } else {
                     p.innerHTML = formatReply(cleanText);
                     bodyOf().appendChild(p);
@@ -1577,7 +1579,7 @@ function buildMsgEl(m) {
     if (media) content.appendChild(media);
     addMsgActions(content, role);
     if (m.role === 'assistant') {
-        if (bubbleText.trim()) attachCallTranslation(bubble || content, bubbleText.trim());
+        if (bubbleText.trim() && speakMode !== 'jpn') attachCallTranslation(bubble || content, bubbleText.trim());
         attachAiActions(content, m, lastAssistantIdx() === memoryList.indexOf(m));
     }
     return assembleMsgRow(role, content);
@@ -2454,6 +2456,19 @@ async function toId(text) {
         }
     } catch (e) { }
     return text;
+}
+
+async function localizeBubble(el, text) {
+    if (!el || !text || !hasJapaneseText(text)) return;
+    const t = await toId(text);
+    if (t && t !== text) el.innerHTML = mdToHtml(t);
+}
+
+async function localizeOptions(host, options) {
+    if (!host || !options || !options.length) return;
+    const ids = await Promise.all(options.map(o => toId(o)));
+    const btns = host.querySelectorAll('.context-btn');
+    btns.forEach((b, i) => { if (ids[i]) b.textContent = ids[i]; });
 }
 
 async function localizeUserMessages(messages) {
