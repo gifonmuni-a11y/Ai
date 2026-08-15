@@ -322,10 +322,12 @@ function encryptText(s) {
 
 function decryptText(s) {
     if (typeof CryptoJS === 'undefined' || !s) return s;
+    const str = String(s);
+    if (!str.startsWith('U2FsdGVkX1')) return str;
     try {
-        const t = CryptoJS.AES.decrypt(String(s), encKey()).toString(CryptoJS.enc.Utf8);
-        return t || null;
-    } catch (e) { return null; }
+        const t = CryptoJS.AES.decrypt(str, encKey()).toString(CryptoJS.enc.Utf8);
+        return t || str;
+    } catch (e) { return str; }
 }
 
 function remoteToLocal(m) {
