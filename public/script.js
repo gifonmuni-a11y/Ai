@@ -67,6 +67,11 @@ window.onload = async () => {
     document.getElementById('panggilan-input').value = panggilan;
     document.getElementById('autospeak-input').checked = autospeak;
 
+    // DEBUG: Check greeting generation
+    console.log('=== GREETING DEBUG ===');
+    console.log('panggilan:', panggilan);
+    console.log('window.supabase:', !!window.supabase);
+
     try {
         const resp = await fetch('/api/config');
         const cfg = await resp.json();
@@ -84,11 +89,13 @@ window.onload = async () => {
     try {
         const sr = await fetch('/api/supabase-status');
         const sd = await sr.json().catch(() => ({}));
+        console.log('supabase-status:', sd);
         if (sd.enabled && window.supabase && sd.url && sd.anonKey) {
             sbAuth = window.supabase.createClient(sd.url, sd.anonKey, {
                 auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
             });
             const { data: sessData } = await sbAuth.auth.getSession();
+            console.log('sessData.session:', !!sessData.session);
             if (sessData.session) {
                 await startCloud(sessData.session.user);
             }
@@ -99,9 +106,11 @@ window.onload = async () => {
         userProfile.memberSince = new Date().toISOString();
         saveProfileState();
     }
+    console.log('About to call loadSessions, renderSessionName, renderChat');
     loadSessions();
     renderSessionName();
     renderChat();
+    console.log('=== GREETING DEBUG END ===');
 };
 
 async function authHeaders() {
