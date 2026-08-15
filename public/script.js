@@ -183,6 +183,7 @@ async function handleAuthFail() {
 }
 
 async function newSessionCloud() {
+    if (isStreaming) { showToast('Tunggu Senka selesai bicara dulu ya, biar jawabannya nggak hilang.'); return; }
     const id = 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const nama = 'Sesi ' + (cloudSessions.length + 1);
     cloudSessions.push({ id, nama });
@@ -201,6 +202,7 @@ async function newSessionCloud() {
 }
 
 async function switchSessionCloud(id) {
+    if (isStreaming) { showToast('Tunggu Senka selesai bicara dulu ya, biar jawabannya nggak hilang.'); return; }
     const target = cloudSessions.find(s => s.id === id);
     if (!target) return;
     cloudSid = id;
@@ -524,6 +526,7 @@ function renderSessionName() {
 
 function newSession() {
     if (supabaseEnabled) { newSessionCloud(); return; }
+    if (isStreaming) { showToast('Tunggu Senka selesai bicara dulu ya, biar jawabannya nggak hilang.'); return; }
     const n = sessions.length + 1;
     const id = 's' + Date.now();
     sessions.push({ id, name: 'Sesi ' + n, messages: [] });
@@ -565,6 +568,7 @@ function confirmDeleteSession() {
 
 function switchSession(id) {
     if (supabaseEnabled) { switchSessionCloud(id); return; }
+    if (isStreaming) { showToast('Tunggu Senka selesai bicara dulu ya, biar jawabannya nggak hilang.'); return; }
     const active = sessions.find(s => s.id === activeId);
     if (active) active.messages = memoryList;
     activeId = id;
@@ -1589,9 +1593,11 @@ function renderChat() {
     chatHistoryDOM.innerHTML = '';
     if (!memoryList.length) {
         if (supabaseEnabled) {
-            chatHistoryDOM.appendChild(document.createElement('div'));
-            scrollToBottom(true);
-            return;
+            const greeting = getGreeting();
+            const gTs = Date.now();
+            const item = { role: 'assistant', content: [{ type: 'text', text: greeting }], ts: gTs, time: formatMsgTime(gTs) };
+            memoryList.push(item);
+            remoteSave('senka', 'text', greeting, item);
         }
         const lastVisit = parseInt(localStorage.getItem('senka_last_visit') || '0', 10);
         localStorage.setItem('senka_last_visit', String(Date.now()));
@@ -1625,7 +1631,9 @@ function renderChat() {
     } else {
         const STEP = 80;
         if (supabaseEnabled && remoteHasMore) {
-            chatHistoryDOM.insertBefore(makeRemoteBtn(), chatHistoryDOM.firstChild);
+            chatHistoryDOM.appendChild(makeRemoteBtn());
+            memoryList.filter(m => !m.hidden).forEach(m => chatHistoryDOM.appendChild(buildMsgEl(m)));
+        } else if (supabaseEnabled && memoryList.length > 0) {
             memoryList.filter(m => !m.hidden).forEach(m => chatHistoryDOM.appendChild(buildMsgEl(m)));
         } else if (memoryList.length > STEP) {
             const hidden = memoryList.length - STEP;
