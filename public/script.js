@@ -3861,6 +3861,13 @@ function showFloatingPlayer(videoId) {
             .catch(fallback));
 }
 
+function remeasureMarquee() {
+    const title = document.getElementById('floating-title');
+    if (!title || !title.firstElementChild) return;
+    const w = title.firstElementChild.scrollWidth;
+    if (w > 10) title.style.setProperty('--dur', Math.max(6, Math.round(w / 40)) + 's');
+}
+
 function setFloatingTitle(text) {
     const title = document.getElementById('floating-title');
     if (!title) return;
@@ -3868,7 +3875,7 @@ function setFloatingTitle(text) {
     const span = document.createElement('span');
     span.textContent = (text || ' ') + '   •   ' + (text || ' ');
     title.appendChild(span);
-    title.style.setProperty('--dur', Math.max(7, Math.round(span.scrollWidth / 35)) + 's');
+    requestAnimationFrame(() => requestAnimationFrame(remeasureMarquee));
 }
 
 function ensureTitleFromPlayer() {
@@ -4021,6 +4028,7 @@ function maximizePlayer() {
     }
     min.style.display = 'none';
     document.getElementById('floating-music-player').style.display = 'flex';
+    requestAnimationFrame(() => requestAnimationFrame(remeasureMarquee));
 }
 
 function makeDraggable(el) {
