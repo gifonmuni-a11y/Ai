@@ -1587,9 +1587,11 @@ function buildMsgEl(m) {
 
 function renderChat() {
     console.log('RENDERCHAT INVOKE: v' + Date.now() + '-' + Math.random().toString(36).slice(2, 8));
+    console.log('RENDERCHAT: supabaseEnabled =', supabaseEnabled, 'memoryList.length =', memoryList.length);
     chatHistoryDOM.innerHTML = '';
     if (!memoryList.length) {
         console.log('DEBUG renderChat: entering !memoryList.length branch');
+        console.log('DEBUG renderChat: supabaseEnabled =', supabaseEnabled);
         const greetingContainer = document.createElement('div');
         greetingContainer.className = 'message msg-senka';
         greetingContainer.style.maxWidth = '100%';
@@ -1619,17 +1621,19 @@ function renderChat() {
         else if (t > 22 && t <= 22.99) selamat = 'Selamat beristirahat';
         else selamat = 'Belom tidur';
         panggilan = localStorage.getItem('senka_panggilan') || 'pengguna';
-        greetingText.textContent = `${selamat} ${panggilan}! Senka di sini`;
+        const fullText = `${selamat} ${panggilan}! Senka di sini`;
+        greetingText.textContent = fullText;
         greetingContainer.appendChild(greetingText);
         
         if (!supabaseEnabled) {
             saveSessions();
         } else {
-            remoteSave('senka', 'text', greetingText.textContent, null);
+            remoteSave('senka', 'text', fullText, null);
         }
         
         chatHistoryDOM.appendChild(greetingContainer);
-        console.log('DEBUG: greeting div created and appended for', supabaseEnabled ? 'Supabase' : 'local', 'session. innerHTML =', greetingContainer.innerHTML.substring(0, 200));
+        console.log('DEBUG: greeting div created. fullText =', fullText, 'innerHTML snippet =', greetingContainer.innerHTML.substring(0, 150));
+        console.log('DEBUG: supabaseEnabled =', supabaseEnabled, '→ saving', supabaseEnabled ? 'via remoteSave' : 'via saveSessions');
     } else {
         const STEP = 80;
         if (supabaseEnabled && remoteHasMore) {
