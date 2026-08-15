@@ -91,10 +91,7 @@ window.onload = async () => {
             const { data: sessData } = await sbAuth.auth.getSession();
             if (sessData.session) {
                 await startCloud(sessData.session.user);
-                return;
             }
-            document.getElementById('login-modal').style.display = 'flex';
-            return;
         }
     } catch (e) { }
 
