@@ -439,6 +439,7 @@ async function loadRemoteChat() {
         remoteHasMore = !!d.hasMore;
         if (!memoryList.length) {
             const greeting = getGreeting();
+            console.log('[GREETING DEBUG] Generated greeting for new session:', greeting);
             const gTs = Date.now();
             const item = { role: 'assistant', content: [{ type: 'text', text: greeting }], ts: gTs, time: formatMsgTime(gTs) };
             memoryList.push(item);
@@ -1606,6 +1607,7 @@ function renderChat() {
     chatHistoryDOM.innerHTML = '';
     if (!memoryList.length) {
         const greeting = getGreeting();
+        console.log('[GREETING DEBUG] Generated greeting (renderChat):', greeting);
         const gTs = Date.now();
         const item = { role: 'assistant', content: [{ type: 'text', text: greeting }], ts: gTs, time: formatMsgTime(gTs) };
         memoryList.push(item);
