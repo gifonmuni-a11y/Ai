@@ -332,18 +332,19 @@ function decryptText(s) {
 
 function remoteToLocal(m) {
     const content = [];
+    const rawContent = m.isi_pesan;
     if (m.tipe_pesan === 'image') {
-        const u = decryptText(m.isi_pesan);
+        const u = decryptText(rawContent);
         content.push({ type: 'image_url', image_url: { url: u || '' } });
     } else if (m.tipe_pesan === 'video') {
-        const u = decryptText(m.isi_pesan);
+        const u = decryptText(rawContent);
         content.push({ type: 'video_url', url: u || '' });
     } else if (m.tipe_pesan === 'voice') {
-        const u = decryptText(m.isi_pesan);
+        const u = decryptText(rawContent);
         content.push({ type: 'audio_url', url: u || '' });
     } else {
-        const t = decryptText(m.isi_pesan);
-        content.push({ type: 'text', text: (t === null || t === '') ? '[pesan terenkripsi]' : t });
+        const t = decryptText(rawContent);
+        content.push({ type: 'text', text: (t === null || t === undefined || t === '') ? String(rawContent || '') : t });
     }
     const ts = m.waktu_kirim ? new Date(m.waktu_kirim).getTime() : undefined;
     return { role: m.pengirim === 'user' ? 'user' : 'assistant', cid: m.id, content, ts, time: ts ? formatMsgTime(ts) : undefined };
