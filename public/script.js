@@ -3744,7 +3744,7 @@ function createYtPlayer(videoId) {
         videoId,
         playerVars: { autoplay: 1, controls: 0, disablekb: 1, fs: 0, rel: 0, playsinline: 1 },
         events: {
-            onReady: e => { try { e.target.playVideo(); } catch (err) { } },
+            onReady: e => { try { e.target.playVideo(); } catch (err) { } updateTitleFromPlayer(); },
             onStateChange: onPlayerStateChange,
             onError: () => {
                 showToast('Video tidak bisa diputar. Coba link lain.');
@@ -3752,6 +3752,18 @@ function createYtPlayer(videoId) {
             }
         }
     });
+}
+
+function updateTitleFromPlayer() {
+    if (!ytPlayer) return;
+    try {
+        const vd = ytPlayer.getVideoData();
+        if (vd && vd.title && vd.title !== 'Video unavailable') {
+            const label = vd.title + (vd.author ? ' — ' + vd.author : '');
+            setFloatingTitle(label);
+            try { localStorage.setItem('senka_yt_title_' + vd.video_id, label); } catch (e) { }
+        }
+    } catch (e) { }
 }
 
 function playTrack(index) {
@@ -3801,10 +3813,17 @@ function setFloatingTitle(text) {
     const title = document.getElementById('floating-title');
     if (!title) return;
     title.innerText = text;
-    const over = title.scrollWidth - title.clientWidth;
-    title.style.setProperty('--shift', '-' + Math.max(over, 0) + 'px');
-    title.classList.toggle('marquee-anim', over > 0);
+    requestAnimationFrame(() => {
+        const over = title.scrollWidth - title.clientWidth;
+        title.style.setProperty('--shift', '-' + Math.max(over, 0) + 'px');
+        title.classList.toggle('marquee-anim', over > 0);
+    });
 }
+
+window.addEventListener('resize', () => {
+    const title = document.getElementById('floating-title');
+    if (title && title.innerText) setFloatingTitle(title.innerText);
+});
 
 const PLAYLIST_KEY = 'senka_playlists';
 
@@ -3826,6 +3845,7 @@ function onPlayerStateChange(e) {
     const playBtn = document.getElementById('play-pause-btn');
     if (e.data === YT.PlayerState.PLAYING) {
         if (playBtn) playBtn.innerHTML = '<i class="fas fa-pause"></i>';
+        updateTitleFromPlayer();
     } else if (e.data === YT.PlayerState.PAUSED) {
         if (playBtn) playBtn.innerHTML = '<i class="fas fa-play"></i>';
     } else if (e.data === YT.PlayerState.ENDED) {
