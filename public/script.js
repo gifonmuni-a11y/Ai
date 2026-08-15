@@ -102,15 +102,17 @@ window.onload = async () => {
         }
     } catch (e) { }
 
-    if (!userProfile.memberSince) {
-        userProfile.memberSince = new Date().toISOString();
-        saveProfileState();
+    // For non-Supabase (local) sessions, render chat immediately
+    // For Supabase users, loadRemoteChat() (called from startCloud) will call renderChat()
+    if (!sd.enabled || !window.supabase) {
+        if (!userProfile.memberSince) {
+            userProfile.memberSince = new Date().toISOString();
+            saveProfileState();
+        }
+        loadSessions();
+        renderSessionName();
+        renderChat();
     }
-    console.log('About to call loadSessions, renderSessionName, renderChat');
-    loadSessions();
-    renderSessionName();
-    renderChat();
-    console.log('=== GREETING DEBUG END ===');
 };
 
 async function authHeaders() {
