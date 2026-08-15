@@ -1586,9 +1586,12 @@ function buildMsgEl(m) {
 }
 
 function renderChat() {
+    console.log('DEBUG renderChat: memoryList.length =', memoryList.length, 'supabaseEnabled =', supabaseEnabled);
     chatHistoryDOM.innerHTML = '';
     if (!memoryList.length) {
+        console.log('DEBUG renderChat: entering !memoryList.length branch');
         if (supabaseEnabled) {
+            console.log('DEBUG renderChat: Supabase branch, appending empty div');
             chatHistoryDOM.appendChild(document.createElement('div'));
             scrollToBottom(true);
             return;
@@ -1625,6 +1628,7 @@ function renderChat() {
         greetingText.textContent = `${selamat} ${panggilan}! Senka di sini`;
         greetingContainer.appendChild(greetingText);
         chatHistoryDOM.appendChild(greetingContainer);
+        console.log('DEBUG: greeting div created and appended. innerHTML =', greetingContainer.innerHTML.substring(0, 200));
     } else {
         const STEP = 80;
         if (supabaseEnabled && remoteHasMore) {
@@ -3625,6 +3629,7 @@ async function sendToSenka() {
     // Remove greeting container after user sends first message
     const greetingContainer = chatHistoryDOM.querySelector('.message.msg-senka');
     if (greetingContainer) {
+        console.log('DEBUG: removing greeting container');
         greetingContainer.remove();
     }
 
