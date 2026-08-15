@@ -2457,20 +2457,17 @@ async function toId(text) {
 }
 
 async function localizeUserMessages(messages) {
-    const out = [];
-    for (const m of messages) {
-        if (m.role !== 'user' || !Array.isArray(m.content) || m.hidden) { out.push(m); continue; }
-        const parts = [];
-        for (const c of m.content) {
+    const jobs = messages.map(async (m) => {
+        if (m.role !== 'user' || !Array.isArray(m.content) || m.hidden) return m;
+        const parts = await Promise.all(m.content.map(async (c) => {
             if (c.type === 'text' && c.text && !hasJapaneseText(c.text)) {
-                parts.push({ ...c, text: await toJp(c.text) });
-            } else {
-                parts.push(c);
+                return { ...c, text: await toJp(c.text) };
             }
-        }
-        out.push({ ...m, content: parts });
-    }
-    return out;
+            return c;
+        }));
+        return { ...m, content: parts };
+    });
+    return Promise.all(jobs);
 }
 
 function hasJapaneseText(text) {
@@ -4378,7 +4375,7 @@ async function streamAssistantReply(payloadMessages, jpnMode = false) {
                     if (delta) {
                         if (!started) { streamBuf = ''; started = true; }
                         streamBuf += delta;
-                        msgBodyOf(msgDiv).innerHTML = mdToHtml(streamBuf);
+                        if (!jpnMode) msgBodyOf(msgDiv).innerHTML = mdToHtml(streamBuf);
                         if (chatHistoryDOM.scrollHeight - chatHistoryDOM.scrollTop - chatHistoryDOM.clientHeight < 200) {
                             chatHistoryDOM.scrollTop = chatHistoryDOM.scrollHeight;
                         }
