@@ -3776,13 +3776,20 @@ function showFloatingPlayer(videoId) {
     document.getElementById('floating-thumb').src = 'https://img.youtube.com/vi/' + videoId + '/hqdefault.jpg';
     setFloatingTitle('Memuat musik...');
     document.getElementById('play-pause-btn').innerHTML = '<i class="fas fa-pause"></i>';
+    const titleKey = 'senka_yt_title_' + videoId;
+    const cached = localStorage.getItem(titleKey);
+    if (cached) setFloatingTitle(cached);
     const fallback = () => setFloatingTitle('Lagu ' + (currentTrackIndex + 1) + ' dari ' + musicQueue.length);
     const applyTitle = d => {
-        if (d && d.title) setFloatingTitle(d.title);
-        else fallback();
+        if (d && d.title) {
+            setFloatingTitle(d.title);
+            try { localStorage.setItem(titleKey, d.title); } catch (e) { }
+        } else {
+            fallback();
+        }
     };
-    fetch('https://www.youtube.com/oembed?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3D' + videoId + '&format=json')
-        .then(r => { if (!r.ok) throw 0; return r.json(); })
+    fetch('/api/yt-title?id=' + encodeURIComponent(videoId))
+        .then(r => r.json())
         .then(applyTitle)
         .catch(() => fetch('https://noembed.com/embed?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3D' + videoId)
             .then(r => { if (!r.ok) throw 0; return r.json(); })
@@ -3893,11 +3900,22 @@ function maximizePlayer() {
 
 function makeDraggable(el) {
     let dragging = false;
+    let arming = false;
     let startX = 0, startY = 0, baseLeft = 0, baseTop = 0;
 
-    function begin(e) {
+    function arm(e) {
         if (e.target.closest('button')) return;
         const t = e.touches ? e.touches[0] : e;
+        arming = true;
+        dragging = false;
+        startX = t.clientX;
+        startY = t.clientY;
+        baseLeft = el.getBoundingClientRect().left;
+        baseTop = el.getBoundingClientRect().top;
+        el.__dragMoved = false;
+    }
+
+    function startDrag() {
         const rect = el.getBoundingClientRect();
         document.body.appendChild(el);
         el.style.position = 'fixed';
@@ -3909,35 +3927,36 @@ function makeDraggable(el) {
         el.style.left = rect.left + 'px';
         el.style.top = rect.top + 'px';
         dragging = true;
-        startX = t.clientX;
-        startY = t.clientY;
-        baseLeft = rect.left;
-        baseTop = rect.top;
     }
 
     function move(e) {
-        if (!dragging) return;
+        if (!arming && !dragging) return;
         const t = e.touches ? e.touches[0] : e;
+        if (!dragging) {
+            if (Math.abs(t.clientX - startX) < 5 && Math.abs(t.clientY - startY) < 5) return;
+            startDrag();
+        }
         let left = baseLeft + (t.clientX - startX);
         let top = baseTop + (t.clientY - startY);
         left = Math.min(Math.max(left, 0), window.innerWidth - el.offsetWidth);
         top = Math.min(Math.max(top, 0), window.innerHeight - el.offsetHeight);
         el.style.left = left + 'px';
         el.style.top = top + 'px';
-        if (Math.abs(t.clientX - startX) > 5 || Math.abs(t.clientY - startY) > 5) el.__dragMoved = true;
+        el.__dragMoved = true;
         if (e.cancelable) e.preventDefault();
     }
 
     function end() {
+        arming = false;
         dragging = false;
     }
 
-    el.addEventListener('mousedown', begin);
+    el.addEventListener('mousedown', arm);
     document.addEventListener('mousemove', move);
     document.addEventListener('mouseup', end);
-    el.addEventListener('touchstart', begin, { passive: false });
-    el.addEventListener('touchmove', move, { passive: false });
-    el.addEventListener('touchend', end);
+    el.addEventListener('touchstart', arm, { passive: false });
+    document.addEventListener('touchmove', move, { passive: false });
+    document.addEventListener('touchend', end);
 }
 
 makeDraggable(document.getElementById('floating-music-player'));

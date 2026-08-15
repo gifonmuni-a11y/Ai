@@ -1298,6 +1298,33 @@ app.get('/api/config', (req, res) => {
     });
 });
 
+app.get('/api/yt-title', async (req, res) => {
+    const id = String(req.query.id || '').trim();
+    if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return res.json({ title: null });
+    try {
+        const r = await fetch('https://www.youtube.com/oembed?url=' + encodeURIComponent('https://www.youtube.com/watch?v=' + id) + '&format=json');
+        if (r.ok) {
+            const d = await r.json();
+            if (d && d.title) {
+                return res.json({ title: d.author_name ? d.title + ' — ' + d.author_name : d.title });
+            }
+        }
+    } catch (e) { }
+    try {
+        const r = await fetch('https://www.youtube.com/watch?v=' + id, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+                'Accept-Language': 'id,en;q=0.8'
+            }
+        });
+        const html = await r.text();
+        const m = html.match(/<title>([^<]+)<\/title>/);
+        const title = m ? m[1].replace(/\s*-\s*YouTube\s*$/, '').trim() : null;
+        return res.json({ title });
+    } catch (e) { }
+    res.json({ title: null });
+});
+
 const ADMIN_MASTER_PASS = process.env.ADMIN_MASTER_PASS || null;
 
 app.get('/api/access-code', async (req, res) => {
