@@ -3627,7 +3627,56 @@ async function handleSenkaCommand(text) {
         return true;
     }
 
-    if (low === '/senkashuffle') {
+    if (low === '/senkastop') {
+        if (stopTimerInterval) { clearInterval(stopTimerInterval); stopTimerInterval = null; }
+        if (ytPlayer) { try { ytPlayer.pauseVideo(); } catch (e) { } }
+        musicQueue = [];
+        currentTrackIndex = 0;
+        isLooping = false;
+        resetShuffleState();
+        document.getElementById('loop-btn').classList.remove('active');
+        const fp = document.getElementById('floating-music-player');
+        if (fp) fp.style.display = 'none';
+        const mn = document.getElementById('minimized-player');
+        if (mn) mn.style.display = 'none';
+        appendMessage('senka', '⏹️ Musik dihentikan dan antrean dikosongkan.');
+        scrollToBottom(true);
+        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User menghentikan musik. Berikan respon singkat dan natural. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu]'), null));
+        return true;
+    }
+
+    if (low.startsWith('/senkatimer')) {
+        const arg = text.slice('/senkatimer'.length).trim();
+        if (!arg || arg === 'off' || arg === '0') {
+            if (stopTimerInterval) { clearInterval(stopTimerInterval); stopTimerInterval = null; }
+            appendMessage('senka', '⏲️ Timer musik dimatikan.');
+            scrollToBottom(true);
+            return true;
+        }
+        const total = parseTimerInput(arg);
+        if (!total || total < 5) {
+            appendMessage('senka', 'Format timer salah. Contoh: ' + colorCmd('/senkatimer') + ' 30 (menit), ' + colorCmd('/senkatimer') + ' 1:30:00 (jam:menit:detik), atau "1 jam 30 menit".');
+            scrollToBottom(true);
+            return true;
+        }
+        if (stopTimerInterval) clearInterval(stopTimerInterval);
+        stopTimerLeft = total;
+        stopTimerInterval = setInterval(() => {
+            stopTimerLeft--;
+            if (stopTimerLeft <= 0) {
+                clearInterval(stopTimerInterval);
+                stopTimerInterval = null;
+                if (ytPlayer) { try { ytPlayer.pauseVideo(); } catch (e) { } }
+                appendMessage('senka', '⏰ Waktu tidur tiba! Musik kuhentikan. Selamat tidur ya~ 💤');
+                scrollToBottom(true);
+            }
+        }, 1000);
+        appendMessage('senka', '⏲️ Timer musik: musik akan berhenti dalam ' + formatDuration(total) + '. Selamat tidur ya~ 💤');
+        scrollToBottom(true);
+        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User mengatur sleep timer musik. Berikan respon hangat untuk menemani tidurnya. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu]'), null));
+        return true;
+    }
+        if (low === '/senkashuffle') {
         const turnedOn = shuffleQueue();
         appendMessage('senka', turnedOn ? '🎵 Playlist berhasil diacak!' : '🔀 Shuffle dimatikan, urutan awal dikembalikan.');
         scrollToBottom(true);
@@ -3766,6 +3815,8 @@ function updateTitleFromPlayer() {
     } catch (e) { }
 }
 
+let titlePoll = null;
+
 function playTrack(index) {
     if (!musicQueue.length) return;
     currentTrackIndex = ((index % musicQueue.length) + musicQueue.length) % musicQueue.length;
@@ -3779,6 +3830,7 @@ function playTrack(index) {
         ensureYtApi();
     }
     showFloatingPlayer(videoId);
+    ensureTitleFromPlayer();
 }
 
 function showFloatingPlayer(videoId) {
@@ -3812,12 +3864,35 @@ function showFloatingPlayer(videoId) {
 function setFloatingTitle(text) {
     const title = document.getElementById('floating-title');
     if (!title) return;
-    title.innerText = text;
-    requestAnimationFrame(() => {
-        const over = title.scrollWidth - title.clientWidth;
-        title.style.setProperty('--shift', '-' + Math.max(over, 0) + 'px');
-        title.classList.toggle('marquee-anim', over > 0);
-    });
+    title.innerHTML = '';
+    const span = document.createElement('span');
+    span.textContent = (text || ' ') + '   •   ' + (text || ' ');
+    title.appendChild(span);
+    title.style.setProperty('--dur', Math.max(7, Math.round(span.scrollWidth / 35)) + 's');
+}
+
+function ensureTitleFromPlayer() {
+    if (titlePoll) return;
+    let tries = 0;
+    titlePoll = setInterval(() => {
+        tries++;
+        let label = null;
+        try {
+            const vd = ytPlayer && ytPlayer.getVideoData ? ytPlayer.getVideoData() : null;
+            if (vd && vd.title && vd.title !== 'Video unavailable') {
+                label = vd.title + (vd.author ? ' — ' + vd.author : '');
+            }
+        } catch (e) { }
+        if (label) {
+            setFloatingTitle(label);
+            try { localStorage.setItem('senka_yt_title_' + musicQueue[currentTrackIndex].id, label); } catch (e) { }
+            clearInterval(titlePoll);
+            titlePoll = null;
+        } else if (tries > 20) {
+            clearInterval(titlePoll);
+            titlePoll = null;
+        }
+    }, 500);
 }
 
 window.addEventListener('resize', () => {
@@ -3876,6 +3951,36 @@ function toggleLoop() {
 
 let shuffleActive = false;
 let queueBackup = [];
+let stopTimerInterval = null;
+let stopTimerLeft = 0;
+
+function parseTimerInput(input) {
+    const s = String(input).trim().toLowerCase();
+    if (!s) return 0;
+    let total = 0;
+    const mJ = s.match(/(\d+)\s*(?:jam|h)\b/);
+    if (mJ) total += +mJ[1] * 3600;
+    const mM = s.match(/(\d+)\s*menit\b/);
+    if (mM) total += +mM[1] * 60;
+    const mD = s.match(/(\d+)\s*detik\b/);
+    if (mD) total += +mD[1];
+    if (total) return total;
+    const parts = s.split(':').map(Number);
+    if (parts.length === 3 && parts.every(n => !isNaN(n))) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    if (parts.length === 2 && parts.every(n => !isNaN(n))) return parts[0] * 60 + parts[1];
+    if (parts.length === 1 && !isNaN(parts[0])) return parts[0] * 60;
+    return 0;
+}
+
+function formatDuration(total) {
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    const p = n => String(n).padStart(2, '0');
+    if (h) return p(h) + ':' + p(m) + ':' + p(s);
+    if (m) return p(m) + ':' + p(s);
+    return s + ' detik';
+}
 
 function shuffleQueue() {
     if (!musicQueue.length) return false;
@@ -4033,6 +4138,8 @@ function showCommandListInChat() {
         colorCmd('/senkasave') + ' [nama] — simpan antrean jadi playlist\n' +
         colorCmd('/senkaplaylist') + ' [nama] — putar playlist tersimpan\n' +
         colorCmd('/senkadel') + ' [nama] — hapus playlist tersimpan\n' +
+        colorCmd('/senkastop') + ' — hentikan musik & kosongkan antrean\n' +
+        colorCmd('/senkatimer') + ' [menit / jam:menit:detik] — sleep timer\n' +
         colorCmd('/senkagame') + ' — mini-game tebak angka\n' +
         colorCmd('/senkahelp') + ' — daftar command');
     scrollToBottom(true);
