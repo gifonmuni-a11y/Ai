@@ -142,7 +142,29 @@ button:focus, button:focus-visible, a:focus, a:focus-visible, [tabindex]:focus-v
 .context-btn { background: rgba(255, 255, 255, 0.15); border: 1px solid rgba(255, 255, 255, 0.3); color: white; padding: 6px 12px; border-radius: 15px; margin-right: 8px; margin-top: 5px; cursor: pointer; transition: 0.3s; font-family: inherit; font-size: 0.8rem; }
 .context-btn:hover { background: rgba(14, 165, 233, 0.5); }
 
-/* Floating Music Player (Spotify style) */
+.glass-minimized {
+    position: absolute; bottom: 80px; right: 20px; width: 50px; height: 50px; border-radius: 50%;
+    background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(15px); -webkit-backdrop-filter: blur(15px);
+    border: 1px solid rgba(255, 255, 255, 0.2); color: white;
+    display: flex; justify-content: center; align-items: center; font-size: 1.5rem;
+    z-index: 1000; box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5); cursor: pointer;
+    touch-action: none; user-select: none; -webkit-user-select: none;
+}
+.glass-minimized:active { transform: scale(0.94); }
+
+.minimize-btn {
+    background: none; border: none; color: rgba(255, 255, 255, 0.7);
+    font-size: 1.2rem; margin-left: 10px; cursor: pointer; transition: all 0.2s ease;
+    padding: 4px 6px; border-radius: 8px;
+}
+.minimize-btn:hover { color: #0ea5e9; }
+
+.drag-handle {
+    display: flex; align-items: center; justify-content: center;
+    cursor: grab; color: rgba(255, 255, 255, 0.5); padding: 5px;
+    font-size: 1.1rem; user-select: none; -webkit-user-select: none; touch-action: none;
+}
+.drag-handle:active { cursor: grabbing; }
 .glass-floating-player { position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%); width: 90%; max-width: 400px; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(15px); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 10px 15px; display: flex; align-items: center; gap: 12px; z-index: 1000; box-shadow: 0 10px 30px rgba(0,0,0,0.5); transition: all 0.3s ease; }
 .glass-floating-player img { width: 45px; height: 45px; border-radius: 8px; object-fit: cover; }
 .floating-info { flex: 1; overflow: hidden; white-space: nowrap; }
@@ -150,7 +172,7 @@ button:focus, button:focus-visible, a:focus, a:focus-visible, [tabindex]:focus-v
 .floating-controls { display: flex; gap: 15px; align-items: center; }
 .floating-controls button { background: none; border: none; color: white; font-size: 1.1rem; cursor: pointer; transition: 0.3s; padding: 5px; }
 .floating-controls button:hover { color: #0ea5e9; }
-.floating-controls #loop-btn.active { color: #0ea5e9; }
+.floating-controls #loop-btn.active, .floating-controls #shuffle-btn.active { color: #0ea5e9; }
 
 .tind i { display: inline-block; width: 5px; height: 5px; margin-left: 3px; border-radius: 50%; background: #c084fc; animation: blink 1.2s infinite; }
 .tind i:nth-child(2) { animation-delay: 0.2s; }

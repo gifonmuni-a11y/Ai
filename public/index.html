@@ -64,16 +64,23 @@
                 <div id="yt-player-engine" style="display:none; width:0; height:0;"></div>
 
                 <div id="floating-music-player" class="glass-floating-player" style="display: none;">
+                    <div class="drag-handle"><i class="fas fa-grip-lines"></i></div>
                     <img id="floating-thumb" src="" alt="cover">
                     <div class="floating-info">
                         <div id="floating-title" class="marquee-text">Memuat musik...</div>
                     </div>
                     <div class="floating-controls">
+                        <button onclick="shuffleQueue()" id="shuffle-btn"><i class="fas fa-random"></i></button>
                         <button onclick="playPrev()"><i class="fas fa-step-backward"></i></button>
                         <button onclick="togglePlay()" id="play-pause-btn"><i class="fas fa-pause"></i></button>
                         <button onclick="playNext()"><i class="fas fa-step-forward"></i></button>
                         <button onclick="toggleLoop()" id="loop-btn"><i class="fas fa-repeat"></i></button>
                     </div>
+                    <button class="minimize-btn" onclick="minimizePlayer()"><i class="fas fa-chevron-down"></i></button>
+                </div>
+
+                <div id="minimized-player" class="glass-minimized" style="display: none;" onclick="maximizePlayer()">
+                    <i class="fas fa-music"></i>
                 </div>
 
                 <div class="input-area">

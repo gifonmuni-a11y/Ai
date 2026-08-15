@@ -3577,7 +3577,7 @@ async function handleSenkaCommand(text) {
             scrollToBottom(true);
             return true;
         }
-        musicQueue = [videoId];
+        musicQueue = [{ id: videoId, url: text.trim() }];
         currentTrackIndex = 0;
         playTrack(0);
         if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User memutar lagu. Berikan respon asik. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu]'), null));
@@ -3593,11 +3593,34 @@ async function handleSenkaCommand(text) {
             return true;
         }
         const wasEmpty = musicQueue.length === 0;
-        musicQueue.push(videoId);
+        musicQueue.push({ id: videoId, url: text.trim() });
         appendMessage('senka', 'Ditambahkan ke antrean musik 🎵');
         scrollToBottom(true);
         if (wasEmpty) playTrack(0);
         if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User menambahkan lagu ke antrean musik. Berikan respon asik. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu]'), null));
+        return true;
+    }
+
+    if (low === '/senkalist') {
+        if (!musicQueue.length) {
+            appendMessage('senka', '📭 Antrean musik masih kosong. Coba **/senkaplay [link YouTube]** dulu ya.');
+            scrollToBottom(true);
+            return true;
+        }
+        const lines = musicQueue.map((t, i) => {
+            const mark = i === currentTrackIndex ? ' *(Sedang diputar)*' : '';
+            return 'Lagu ' + (i + 1) + ': ' + t.url + mark;
+        }).join('\n');
+        appendMessage('senka', '🎵 **Playlist Antrean:**\n' + lines);
+        scrollToBottom(true);
+        return true;
+    }
+
+    if (low === '/senkashuffle') {
+        const turnedOn = shuffleQueue();
+        appendMessage('senka', turnedOn ? '🎵 Playlist berhasil diacak!' : '🔀 Shuffle dimatikan, urutan awal dikembalikan.');
+        scrollToBottom(true);
+        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User mengacak antrean musik. Berikan respon asik. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu]'), null));
         return true;
     }
 
@@ -3665,7 +3688,7 @@ function createYtPlayer(videoId) {
 function playTrack(index) {
     if (!musicQueue.length) return;
     currentTrackIndex = ((index % musicQueue.length) + musicQueue.length) % musicQueue.length;
-    const videoId = musicQueue[currentTrackIndex];
+    const videoId = musicQueue[currentTrackIndex].id;
     if (ytPlayer) {
         ytPlayer.loadVideoById(videoId);
     } else if (window.YT && ytApiReady) {
@@ -3722,6 +3745,105 @@ function toggleLoop() {
     document.getElementById('loop-btn').classList.toggle('active', isLooping);
 }
 
+let shuffleActive = false;
+let queueBackup = [];
+
+function shuffleQueue() {
+    if (!musicQueue.length) return false;
+    if (!shuffleActive) {
+        queueBackup = musicQueue.slice();
+        const current = musicQueue[currentTrackIndex];
+        const rest = musicQueue.filter((_, i) => i !== currentTrackIndex);
+        for (let i = rest.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [rest[i], rest[j]] = [rest[j], rest[i]];
+        }
+        musicQueue = [current, ...rest];
+        currentTrackIndex = 0;
+        shuffleActive = true;
+    } else {
+        const currentId = musicQueue[currentTrackIndex].id;
+        musicQueue = queueBackup;
+        currentTrackIndex = Math.max(0, musicQueue.findIndex(t => t.id === currentId));
+        shuffleActive = false;
+        queueBackup = [];
+    }
+    document.getElementById('shuffle-btn').classList.toggle('active', shuffleActive);
+    return shuffleActive;
+}
+
+function minimizePlayer() {
+    document.getElementById('floating-music-player').style.display = 'none';
+    const min = document.getElementById('minimized-player');
+    min.style.display = 'flex';
+    min.__dragMoved = false;
+}
+
+function maximizePlayer() {
+    const min = document.getElementById('minimized-player');
+    if (min.__dragMoved) {
+        min.__dragMoved = false;
+        return;
+    }
+    min.style.display = 'none';
+    document.getElementById('floating-music-player').style.display = 'flex';
+}
+
+function makeDraggable(el) {
+    const handle = el.querySelector('.drag-handle') || el;
+    let dragging = false;
+    let startX = 0, startY = 0, baseLeft = 0, baseTop = 0;
+
+    function begin(e) {
+        if (e.target.closest('button')) return;
+        const t = e.touches ? e.touches[0] : e;
+        const rect = el.getBoundingClientRect();
+        document.body.appendChild(el);
+        el.style.position = 'fixed';
+        el.style.bottom = 'auto';
+        el.style.right = 'auto';
+        el.style.transform = 'none';
+        el.style.margin = '0';
+        el.style.width = rect.width + 'px';
+        el.style.left = rect.left + 'px';
+        el.style.top = rect.top + 'px';
+        dragging = true;
+        startX = t.clientX;
+        startY = t.clientY;
+        baseLeft = rect.left;
+        baseTop = rect.top;
+        if (e.cancelable) e.preventDefault();
+    }
+
+    function move(e) {
+        if (!dragging) return;
+        const t = e.touches ? e.touches[0] : e;
+        let left = baseLeft + (t.clientX - startX);
+        let top = baseTop + (t.clientY - startY);
+        left = Math.min(Math.max(left, 0), window.innerWidth - el.offsetWidth);
+        top = Math.min(Math.max(top, 0), window.innerHeight - el.offsetHeight);
+        el.style.left = left + 'px';
+        el.style.top = top + 'px';
+        if (Math.abs(t.clientX - startX) > 5 || Math.abs(t.clientY - startY) > 5) el.__dragMoved = true;
+        if (e.cancelable) e.preventDefault();
+    }
+
+    function end() {
+        if (!dragging) return;
+        dragging = false;
+    }
+
+    handle.addEventListener('mousedown', begin);
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', end);
+    handle.addEventListener('touchstart', begin, { passive: false });
+    handle.addEventListener('touchmove', move, { passive: false });
+    handle.addEventListener('touchend', end);
+}
+
+makeDraggable(document.getElementById('floating-music-player'));
+makeDraggable(document.getElementById('minimized-player'));
+
 function startTebakGame() {
     tebakGame = { answer: 1 + Math.floor(Math.random() * 10), tries: 0 };
     appendMessage('senka', '🎲 Aku lagi mikirin angka rahasia dari 1 sampai 10. Coba tebak, sayang! (kirim angkanya)');
@@ -3757,7 +3879,7 @@ function clearChat() {
 }
 
 function showCommandListInChat() {
-    appendMessage('senka', '🤖 Command List:\n/senkaplay [link YouTube] — putar musik (full durasi)\n/senkaadd [link YouTube] — tambah ke antrean\n/senkagame — mini-game tebak angka\n/senkahelp — daftar command');
+    appendMessage('senka', '🤖 Command List:\n/senkaplay [link YouTube] — putar musik (full durasi)\n/senkaadd [link YouTube] — tambah ke antrean\n/senkalist — lihat daftar antrean\n/senkashuffle — acak urutan playlist\n/senkagame — mini-game tebak angka\n/senkahelp — daftar command');
     scrollToBottom(true);
 }
 
