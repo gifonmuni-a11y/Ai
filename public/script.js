@@ -326,8 +326,8 @@ function decryptText(s) {
     if (!str.startsWith('U2FsdGVkX1')) return str;
     try {
         const t = CryptoJS.AES.decrypt(str, encKey()).toString(CryptoJS.enc.Utf8);
-        return t || str;
-    } catch (e) { return str; }
+        return t || null;
+    } catch (e) { return null; }
 }
 
 function remoteToLocal(m) {
@@ -335,16 +335,16 @@ function remoteToLocal(m) {
     const rawContent = m.isi_pesan;
     if (m.tipe_pesan === 'image') {
         const u = decryptText(rawContent);
-        content.push({ type: 'image_url', image_url: { url: u || '' } });
+        content.push({ type: 'image_url', image_url: { url: u || rawContent || '' } });
     } else if (m.tipe_pesan === 'video') {
         const u = decryptText(rawContent);
-        content.push({ type: 'video_url', url: u || '' });
+        content.push({ type: 'video_url', url: u || rawContent || '' });
     } else if (m.tipe_pesan === 'voice') {
         const u = decryptText(rawContent);
-        content.push({ type: 'audio_url', url: u || '' });
+        content.push({ type: 'audio_url', url: u || rawContent || '' });
     } else {
         const t = decryptText(rawContent);
-        content.push({ type: 'text', text: (t === null || t === undefined || t === '') ? String(rawContent || '') : t });
+        content.push({ type: 'text', text: t ?? String(rawContent || '') });
     }
     const ts = m.waktu_kirim ? new Date(m.waktu_kirim).getTime() : undefined;
     return { role: m.pengirim === 'user' ? 'user' : 'assistant', cid: m.id, content, ts, time: ts ? formatMsgTime(ts) : undefined };
