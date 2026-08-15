@@ -348,10 +348,11 @@ function remoteToLocal(m) {
 function remoteSave(pengirim, tipePesan, isi, memItem) {
     if (!supabaseEnabled) return;
     authHeaders().then(headers => {
+        const sessionNama = cloudSessions.find(s => s.id === cloudSid)?.nama || 'Pengguna';
         fetch('/api/chats', {
             method: 'POST',
             headers,
-            body: JSON.stringify({ sesiId: cloudSid, tipePesan, isiPesan: encryptText(isi), pengirim })
+            body: JSON.stringify({ sesiId: cloudSid, tipePesan, isiPesan: encryptText(isi), pengirim, nama: sessionNama })
         })
             .then(r => r.ok ? r.json() : null)
             .then(d => {
