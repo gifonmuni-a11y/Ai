@@ -312,7 +312,7 @@ function getUserId() {
 }
 
 function encKey() {
-    return CryptoJS.SHA256('senka:' + (cloudUid || getDeviceUserId())).toString();
+    return CryptoJS.SHA256('senka:masterkey').toString();
 }
 
 function encryptText(s) {
