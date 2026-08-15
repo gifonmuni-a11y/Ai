@@ -143,14 +143,14 @@ button:focus, button:focus-visible, a:focus, a:focus-visible, [tabindex]:focus-v
 .context-btn:hover { background: rgba(14, 165, 233, 0.5); }
 
 .glass-minimized {
-    position: absolute; bottom: 80px; right: 20px; width: 50px; height: 50px; border-radius: 50%;
-    background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(15px); -webkit-backdrop-filter: blur(15px);
-    border: 1px solid rgba(255, 255, 255, 0.2); color: white;
-    display: flex; justify-content: center; align-items: center; font-size: 1.5rem;
-    z-index: 1000; box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5); cursor: pointer;
+    position: absolute; bottom: 80px; right: 20px; width: 42px; height: 42px; border-radius: 50%;
+    background: rgba(8, 12, 26, 0.45); border: 1px solid rgba(96, 165, 250, 0.3); color: #7dd3fc;
+    display: flex; justify-content: center; align-items: center; font-size: 1.02rem;
+    z-index: 1000; cursor: pointer; transition: all 0.25s ease;
     touch-action: none; user-select: none; -webkit-user-select: none;
 }
-.glass-minimized:active { transform: scale(0.94); }
+.glass-minimized:hover { background: rgba(56, 189, 248, 0.3); color: #fff; box-shadow: 0 0 14px rgba(56, 189, 248, 0.5); }
+.glass-minimized:active { transform: scale(0.92); }
 
 .minimize-btn {
     background: rgba(255, 255, 255, 0.08);
