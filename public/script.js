@@ -2413,6 +2413,65 @@ function editAiMessage(bubble, item) {
 
 // ===== Terjemahan otomatis mode telfon (bila teks Senka ada huruf Jepang) =====
 const msgTlCache = new Map();
+const jpTrCache = new Map();
+const idTrCache = new Map();
+
+async function toJp(text) {
+    const s = String(text || '').trim();
+    if (!s) return text;
+    if (hasJapaneseText(s)) return text;
+    if (jpTrCache.has(s)) return jpTrCache.get(s);
+    try {
+        const r = await fetch('/api/translate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: s, target: 'ja' })
+        });
+        const d = await r.json().catch(() => ({}));
+        if (d && d.translated && hasJapaneseText(d.translated)) {
+            jpTrCache.set(s, d.translated);
+            return d.translated;
+        }
+    } catch (e) { }
+    return text;
+}
+
+async function toId(text) {
+    const s = String(text || '').trim();
+    if (!s) return text;
+    if (!hasJapaneseText(s)) return text;
+    if (idTrCache.has(s)) return idTrCache.get(s);
+    try {
+        const r = await fetch('/api/translate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: s, target: 'id' })
+        });
+        const d = await r.json().catch(() => ({}));
+        if (d && d.translated) {
+            idTrCache.set(s, d.translated);
+            return d.translated;
+        }
+    } catch (e) { }
+    return text;
+}
+
+async function localizeUserMessages(messages) {
+    const out = [];
+    for (const m of messages) {
+        if (m.role !== 'user' || !Array.isArray(m.content) || m.hidden) { out.push(m); continue; }
+        const parts = [];
+        for (const c of m.content) {
+            if (c.type === 'text' && c.text && !hasJapaneseText(c.text)) {
+                parts.push({ ...c, text: await toJp(c.text) });
+            } else {
+                parts.push(c);
+            }
+        }
+        out.push({ ...m, content: parts });
+    }
+    return out;
+}
 
 function hasJapaneseText(text) {
     return /[\u3040-\u30ff\u4e00-\u9faf]/.test(text);
@@ -3548,7 +3607,10 @@ async function sendToSenka() {
     removeImage();
     scrollToBottom(true);
 
-    await streamAssistantReply(await getWebPayload(memoryList, text));
+    const jpnMode = speakMode === 'jpn';
+    const sendText = jpnMode ? await toJp(text) : text;
+    const payload = jpnMode ? await localizeUserMessages(memoryList) : memoryList;
+    await streamAssistantReply(await getWebPayload(payload, sendText), jpnMode);
 }
 
 /* ===== Bot Command Center (/senka*) ===== */
@@ -4250,7 +4312,7 @@ async function getWebPayload(baseMessages, lastText) {
     return context ? [...baseMessages, { role: 'system', content: context }] : baseMessages;
 }
 
-async function streamAssistantReply(payloadMessages) {
+async function streamAssistantReply(payloadMessages, jpnMode = false) {
     const createdTs = Date.now();
     const msgContent = makeMsgContent('senka', createdTs, formatMsgTime(createdTs));
     const msgDiv = document.createElement('div');
@@ -4269,7 +4331,7 @@ async function streamAssistantReply(payloadMessages) {
         const response = await fetch('/api/chat/stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages: payloadMessages, modelKey, panggilan, useVision: visionAuto, gender: personaGender(), persona: personaPayload(), length: lengthSetting(), lorebook: getActiveLorebook(), mode: storyMode })
+            body: JSON.stringify({ messages: payloadMessages, modelKey, panggilan, useVision: visionAuto, gender: personaGender(), persona: personaPayload(), length: lengthSetting(), lorebook: getActiveLorebook(), mode: storyMode, jpnMode })
         });
 
         if (!response.ok) {
@@ -4340,11 +4402,21 @@ async function streamAssistantReply(payloadMessages) {
         const opsi = extractOpsi(renderText);
 
         const rb = msgBodyOf(msgContent);
-        rb.innerHTML = mdToHtml(opsi.clean);
-        if (stk) appendStickerImg(msgMediaOf(msgContent), stk);
-        if (fileReq) rb.appendChild(makeFileCard(fileReq.meta));
-        if (!fileReq && displayText.trim()) attachCallTranslation(rb, displayText.trim());
-        if (!fileReq) appendOpsiButtons(rb, opsi.options);
+        if (jpnMode && hasJapaneseText(renderText)) {
+            const [cleanId, optsId] = await Promise.all([
+                toId(opsi.clean),
+                Promise.all((opsi.options || []).map(o => toId(o)))
+            ]);
+            rb.innerHTML = mdToHtml(cleanId);
+            if (stk) appendStickerImg(msgMediaOf(msgContent), stk);
+            if (fileReq) rb.appendChild(makeFileCard(fileReq.meta));
+            if (!fileReq) appendOpsiButtons(rb, optsId);
+        } else {
+            rb.innerHTML = mdToHtml(opsi.clean);
+            if (stk) appendStickerImg(msgMediaOf(msgContent), stk);
+            if (fileReq) rb.appendChild(makeFileCard(fileReq.meta));
+            if (!fileReq) appendOpsiButtons(rb, opsi.options);
+        }
         addMsgActions(msgContent, 'senka');
 
         memoryList.push({ role: 'assistant', content: [{ type: "text", text: displayText }], ts: createdTs, time: formatMsgTime(createdTs) });

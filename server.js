@@ -1479,7 +1479,7 @@ app.post('/api/chat', async (req, res) => {
 
 app.post('/api/chat/stream', async (req, res) => {
     try {
-        const { messages, modelKey, panggilan, useVision, call, gender, persona, length, lorebook, mode } = req.body;
+        const { messages, modelKey, panggilan, useVision, call, gender, persona, length, lorebook, mode, jpnMode } = req.body;
 
         if (!Array.isArray(messages) || messages.length === 0) {
             return res.status(400).json({ error: "Pesan harus diisi dulu." });
@@ -1506,6 +1506,8 @@ app.post('/api/chat/stream', async (req, res) => {
             baseMessages = res.messages;
             rag = res.rag;
         }
+        if (jpnMode) systemPrompt += '\n\n### 5. JAPANESE MODE (WAJIB) ###\n1. Pesan user yang sampai ke kamu SUDAH diterjemahkan ke bahasa Jepang (user aslinya menulis bahasa Indonesia).\n2. Kamu WAJIB menjawab seluruhnya dalam bahasa JEPANG yang natural, lancar, dan hangat ala anime — TIDAK kaku, tidak terjemahan harfiah. Gunakan partikel & ekspresi alami (ね、よ、だよ、〜、あらあら、ふふっ).\n3. DILARANG keras menampilkan blok terjemahan apa pun seperti "[A|文] Terjemahan: ...", label bahasa, atau komentar bahwa kamu menerjemahkan. Langsung jawab dalam bahasa Jepang saja.\n4. Bahasa Jepang yang kamu tulis akan ditampilkan ke user dalam bahasa Indonesia dan dibacakan TTS dalam bahasa Jepang, jadi tulis dengan ekspresif seperti karakter anime yang hidup.';
+        baseMessages = [systemPrompt, ...finalMessages];
         for (const m of candidateList(chosen, isVision, useVision !== false)) {
             let upstream;
             let msgsForModel = baseMessages;
@@ -2276,7 +2278,10 @@ app.post('/api/translate', async (req, res) => {
     try {
         const text = String(req.body?.text || '').trim().slice(0, 1000);
         if (!text) return res.status(400).json({ error: 'Teks kosong.' });
-        const t = await translateToIndonesian(text);
+        const target = String(req.body?.target || 'id').toLowerCase();
+        let t;
+        if (target === 'ja') t = await translateToJapanese(text);
+        else t = await translateToIndonesian(text);
         if (!t) return res.status(502).json({ error: 'Terjemahan gagal. Coba lagi ya.' });
         res.json({ translated: t });
     } catch (e) {
