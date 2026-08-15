@@ -1514,9 +1514,16 @@ function buildMsgEl(m) {
             const p = document.createElement('div');
             const cleanText = stk ? stripStickerTag(c.text) : c.text;
             if (cleanText) {
-                p.innerHTML = m.role === 'assistant' ? mdToHtml(cleanText) : formatReply(cleanText);
-                if (m.role === 'assistant') bubbleText += ' ' + cleanText;
-                bodyOf().appendChild(p);
+                if (m.role === 'assistant') {
+                    const opsi = extractOpsi(cleanText);
+                    p.innerHTML = mdToHtml(opsi.clean);
+                    if (m.role === 'assistant') bubbleText += ' ' + cleanText;
+                    bodyOf().appendChild(p);
+                    appendOpsiButtons(bodyOf(), opsi.options);
+                } else {
+                    p.innerHTML = formatReply(cleanText);
+                    bodyOf().appendChild(p);
+                }
             }
             if (stk) appendStickerImg(mediaOf(), stk);
         } else if (c.type === 'image_url') {
@@ -3588,13 +3595,30 @@ async function handleSenkaCommand(text) {
     return false;
 }
 
+function extractYouTubeId(url) {
+    const m = String(url).match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?|shorts)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/i);
+    return m ? m[1] : null;
+}
+
 async function renderMusicPlayer(query) {
     const content = appendMessage('senka', 'Senka Bot 🎵');
     const media = msgMediaOf(content);
+    const isLink = /youtube\.com|youtu\.be/i.test(String(query));
     const info = document.createElement('div');
     info.className = 'music-info';
-    info.innerHTML = '<i class="fa-solid fa-music"></i> Memutar: <b>' + escapeHtml(query) + '</b>';
+    info.innerHTML = '<i class="fa-solid fa-music"></i> Memutar: <b>' + escapeHtml(isLink ? 'lagu YouTube (full durasi)' : query) + '</b>';
     media.appendChild(info);
+    const videoId = extractYouTubeId(query);
+    if (videoId) {
+        const frame = document.createElement('iframe');
+        frame.className = 'music-youtube';
+        frame.src = 'https://www.youtube.com/embed/' + videoId + '?autoplay=1';
+        frame.setAttribute('frameborder', '0');
+        frame.setAttribute('allow', 'autoplay; encrypted-media');
+        media.appendChild(frame);
+        scrollToBottom(true);
+        return;
+    }
     const holder = document.createElement('div');
     holder.className = 'music-loading';
     holder.innerHTML = 'Mencari lagu...<span class="tind"><i></i><i></i><i></i></span>';
@@ -3663,20 +3687,34 @@ function showCommandListInChat() {
     scrollToBottom(true);
 }
 
-function addContextShortcuts(body, text) {
-    if (!body || !text) return;
-    if (!/[?？]|\b(apa|mana|mau yang|pilih|lebih suka|suka yang|minum apa|makan apa|kopi|teh)\b/i.test(String(text))) return;
+function extractOpsi(text) {
+    let out = '';
+    const options = [];
+    const re = /\[Opsi\s*:\s*([^\]]*)\]/gi;
+    let last = 0, m;
+    while ((m = re.exec(String(text || ''))) !== null) {
+        out += text.slice(last, m.index);
+        m[1].split('|').forEach(o => {
+            const t = o.trim();
+            if (t) options.push(t);
+        });
+        last = m.index + m[0].length;
+    }
+    out += text.slice(last);
+    return { clean: out, options };
+}
+
+function appendOpsiButtons(body, options) {
+    if (!body || !options || !options.length) return;
     const bar = document.createElement('div');
     bar.className = 'context-btn-container';
-    const mk = (emoji, label) => {
+    options.forEach(opt => {
         const b = document.createElement('button');
         b.className = 'context-btn';
-        b.innerHTML = emoji + ' ' + label;
-        b.onclick = () => sendMessageFromBtn(b, label);
-        return b;
-    };
-    bar.appendChild(mk('☕', 'Kopi'));
-    bar.appendChild(mk('🍵', 'Teh'));
+        b.innerText = opt;
+        b.onclick = () => sendMessageFromBtn(b, opt);
+        bar.appendChild(b);
+    });
     body.appendChild(bar);
 }
 
@@ -3833,13 +3871,14 @@ async function streamAssistantReply(payloadMessages) {
             displayText = displayText.split('###SENKA_FILE###')[0].trim();
         }
         const renderText = stk ? stripStickerTag(displayText) : displayText;
+        const opsi = extractOpsi(renderText);
 
         const rb = msgBodyOf(msgContent);
-        rb.innerHTML = mdToHtml(renderText);
+        rb.innerHTML = mdToHtml(opsi.clean);
         if (stk) appendStickerImg(msgMediaOf(msgContent), stk);
         if (fileReq) rb.appendChild(makeFileCard(fileReq.meta));
         if (!fileReq && displayText.trim()) attachCallTranslation(rb, displayText.trim());
-        if (!fileReq) addContextShortcuts(rb, renderText);
+        if (!fileReq) appendOpsiButtons(rb, opsi.options);
         addMsgActions(msgContent, 'senka');
 
         memoryList.push({ role: 'assistant', content: [{ type: "text", text: displayText }], ts: createdTs, time: formatMsgTime(createdTs) });
@@ -3848,7 +3887,7 @@ async function streamAssistantReply(payloadMessages) {
         if (!supabaseEnabled) saveSessions();
         else remoteSave('senka', 'text', displayText, aiItem);
         shrinkMemoryImages();
-        if (autospeak && !fileReq) speak(displayText);
+        if (autospeak && !fileReq) speak(opsi.clean);
     } catch (error) {
         if (error.message === 'empty') {
             memoryList.pop();
