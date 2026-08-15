@@ -370,18 +370,17 @@ button:focus, button:focus-visible, a:focus, a:focus-visible, [tabindex]:focus-v
 #message-input { flex: 1; min-width: 0; background: rgba(6, 10, 20, 0.5); border: 1px solid rgba(96, 165, 250, 0.32); color: #fff; padding: 12px 18px; border-radius: 25px; outline: none; transition: all 0.3s ease; }
 #message-input:focus { border-color: #38bdf8; box-shadow: 0 0 12px rgba(56, 189, 248, 0.3); }
 #message-input::placeholder { color: #8b7f9e; }
-/* Styling Tombol Kirim — tema biru laut (ocean blue) */
+/* Styling Tombol Kirim — Glassmorphism sama dengan tombol telepon (.tool-btn) */
 #send-btn {
-    background: linear-gradient(135deg, #0ea5e9, #0284c7);
-    border: none;
-    color: #fff;
-    width: 45px; height: 45px; border-radius: 50%; cursor: pointer; font-size: 1rem;
+    background: rgba(8,12,26,0.45);
+    border: 1px solid rgba(96,165,250,0.3);
+    color: #7dd3fc;
+    width: 42px; height: 42px; border-radius: 50%; cursor: pointer; font-size: 1.02rem;
     display: flex; align-items: center; justify-content: center; transition: all 0.25s ease;
     flex-shrink: 0;
-    box-shadow: 0 4px 14px rgba(14, 165, 233, 0.45);
 }
 
-#send-btn:hover { transform: scale(1.07); box-shadow: 0 0 18px rgba(56, 189, 248, 0.7); }
+#send-btn:hover { background: rgba(56, 189, 248, 0.3); color: #fff; box-shadow: 0 0 14px rgba(56, 189, 248, 0.5); }
 #send-btn:active { transform: scale(0.92); }
 #pm-mic.recording {
     background: linear-gradient(135deg, #f87171, #dc2626) !important;
