@@ -3569,7 +3569,7 @@ async function handleSenkaCommand(text) {
             scrollToBottom(true);
             return true;
         }
-        renderMusicPlayer(query);
+        await renderMusicPlayer(query);
         if (modelKey) await streamAssistantReply(await getWebPayload(secretNote(`[System Note: User saat ini sedang memutar lagu/musik berjudul "${query}" melalui sistem command. Berikan komentar singkat, manis, atau nyambung tentang lagu tersebut seolah-olah kamu ikut mendengarkannya bersama user.]`), null));
         return true;
     }
@@ -3588,24 +3588,40 @@ async function handleSenkaCommand(text) {
     return false;
 }
 
-function renderMusicPlayer(query) {
+async function renderMusicPlayer(query) {
     const content = appendMessage('senka', 'Senka Bot 🎵');
     const media = msgMediaOf(content);
     const info = document.createElement('div');
     info.className = 'music-info';
     info.innerHTML = '<i class="fa-solid fa-music"></i> Memutar: <b>' + escapeHtml(query) + '</b>';
     media.appendChild(info);
-    const frame = document.createElement('div');
-    frame.className = 'music-frame';
-    const iframe = document.createElement('iframe');
-    iframe.src = 'https://www.youtube.com/embed?listType=search&list=' + encodeURIComponent(query) + '&autoplay=1';
-    iframe.allow = 'autoplay; encrypted-media; picture-in-picture';
-    iframe.setAttribute('frameborder', '0');
-    iframe.setAttribute('allowfullscreen', '');
-    iframe.setAttribute('referrerpolicy', 'no-referrer-when-downgrade');
-    frame.appendChild(iframe);
-    media.appendChild(frame);
+    const holder = document.createElement('div');
+    holder.className = 'music-loading';
+    holder.innerHTML = 'Mencari lagu...<span class="tind"><i></i><i></i><i></i></span>';
+    media.appendChild(holder);
     scrollToBottom(true);
+    try {
+        const r = await fetch('https://itunes.apple.com/search?term=' + encodeURIComponent(query) + '&entity=song&limit=1');
+        if (!r.ok) throw new Error('itunes ' + r.status);
+        const data = await r.json();
+        const track = data.results && data.results[0];
+        if (!track) {
+            holder.innerHTML = 'Lagu "<b>' + escapeHtml(query) + '</b>" tidak ditemukan. Coba judul lain ya.';
+            scrollToBottom(true);
+            return;
+        }
+        holder.remove();
+        const card = document.createElement('div');
+        card.className = 'music-player-glass';
+        card.innerHTML = '<img src="' + escapeHtml(track.artworkUrl100 || '') + '" alt=""><div class="mp-info"><div class="mp-track"></div><div class="mp-artist"></div></div><audio controls preload="none" src="' + escapeHtml(track.previewUrl || '') + '"></audio>';
+        card.querySelector('.mp-track').innerText = track.trackName || 'Tanpa judul';
+        card.querySelector('.mp-artist').innerText = track.artistName || '';
+        media.appendChild(card);
+        scrollToBottom(true);
+    } catch (e) {
+        holder.innerHTML = 'Gagal mencari lagu. Cek koneksi lalu coba lagi ya.';
+        scrollToBottom(true);
+    }
 }
 
 function startTebakGame() {
@@ -3651,12 +3667,12 @@ function addContextShortcuts(body, text) {
     if (!body || !text) return;
     if (!/[?？]|\b(apa|mana|mau yang|pilih|lebih suka|suka yang|minum apa|makan apa|kopi|teh)\b/i.test(String(text))) return;
     const bar = document.createElement('div');
-    bar.className = 'context-bar';
+    bar.className = 'context-btn-container';
     const mk = (emoji, label) => {
         const b = document.createElement('button');
         b.className = 'context-btn';
         b.innerHTML = emoji + ' ' + label;
-        b.onclick = () => sendMessageFromBtn(label);
+        b.onclick = () => sendMessageFromBtn(b, label);
         return b;
     };
     bar.appendChild(mk('☕', 'Kopi'));
@@ -3664,10 +3680,13 @@ function addContextShortcuts(body, text) {
     body.appendChild(bar);
 }
 
-function sendMessageFromBtn(text) {
+function sendMessageFromBtn(btnElement, text) {
     messageInput.value = text;
-    messageInput.focus();
     sendToSenka();
+    if (btnElement && btnElement.closest) {
+        const container = btnElement.closest('.context-btn-container');
+        if (container) container.remove();
+    }
 }
 
 /* ===== Command List Modal ===== */
@@ -3690,6 +3709,8 @@ function runCommandFromMenu(kind) {
         sendToSenka();
     } else if (kind === 'image') {
         openImageModal();
+    } else if (kind === 'info') {
+        showCommandListInChat();
     }
 }
 
