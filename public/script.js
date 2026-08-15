@@ -427,6 +427,7 @@ function cleanupDuplicateGreetings() {
 }
 
 async function loadRemoteChat() {
+    console.log('[GREETING DEBUG] loadRemoteChat start: supabaseEnabled=', supabaseEnabled, 'cloudSid=', cloudSid, 'memoryList.length=', memoryList.length);
     try {
         const q = new URLSearchParams({ limit: '50' });
         if (cloudSid) q.set('sesiId', cloudSid);
