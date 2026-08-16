@@ -1595,17 +1595,6 @@ function renderChat() {
         console.log('DEBUG renderChat: supabaseEnabled =', supabaseEnabled);
         const greetingContainer = document.createElement('div');
         greetingContainer.className = 'message msg-senka';
-        greetingContainer.style.maxWidth = '100%';
-        greetingContainer.style.padding = '10px 14px';
-        greetingContainer.style.background = 'rgba(0, 0, 0, 0.25)';
-        greetingContainer.style.backdropFilter = 'blur(3px)';
-        greetingContainer.style.borderRadius = '14px';
-        greetingContainer.style.fontSize = '0.9rem';
-        greetingContainer.style.lineHeight = '1.6';
-        greetingContainer.style.whiteSpace = 'pre-wrap';
-        greetingContainer.style.wordWrap = 'break-word';
-        greetingContainer.style.minWidth = '0';
-        greetingContainer.style.animation = 'msgIn 0.28s ease-out';
         const greetingText = document.createElement('div');
         greetingText.className = 'msg-body';
         const now = new Date();
@@ -1623,8 +1612,7 @@ function renderChat() {
         else selamat = 'Belom tidur';
         panggilan = localStorage.getItem('senka_panggilan') || 'pengguna';
         const fullText = `${selamat} ${panggilan}! Senka di sini`;
-        greetingText.textContent = fullText;
-        greetingContainer.appendChild(greetingText);
+        greetingText.innerHTML = renderRich(fullText);
         
         if (!supabaseEnabled) {
             saveSessions();
