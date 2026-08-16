@@ -2716,10 +2716,8 @@ async function speak(text) {
         if (!cleanText) return;
         if (voicevoxSpeakerId > 0) {
             const jpText = await toJp(cleanText);
-            if (hasJapaneseText(jpText)) {
-                const ok = await playVoicevoxTTS(jpText, voicevoxSpeakerId);
-                if (ok) return;
-            }
+            const ok = await playVoicevoxTTS(jpText || cleanText, voicevoxSpeakerId);
+            if (ok) return;
         }
         await ttsStreamTo((b64, type) => playSpeechBlob(b64, type), { text: cleanText, mode: speakMode });
     } catch (e) {
@@ -3397,10 +3395,8 @@ async function speakCallText(text) {
     try {
         if (voicevoxSpeakerId > 0) {
             const jpText = await toJp(text);
-            if (hasJapaneseText(jpText)) {
-                const ok = await playVoicevoxTTS(jpText, voicevoxSpeakerId);
-                if (ok) { afterCallSpeech(); return; }
-            }
+            const ok = await playVoicevoxTTS(jpText || text, voicevoxSpeakerId);
+            if (ok) { afterCallSpeech(); return; }
         }
         const result = await ttsStreamTo(async (b64, type) => {
             if (!callActive) return;
