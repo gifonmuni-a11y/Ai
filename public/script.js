@@ -2476,9 +2476,11 @@ async function toId(text) {
 }
 
 async function localizeBubble(el, text) {
-    if (!el || !text || !hasJapaneseText(text)) return;
+    if (!el || !text) return;
+    if (!hasJapaneseText(text)) { el.innerHTML = mdToHtml(text); return; }
     const t = await toId(text);
     if (t && t !== text) el.innerHTML = mdToHtml(t);
+    else el.innerHTML = mdToHtml(text);
 }
 
 async function localizeOptions(host, options) {
