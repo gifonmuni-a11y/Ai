@@ -16,6 +16,7 @@ let lastUserImage = null;
 let isStreaming = false;
 let autospeak = localStorage.getItem('senka_autospeak') === '1';
 let speakMode = localStorage.getItem('senka_speakmode') === 'ind' ? 'ind' : 'jpn';
+let voicevoxSpeakerId = parseInt(localStorage.getItem('senka_voicevox') || '0', 10) || 0;
 let userGender = localStorage.getItem('senka_gender') === 'perempuan' ? 'perempuan' : 'laki';
 let visionAuto = localStorage.getItem('senka_visionauto') !== '0';
 let recognition = null;
@@ -66,6 +67,8 @@ window.onload = async () => {
     initCustomSelects();
     document.getElementById('panggilan-input').value = panggilan;
     document.getElementById('autospeak-input').checked = autospeak;
+    const vpInit = document.getElementById('voice-picker');
+    if (vpInit) vpInit.value = String(voicevoxSpeakerId);
 
     try {
         const resp = await fetch('/api/config');
@@ -683,6 +686,8 @@ function openSettings() {
     document.getElementById('visionauto-input').checked = visionAuto;
     document.getElementById('speak-jp-input').checked = speakMode === 'jpn';
     document.getElementById('speak-id-input').checked = speakMode === 'ind';
+    const vp = document.getElementById('voice-picker');
+    if (vp) vp.value = String(voicevoxSpeakerId);
     document.getElementById('gender-' + userGender + '-input').checked = true;
     document.getElementById('signout-block').style.display = supabaseEnabled ? 'block' : 'none';
     renderModelPicker();
@@ -2702,10 +2707,55 @@ async function speak(text) {
     try {
         const cleanText = stripStickerTag(String(text || '')).trim();
         if (!cleanText) return;
+        if (voicevoxSpeakerId > 0) {
+            const jpText = await toJp(cleanText);
+            if (hasJapaneseText(jpText)) {
+                const ok = await playVoicevoxTTS(jpText, voicevoxSpeakerId);
+                if (ok) return;
+            }
+        }
         await ttsStreamTo((b64, type) => playSpeechBlob(b64, type), { text: cleanText, mode: speakMode });
     } catch (e) {
         // teks tetap tampil di chat; suara hanyalah bonus
     }
+}
+
+function playVoicevoxTTS(text, speakerId) {
+    return new Promise((resolve) => {
+        if (senkaAudio) stopSenkaAudio();
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 10000);
+        fetch('https://api.tts.quest/v3/voicevox/synthesis?text=' + encodeURIComponent(text) + '&speaker=' + speakerId, { signal: ctrl.signal })
+            .then(r => r.json().catch(() => ({})))
+            .then(async d => {
+                if (!d || !d.success || !d.mp3DownloadUrl) return resolve(false);
+                const audio = new Audio();
+                senkaAudio = audio;
+                audio.src = d.mp3DownloadUrl;
+                audio.onended = () => { audio.src = ''; senkaAudio = null; resolve(true); };
+                audio.onerror = () => { audio.src = ''; senkaAudio = null; resolve(false); };
+                try { await audio.play(); } catch (e) { audio.src = ''; senkaAudio = null; resolve(false); }
+            })
+            .catch(() => resolve(false))
+            .finally(() => clearTimeout(timer));
+    });
+}
+
+function setVoicevoxVoice(id) {
+    voicevoxSpeakerId = parseInt(id, 10) || 0;
+    localStorage.setItem('senka_voicevox', String(voicevoxSpeakerId));
+    if (voicevoxSpeakerId > 0) {
+        speakMode = 'jpn';
+        document.getElementById('speak-jp-input').checked = true;
+        document.getElementById('speak-id-input').checked = false;
+        localStorage.setItem('senka_speakmode', 'jpn');
+    }
+    showToast(voicevoxSpeakerId > 0 ? 'Suara Voicevox aktif' : 'Kembali ke TikTok TTS');
+}
+
+async function testVoicevox(id) {
+    const ok = await playVoicevoxTTS('こんにちは、Senkaです〜 よろしくね！', parseInt(id, 10));
+    showToast(ok ? 'Voicevox speaker ' + id + ' jalan!' : 'Voicevox speaker ' + id + ' gagal, otomatis fallback TikTok');
 }
 
 // ====== Voice Note (Pesan Suara) ======
@@ -3315,6 +3365,13 @@ async function speakCallText(text) {
     callSpeaking = true;
     setCallUI(true, 'Senka bicara...');
     try {
+        if (voicevoxSpeakerId > 0) {
+            const jpText = await toJp(text);
+            if (hasJapaneseText(jpText)) {
+                const ok = await playVoicevoxTTS(jpText, voicevoxSpeakerId);
+                if (ok) { afterCallSpeech(); return; }
+            }
+        }
         const result = await ttsStreamTo(async (b64, type) => {
             if (!callActive) return;
             const blob = base64ToBlob(b64, type || 'audio/mpeg');
