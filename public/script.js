@@ -16,14 +16,12 @@ let lastUserImage = null;
 let isStreaming = false;
 let autospeak = localStorage.getItem('senka_autospeak') === '1';
 let speakMode = localStorage.getItem('senka_speakmode') === 'ind' ? 'ind' : 'jpn';
-const VV_MIN_GAP = 2500;
-let vvQueue = Promise.resolve();
-let vvLastTs = 0;
 let voicevoxSpeakerId = (() => {
     const v = localStorage.getItem('senka_voicevox');
     const n = parseInt(v, 10);
     return Number.isNaN(n) ? 3 : n;
 })();
+let vvSpeechQueue = Promise.resolve();
 let userGender = localStorage.getItem('senka_gender') === 'perempuan' ? 'perempuan' : 'laki';
 let visionAuto = localStorage.getItem('senka_visionauto') !== '0';
 let recognition = null;
@@ -2709,56 +2707,97 @@ async function ttsStreamTo(onSegment, body) {
     return { error: false };
 }
 
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function translateToJapanese(text) {
+    return fetch('https://translate.googleapis.com/translate_a/single?client=gtx&sl=id&tl=ja&dt=t&q=' + encodeURIComponent(text))
+        .then(r => {
+            if (!r.ok) throw new Error('translate HTTP ' + r.status);
+            return r.json();
+        })
+        .then(d => {
+            const segs = (Array.isArray(d) && Array.isArray(d[0])) ? d[0].map(s => (Array.isArray(s) && s[0]) ? s[0] : '').join('') : '';
+            if (!segs.trim()) throw new Error('translate kosong');
+            return segs.trim();
+        });
+}
+
+async function stubbornTranslate(text) {
+    while (true) {
+        try {
+            const jp = await translateToJapanese(text);
+            if (hasJapaneseText(jp)) return jp;
+        } catch (e) { }
+        await sleep(2000);
+    }
+}
+
+async function stubbornSynth(jpText, speakerId) {
+    while (true) {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 15000);
+        try {
+            const r = await fetch('https://api.tts.quest/v3/voicevox/synthesis?text=' + encodeURIComponent(jpText) + '&speaker=' + speakerId, { signal: ctrl.signal });
+            clearTimeout(timer);
+            if (r.status === 429) {
+                let wait = 2000;
+                try { const d = await r.json(); if (d && d.retryAfter) wait = (parseFloat(d.retryAfter) || 2) * 1000; } catch (e) { }
+                await sleep(wait);
+                continue;
+            }
+            if (!r.ok) { await sleep(2000); continue; }
+            const d = await r.json().catch(() => ({}));
+            if (d && d.success && d.mp3DownloadUrl) return d.mp3DownloadUrl;
+        } catch (e) { clearTimeout(timer); }
+        await sleep(2000);
+    }
+}
+
+function playVvAudio(url) {
+    return new Promise((resolve) => {
+        const audio = new Audio();
+        senkaAudio = audio;
+        audio.src = url;
+        audio.onended = () => { audio.src = ''; senkaAudio = null; resolve(true); };
+        audio.onerror = () => { audio.src = ''; senkaAudio = null; resolve(false); };
+        audio.play().catch(() => { audio.src = ''; senkaAudio = null; resolve(false); });
+    });
+}
+
+async function stubbornSpeak(text, speakerId) {
+    const jpText = await stubbornTranslate(text);
+    if (!hasJapaneseText(jpText)) return false;
+    let fails = 0;
+    while (true) {
+        const url = await stubbornSynth(jpText, speakerId);
+        if (!url) { await sleep(2000); continue; }
+        const ok = await playVvAudio(url);
+        if (ok) return true;
+        fails++;
+        if (fails % 3 === 0) showToast('Suara Voicevox lagi nyambung ulang... mohon tunggu');
+        await sleep(2000);
+    }
+}
+
+function enqueueVvSpeech(text) {
+    const job = vvSpeechQueue.then(() => stubbornSpeak(text, voicevoxSpeakerId));
+    vvSpeechQueue = job.catch(() => { });
+    return job;
+}
+
 async function speak(text) {
     if (senkaAudio) stopSenkaAudio();
     try {
         const cleanText = stripStickerTag(String(text || '')).trim();
         if (!cleanText) return;
         if (voicevoxSpeakerId > 0) {
-            const jpText = await toJp(cleanText);
-            const ok = await playVoicevoxTTS(jpText || cleanText, voicevoxSpeakerId);
-            if (ok) return;
+            await enqueueVvSpeech(cleanText);
+            return;
         }
         await ttsStreamTo((b64, type) => playSpeechBlob(b64, type), { text: cleanText, mode: speakMode });
     } catch (e) {
         // teks tetap tampil di chat; suara hanyalah bonus
     }
-}
-
-function vvSynthesize(text, speakerId) {
-    return new Promise((resolve) => {
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 10000);
-        fetch('https://api.tts.quest/v3/voicevox/synthesis?text=' + encodeURIComponent(text) + '&speaker=' + speakerId, { signal: ctrl.signal })
-            .then(r => r.json().catch(() => ({})))
-            .then(d => {
-                if (d && d.success && d.mp3DownloadUrl) return resolve(d);
-                if (d && d.retryAfter) { clearTimeout(timer); return setTimeout(() => resolve({ retry: true, wait: (d.retryAfter || 1) * 1000 }), (d.retryAfter || 1) * 1000); }
-                resolve(null);
-            })
-            .catch(() => resolve(null));
-    });
-}
-
-function playVoicevoxTTS(text, speakerId) {
-    const run = () => new Promise((resolve) => {
-        vvSynthesize(text, speakerId).then(async d => {
-            if (d && d.retry) {
-                const d2 = await vvSynthesize(text, speakerId);
-                d = d2 || null;
-            }
-            if (!d || d.retry || !d.mp3DownloadUrl) return resolve(false);
-            const audio = new Audio();
-            senkaAudio = audio;
-            audio.src = d.mp3DownloadUrl;
-            audio.onended = () => { audio.src = ''; senkaAudio = null; resolve(true); };
-            audio.onerror = () => { audio.src = ''; senkaAudio = null; resolve(false); };
-            try { await audio.play(); } catch (e) { audio.src = ''; senkaAudio = null; resolve(false); }
-        });
-    });
-    const wait = Math.max(0, VV_MIN_GAP - (Date.now() - vvLastTs));
-    vvQueue = vvQueue.then(() => new Promise(r => setTimeout(r, wait))).then(run);
-    return vvQueue.then(ok => { vvLastTs = Date.now(); return ok; });
 }
 
 let prevSpeakMode = speakMode;
@@ -2782,8 +2821,10 @@ function setVoicevoxVoice(id) {
 }
 
 async function testVoicevox(id) {
-    const ok = await playVoicevoxTTS('こんにちは、Senkaです〜 よろしくね！', parseInt(id, 10));
-    showToast(ok ? 'Voicevox speaker ' + id + ' jalan!' : 'Voicevox speaker ' + id + ' gagal, otomatis fallback TikTok');
+    const jpText = await stubbornTranslate('こんにちは、Senkaです〜 よろしくね！');
+    const url = await stubbornSynth(jpText, parseInt(id, 10));
+    const ok = url ? await playVvAudio(url) : false;
+    showToast(ok ? 'Voicevox speaker ' + id + ' jalan!' : 'Voicevox speaker ' + id + ' gagal');
 }
 
 // ====== Voice Note (Pesan Suara) ======
@@ -3394,9 +3435,9 @@ async function speakCallText(text) {
     setCallUI(true, 'Senka bicara...');
     try {
         if (voicevoxSpeakerId > 0) {
-            const jpText = await toJp(text);
-            const ok = await playVoicevoxTTS(jpText || text, voicevoxSpeakerId);
-            if (ok) { afterCallSpeech(); return; }
+            await enqueueVvSpeech(text);
+            afterCallSpeech();
+            return;
         }
         const result = await ttsStreamTo(async (b64, type) => {
             if (!callActive) return;
