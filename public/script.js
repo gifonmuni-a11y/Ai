@@ -2790,6 +2790,18 @@ async function produceVvSpeech(text) {
     }
 }
 
+function silentAudioUnlock() {
+    try {
+        const a = new Audio('data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU5LjI3LjEwMAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIAD+//7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+AAAAAExhdmYAAAAAAAAAAAAAAAAAAAAAACQAAAAAAAAAASDs9y8AAAAAAAAAAAAAAAAAAAAA//MUZAAAAAGkAAAAAAAAA0gAAAAATEFNRTMuMTAwA8sAAAAAAgAAAEgAAABIAAAABH//OEZCAAAAGkAAAAAAAAA0gAAAAAAAD/5xAAAAAAAAAAAAAAA//OEZAwAAAGkAAAAAAAAA0gAAAAAAAD/5xAAAAAAAAAAAAAAA//OEZEwAAAGkAAAAAAAAA0gAAAAAAAD/5xAAAAAAAAAAAAAAA');
+        a.volume = 0.001;
+        a.play().catch(() => { });
+    } catch (e) { }
+    try {
+        if (!callCtx) callCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (callCtx && callCtx.state === 'suspended') callCtx.resume().catch(() => { });
+    } catch (e) { }
+}
+
 function playNextVoicevox() {
     if (isVoicevoxPlaying || audioQueue.length === 0) return;
     const url = audioQueue.shift();
@@ -2799,7 +2811,21 @@ function playNextVoicevox() {
     audio.src = url;
     audio.onended = () => { audio.src = ''; senkaAudio = null; isVoicevoxPlaying = false; playNextVoicevox(); };
     audio.onerror = () => { audio.src = ''; senkaAudio = null; isVoicevoxPlaying = false; playNextVoicevox(); };
-    audio.play().catch(() => { audio.src = ''; senkaAudio = null; isVoicevoxPlaying = false; playNextVoicevox(); });
+    audio.play().catch(e => {
+        audio.src = '';
+        senkaAudio = null;
+        isVoicevoxPlaying = false;
+        if (e && e.name === 'NotAllowedError') {
+            showToast('Suara belum aktif — ketuk layar sekali lagi biar izin audio kebuka');
+            document.addEventListener('pointerdown', function unlockTap() {
+                document.removeEventListener('pointerdown', unlockTap);
+                silentAudioUnlock();
+                playNextVoicevox();
+            });
+            return;
+        }
+        playNextVoicevox();
+    });
 }
 
 async function speak(text) {
@@ -3723,6 +3749,7 @@ async function sendToSenka() {
     const text = messageInput.value.trim();
     if (!text && !base64Image) return;
     if (isStreaming) return;
+    silentAudioUnlock();
 
     if (!modelKey) {
         openSettings();
