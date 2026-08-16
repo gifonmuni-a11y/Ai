@@ -4513,11 +4513,14 @@ function makeFileCard(meta) {
     const isTable = looksLikeTable(content);
     const card = document.createElement('div');
     card.className = 'file-card';
-    const iconMap = { txt: 'fa-file-lines', csv: 'fa-table', xlsx: 'fa-file-excel', excel: 'fa-file-excel', doc: 'fa-file-word', docx: 'fa-file-word', pdf: 'fa-file-pdf' };
+    const iconMap = { txt: 'fa-file-lines', csv: 'fa-table', xlsx: 'fa-file-excel', excel: 'fa-file-excel', doc: 'fa-file-word', docx: 'fa-file-word', pdf: 'fa-file-pdf', html: 'fa-file-code' };
     const btns = [
         { fmt: 'pdf', icon: 'fa-file-pdf', label: 'Download PDF' },
         { fmt: 'doc', icon: 'fa-file-word', label: 'Download Word' }
     ];
+    if (type === 'html') {
+        btns.push({ fmt: 'html', icon: 'fa-file-code', label: 'Download HTML' });
+    }
     if (isTable || ['csv', 'xlsx', 'excel'].includes(type)) {
         btns.push({ fmt: 'xlsx', icon: 'fa-file-excel', label: 'Download Excel' });
     }
@@ -4536,7 +4539,7 @@ function makeFileCard(meta) {
 }
 
 function nameWithoutExt(n) {
-    return String(n).replace(/\.(txt|csv|xlsx|excel|doc|docx|pdf)$/i, '');
+    return String(n).replace(/\.(txt|csv|xlsx|excel|doc|docx|pdf|html)$/i, '');
 }
 
 function looksLikeTable(content) {
@@ -4610,6 +4613,12 @@ function downloadGeneratedFile(meta, format) {
 
     if (fmt === 'doc' || fmt === 'docx') {
         downloadWord(name, content);
+        return;
+    }
+
+    if (fmt === 'html') {
+        const blob = new Blob([content], { type: 'text/html;charset=utf-8' });
+        saveBlob(blob, nameWithoutExt(name) + '.html');
         return;
     }
 
