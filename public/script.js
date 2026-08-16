@@ -16,7 +16,14 @@ let lastUserImage = null;
 let isStreaming = false;
 let autospeak = localStorage.getItem('senka_autospeak') === '1';
 let speakMode = localStorage.getItem('senka_speakmode') === 'ind' ? 'ind' : 'jpn';
-let voicevoxSpeakerId = parseInt(localStorage.getItem('senka_voicevox') || '0', 10) || 0;
+const VV_MIN_GAP = 2500;
+let vvQueue = Promise.resolve();
+let vvLastTs = 0;
+let voicevoxSpeakerId = (() => {
+    const v = localStorage.getItem('senka_voicevox');
+    const n = parseInt(v, 10);
+    return Number.isNaN(n) ? 3 : n;
+})();
 let userGender = localStorage.getItem('senka_gender') === 'perempuan' ? 'perempuan' : 'laki';
 let visionAuto = localStorage.getItem('senka_visionauto') !== '0';
 let recognition = null;
@@ -2720,37 +2727,60 @@ async function speak(text) {
     }
 }
 
-function playVoicevoxTTS(text, speakerId) {
+function vvSynthesize(text, speakerId) {
     return new Promise((resolve) => {
-        if (senkaAudio) stopSenkaAudio();
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), 10000);
         fetch('https://api.tts.quest/v3/voicevox/synthesis?text=' + encodeURIComponent(text) + '&speaker=' + speakerId, { signal: ctrl.signal })
             .then(r => r.json().catch(() => ({})))
-            .then(async d => {
-                if (!d || !d.success || !d.mp3DownloadUrl) return resolve(false);
-                const audio = new Audio();
-                senkaAudio = audio;
-                audio.src = d.mp3DownloadUrl;
-                audio.onended = () => { audio.src = ''; senkaAudio = null; resolve(true); };
-                audio.onerror = () => { audio.src = ''; senkaAudio = null; resolve(false); };
-                try { await audio.play(); } catch (e) { audio.src = ''; senkaAudio = null; resolve(false); }
+            .then(d => {
+                if (d && d.success && d.mp3DownloadUrl) return resolve(d);
+                if (d && d.retryAfter) { clearTimeout(timer); return setTimeout(() => resolve({ retry: true, wait: (d.retryAfter || 1) * 1000 }), (d.retryAfter || 1) * 1000); }
+                resolve(null);
             })
-            .catch(() => resolve(false))
-            .finally(() => clearTimeout(timer));
+            .catch(() => resolve(null));
     });
 }
 
+function playVoicevoxTTS(text, speakerId) {
+    const run = () => new Promise((resolve) => {
+        vvSynthesize(text, speakerId).then(async d => {
+            if (d && d.retry) {
+                const d2 = await vvSynthesize(text, speakerId);
+                d = d2 || null;
+            }
+            if (!d || d.retry || !d.mp3DownloadUrl) return resolve(false);
+            const audio = new Audio();
+            senkaAudio = audio;
+            audio.src = d.mp3DownloadUrl;
+            audio.onended = () => { audio.src = ''; senkaAudio = null; resolve(true); };
+            audio.onerror = () => { audio.src = ''; senkaAudio = null; resolve(false); };
+            try { await audio.play(); } catch (e) { audio.src = ''; senkaAudio = null; resolve(false); }
+        });
+    });
+    const wait = Math.max(0, VV_MIN_GAP - (Date.now() - vvLastTs));
+    vvQueue = vvQueue.then(() => new Promise(r => setTimeout(r, wait))).then(run);
+    return vvQueue.then(ok => { vvLastTs = Date.now(); return ok; });
+}
+
+let prevSpeakMode = speakMode;
 function setVoicevoxVoice(id) {
-    voicevoxSpeakerId = parseInt(id, 10) || 0;
-    localStorage.setItem('senka_voicevox', String(voicevoxSpeakerId));
-    if (voicevoxSpeakerId > 0) {
+    const vv = parseInt(id, 10) || 0;
+    voicevoxSpeakerId = vv;
+    localStorage.setItem('senka_voicevox', String(vv));
+    if (vv > 0) {
+        if (prevSpeakMode === speakMode) prevSpeakMode = speakMode;
         speakMode = 'jpn';
         document.getElementById('speak-jp-input').checked = true;
         document.getElementById('speak-id-input').checked = false;
         localStorage.setItem('senka_speakmode', 'jpn');
+    } else {
+        speakMode = prevSpeakMode;
+        document.getElementById('speak-jp-input').checked = speakMode === 'jpn';
+        document.getElementById('speak-id-input').checked = speakMode === 'ind';
+        localStorage.setItem('senka_speakmode', speakMode);
     }
-    showToast(voicevoxSpeakerId > 0 ? 'Suara Voicevox aktif' : 'Kembali ke TikTok TTS');
+    showToast(vv > 0 ? 'Suara Voicevox aktif' : 'Kembali ke TikTok TTS');
 }
 
 async function testVoicevox(id) {
