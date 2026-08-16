@@ -394,7 +394,8 @@ function makeRemoteBtn() {
 }
 
 function isGreetingText(t) {
-    return /^(Selamat (pagi|siang|sore|malam|beristirahat)|Bangun dan waktunya bersinar|Belom tidur)/.test(t);
+    const s = (t || '').trim();
+    return /^(Selamat (pagi|siang|sore|malam|beristirahat|istirahat siang|siang semangat hari ini)|Bangun dan waktunya bersinar|Belom tidur)\s+[^!]+!\s*(Si Kelelawar,\s*)?Senka (Online|disini|di sini)$/.test(s);
 }
 
 function cleanupDuplicateGreetings() {
