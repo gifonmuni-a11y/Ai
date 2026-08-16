@@ -1620,6 +1620,9 @@ function renderChat() {
         else selamat = 'Belom tidur';
         panggilan = localStorage.getItem('senka_panggilan') || 'pengguna';
         const fullText = `${selamat} ${panggilan}! Senka di sini`;
+        const gTs = Date.now();
+        const item = { role: 'assistant', content: [{ type: 'text', text: fullText }], ts: gTs, time: formatMsgTime(gTs) };
+        memoryList.push(item);
         const gEl = document.createElement('div');
         gEl.classList.add('message', 'msg-senka');
         gEl.innerText = fullText;
@@ -1632,7 +1635,7 @@ function renderChat() {
             if (!supabaseEnabled) {
                 saveSessions();
             } else {
-                remoteSave('senka', 'text', fullText, null);
+                remoteSave('senka', 'text', fullText, item);
             }
         } catch (e) {
             console.log('DEBUG: greeting save failed, but rendered:', e);
@@ -2440,6 +2443,7 @@ async function toJp(text) {
     const s = String(text || '').trim();
     if (!s) return text;
     if (hasJapaneseText(s)) return text;
+    if (/https?:\/\/\S+/i.test(s)) return text;
     if (jpTrCache.has(s)) return jpTrCache.get(s);
     try {
         const r = await fetch('/api/translate', {
@@ -2495,7 +2499,7 @@ async function localizeUserMessages(messages) {
     const jobs = messages.map(async (m) => {
         if (m.role !== 'user' || !Array.isArray(m.content) || m.hidden) return m;
         const parts = await Promise.all(m.content.map(async (c) => {
-            if (c.type === 'text' && c.text && !hasJapaneseText(c.text)) {
+            if (c.type === 'text' && c.text && !hasJapaneseText(c.text) && !/https?:\/\/\S+/i.test(c.text)) {
                 return { ...c, text: await toJp(c.text) };
             }
             return c;
@@ -3638,13 +3642,6 @@ async function sendToSenka() {
     messageInput.value = '';
     removeImage();
     scrollToBottom(true);
-
-    // Remove greeting container after user sends first message
-    const greetingContainer = chatHistoryDOM.querySelector('.message.msg-senka');
-    if (greetingContainer) {
-        console.log('DEBUG: removing greeting container');
-        greetingContainer.remove();
-    }
 
     const jpnMode = speakMode === 'jpn';
     const sendText = jpnMode ? await toJp(text) : text;
