@@ -21,7 +21,9 @@ let voicevoxSpeakerId = (() => {
     const n = parseInt(v, 10);
     return Number.isNaN(n) ? 3 : n;
 })();
-let vvSpeechQueue = Promise.resolve();
+let vvSession = 0;
+let audioQueue = [];
+let isVoicevoxPlaying = false;
 let userGender = localStorage.getItem('senka_gender') === 'perempuan' ? 'perempuan' : 'laki';
 let visionAuto = localStorage.getItem('senka_visionauto') !== '0';
 let recognition = null;
@@ -2649,7 +2651,7 @@ function addMsgActions(bubble, role) {
 }
 
 let senkaAudio = null;
-function stopSenkaAudio() { if (senkaAudio) { try { senkaAudio.pause(); } catch (e) { } senkaAudio = null; } }
+function stopSenkaAudio() { if (senkaAudio) { try { senkaAudio.pause(); } catch (e) { } senkaAudio = null; } isVoicevoxPlaying = false; }
 
 function playSpeechBlob(b64, type) {
     return new Promise((resolve, reject) => {
@@ -2753,36 +2755,51 @@ async function stubbornSynth(jpText, speakerId) {
     }
 }
 
-function playVvAudio(url) {
-    return new Promise((resolve) => {
-        const audio = new Audio();
-        senkaAudio = audio;
-        audio.src = url;
-        audio.onended = () => { audio.src = ''; senkaAudio = null; resolve(true); };
-        audio.onerror = () => { audio.src = ''; senkaAudio = null; resolve(false); };
-        audio.play().catch(() => { audio.src = ''; senkaAudio = null; resolve(false); });
-    });
+function chunkText(text) {
+    const raw = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!raw) return [];
+    const sentences = raw.split(/(?<=[.!?。！？])\s+/).map(s => s.trim()).filter(Boolean);
+    const chunks = [];
+    for (const s of sentences) {
+        if (s.length <= 70) { chunks.push(s); continue; }
+        const parts = s.split(/(?<=[,，])\s+/).map(p => p.trim()).filter(Boolean);
+        let acc = '';
+        for (const p of parts) {
+            if ((acc + ' ' + p).trim().length <= 70) acc = acc ? acc + ' ' + p : p;
+            else { if (acc) chunks.push(acc.trim()); acc = p; }
+        }
+        if (acc) chunks.push(acc.trim());
+    }
+    return chunks;
 }
 
-async function stubbornSpeak(text, speakerId) {
-    const jpText = await stubbornTranslate(text);
-    if (!hasJapaneseText(jpText)) return false;
-    let fails = 0;
-    while (true) {
-        const url = await stubbornSynth(jpText, speakerId);
-        if (!url) { await sleep(2000); continue; }
-        const ok = await playVvAudio(url);
-        if (ok) return true;
-        fails++;
-        if (fails % 3 === 0) showToast('Suara Voicevox lagi nyambung ulang... mohon tunggu');
-        await sleep(2000);
+async function produceVvSpeech(text) {
+    const mySession = vvSession;
+    const chunks = chunkText(text);
+    for (const c of chunks) {
+        if (mySession !== vvSession) return;
+        const jp = await stubbornTranslate(c);
+        if (!hasJapaneseText(jp)) continue;
+        const url = await stubbornSynth(jp, voicevoxSpeakerId);
+        if (mySession !== vvSession) return;
+        if (url) {
+            audioQueue.push(url);
+            playNextVoicevox();
+        }
+        await sleep(1500);
     }
 }
 
-function enqueueVvSpeech(text) {
-    const job = vvSpeechQueue.then(() => stubbornSpeak(text, voicevoxSpeakerId));
-    vvSpeechQueue = job.catch(() => { });
-    return job;
+function playNextVoicevox() {
+    if (isVoicevoxPlaying || audioQueue.length === 0) return;
+    const url = audioQueue.shift();
+    isVoicevoxPlaying = true;
+    const audio = new Audio();
+    senkaAudio = audio;
+    audio.src = url;
+    audio.onended = () => { audio.src = ''; senkaAudio = null; isVoicevoxPlaying = false; playNextVoicevox(); };
+    audio.onerror = () => { audio.src = ''; senkaAudio = null; isVoicevoxPlaying = false; playNextVoicevox(); };
+    audio.play().catch(() => { audio.src = ''; senkaAudio = null; isVoicevoxPlaying = false; playNextVoicevox(); });
 }
 
 async function speak(text) {
@@ -2791,7 +2808,10 @@ async function speak(text) {
         const cleanText = stripStickerTag(String(text || '')).trim();
         if (!cleanText) return;
         if (voicevoxSpeakerId > 0) {
-            await enqueueVvSpeech(cleanText);
+            vvSession++;
+            audioQueue.length = 0;
+            isVoicevoxPlaying = false;
+            produceVvSpeech(cleanText);
             return;
         }
         await ttsStreamTo((b64, type) => playSpeechBlob(b64, type), { text: cleanText, mode: speakMode });
@@ -2823,8 +2843,13 @@ function setVoicevoxVoice(id) {
 async function testVoicevox(id) {
     const jpText = await stubbornTranslate('こんにちは、Senkaです〜 よろしくね！');
     const url = await stubbornSynth(jpText, parseInt(id, 10));
-    const ok = url ? await playVvAudio(url) : false;
-    showToast(ok ? 'Voicevox speaker ' + id + ' jalan!' : 'Voicevox speaker ' + id + ' gagal');
+    if (!url) { showToast('Voicevox speaker ' + id + ' gagal'); return; }
+    vvSession++;
+    audioQueue.length = 0;
+    isVoicevoxPlaying = false;
+    audioQueue.push(url);
+    playNextVoicevox();
+    showToast('Voicevox speaker ' + id + ' jalan!');
 }
 
 // ====== Voice Note (Pesan Suara) ======
@@ -3435,7 +3460,11 @@ async function speakCallText(text) {
     setCallUI(true, 'Senka bicara...');
     try {
         if (voicevoxSpeakerId > 0) {
-            await enqueueVvSpeech(text);
+            vvSession++;
+            audioQueue.length = 0;
+            isVoicevoxPlaying = false;
+            await produceVvSpeech(text);
+            while (audioQueue.length > 0 || isVoicevoxPlaying) await sleep(200);
             afterCallSpeech();
             return;
         }
