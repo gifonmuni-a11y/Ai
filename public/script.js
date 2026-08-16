@@ -3643,10 +3643,7 @@ async function sendToSenka() {
     removeImage();
     scrollToBottom(true);
 
-    const jpnMode = speakMode === 'jpn';
-    const sendText = jpnMode ? await toJp(text) : text;
-    const payload = jpnMode ? await localizeUserMessages(memoryList) : memoryList;
-    await streamAssistantReply(await getWebPayload(payload, sendText), jpnMode);
+    await streamAssistantReply(await getWebPayload(memoryList, text));
 }
 
 /* ===== Bot Command Center (/senka*) ===== */
@@ -4348,7 +4345,7 @@ async function getWebPayload(baseMessages, lastText) {
     return context ? [...baseMessages, { role: 'system', content: context }] : baseMessages;
 }
 
-async function streamAssistantReply(payloadMessages, jpnMode = false) {
+async function streamAssistantReply(payloadMessages) {
     const createdTs = Date.now();
     const msgContent = makeMsgContent('senka', createdTs, formatMsgTime(createdTs));
     const msgDiv = document.createElement('div');
@@ -4367,7 +4364,7 @@ async function streamAssistantReply(payloadMessages, jpnMode = false) {
         const response = await fetch('/api/chat/stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages: payloadMessages, modelKey, panggilan, useVision: visionAuto, gender: personaGender(), persona: personaPayload(), length: lengthSetting(), lorebook: getActiveLorebook(), mode: storyMode, jpnMode })
+            body: JSON.stringify({ messages: payloadMessages, modelKey, panggilan, useVision: visionAuto, gender: personaGender(), persona: personaPayload(), length: lengthSetting(), lorebook: getActiveLorebook(), mode: storyMode })
         });
 
         if (!response.ok) {
@@ -4414,7 +4411,7 @@ async function streamAssistantReply(payloadMessages, jpnMode = false) {
                     if (delta) {
                         if (!started) { streamBuf = ''; started = true; }
                         streamBuf += delta;
-                        if (!jpnMode) msgBodyOf(msgDiv).innerHTML = mdToHtml(streamBuf);
+                        msgBodyOf(msgDiv).innerHTML = mdToHtml(streamBuf);
                         if (chatHistoryDOM.scrollHeight - chatHistoryDOM.scrollTop - chatHistoryDOM.clientHeight < 200) {
                             chatHistoryDOM.scrollTop = chatHistoryDOM.scrollHeight;
                         }
@@ -4438,21 +4435,11 @@ async function streamAssistantReply(payloadMessages, jpnMode = false) {
         const opsi = extractOpsi(renderText);
 
         const rb = msgBodyOf(msgContent);
-        if (jpnMode && hasJapaneseText(renderText)) {
-            const [cleanId, optsId] = await Promise.all([
-                toId(opsi.clean),
-                Promise.all((opsi.options || []).map(o => toId(o)))
-            ]);
-            rb.innerHTML = mdToHtml(cleanId);
-            if (stk) appendStickerImg(msgMediaOf(msgContent), stk);
-            if (fileReq) rb.appendChild(makeFileCard(fileReq.meta));
-            if (!fileReq) appendOpsiButtons(rb, optsId);
-        } else {
-            rb.innerHTML = mdToHtml(opsi.clean);
-            if (stk) appendStickerImg(msgMediaOf(msgContent), stk);
-            if (fileReq) rb.appendChild(makeFileCard(fileReq.meta));
-            if (!fileReq) appendOpsiButtons(rb, opsi.options);
-        }
+        rb.innerHTML = mdToHtml(opsi.clean);
+        if (stk) appendStickerImg(msgMediaOf(msgContent), stk);
+        if (fileReq) rb.appendChild(makeFileCard(fileReq.meta));
+        if (!fileReq && displayText.trim()) attachCallTranslation(rb, displayText.trim());
+        if (!fileReq) appendOpsiButtons(rb, opsi.options);
         addMsgActions(msgContent, 'senka');
 
         memoryList.push({ role: 'assistant', content: [{ type: "text", text: displayText }], ts: createdTs, time: formatMsgTime(createdTs) });
