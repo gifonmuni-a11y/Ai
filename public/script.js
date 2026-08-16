@@ -320,10 +320,21 @@ function encryptText(s) {
 
 function decryptText(s) {
     if (typeof CryptoJS === 'undefined' || !s) return s;
-    try {
-        const t = CryptoJS.AES.decrypt(String(s), encKey()).toString(CryptoJS.enc.Utf8);
-        return t || null;
-    } catch (e) { return null; }
+    const str = String(s);
+    if (!str.startsWith('U2FsdGVkX1')) return str;
+    const keys = [];
+    const push = k => { if (k) keys.push(k); };
+    push(encKey());
+    push(CryptoJS.SHA256('senka:masterkey').toString());
+    push(CryptoJS.SHA256('senka:' + (cloudUid || '')).toString());
+    push(CryptoJS.SHA256('senka:' + (deviceUserId || getDeviceUserId())).toString());
+    for (let i = 0; i < keys.length; i++) {
+        try {
+            const t = CryptoJS.AES.decrypt(str, keys[i]).toString(CryptoJS.enc.Utf8);
+            if (t) return t;
+        } catch (e) { }
+    }
+    return null;
 }
 
 function remoteToLocal(m) {
@@ -1613,14 +1624,19 @@ function renderChat() {
         gEl.innerText = fullText;
         gEl.dataset.greeting = '1';
         
-        if (!supabaseEnabled) {
-            saveSessions();
-        } else {
-            remoteSave('senka', 'text', fullText, null);
-        }
-        
         chatHistoryDOM.appendChild(gEl);
         scrollToBottom(true);
+        
+        try {
+            if (!supabaseEnabled) {
+                saveSessions();
+            } else {
+                remoteSave('senka', 'text', fullText, null);
+            }
+        } catch (e) {
+            console.log('DEBUG: greeting save failed, but rendered:', e);
+        }
+        
         console.log('DEBUG: greeting div created. fullText =', fullText, 'structure = <div class="message msg-senka">');
         console.log('DEBUG: supabaseEnabled =', supabaseEnabled, '→ saving', supabaseEnabled ? 'via remoteSave' : 'via saveSessions');
     } else {
