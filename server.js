@@ -59,7 +59,7 @@ const PROVIDERS = {
 };
 
 const MODELS = [
-    { key: "groq-llama33",   label: "GPT-OSS 20B (Groq)",                 provider: "groq",       id: "openai/gpt-oss-20b" },
+    { key: "groq-llama33",   label: "GPT-OSS 120B (Groq)",                 provider: "groq",       id: "openai/gpt-oss-120b" },
     { key: "gemini-flash",   label: "Gemini 3.6 Flash (Google)",            provider: "gemini",     id: process.env.GEMINI_MODEL || "gemini-3.6-flash" },
     { key: "horde-rp",       label: "AI Horde (gratis)",                      provider: "horde",      id: "any" },
     { key: "groq-oss120b",   label: "GPT-OSS 120B (Groq)",                  provider: "groq",       id: "openai/gpt-oss-120b" },
@@ -1093,7 +1093,7 @@ async function executeVerifiedSearch(intent, query, rawText, budgetMs = 13000) {
 // ====== ROUTER: pre-flight LLM (timeout cepat) → { intent, query } ======
 async function detectSearchIntent(lastText) {
     const preflights = [];
-    if (hasGroqKey()) preflights.push(['groq', 'openai/gpt-oss-20b']);
+    if (hasGroqKey()) preflights.push(['groq', 'openai/gpt-oss-120b']);
     if (process.env.GEMINI_API_KEY) preflights.push(['gemini', process.env.GEMINI_MODEL || 'gemini-3.6-flash']);
     const res = await Promise.all(preflights.map(([pv, pid]) =>
         withTimeout(
@@ -2207,7 +2207,7 @@ async function translateToEnglish(prompt) {
             method: 'POST',
             headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: 'openai/gpt-oss-20b',
+                model: 'openai/gpt-oss-120b',
                 messages: [
                     { role: 'system', content: 'Translate the user text to English. Reply with ONLY the English translation, no quotes, no explanations.' },
                     { role: 'user', content: prompt }
@@ -2247,7 +2247,7 @@ async function translateToJapanese(text) {
         { role: 'user', content: text }
     ];
     const attempts = [];
-    if (hasGroqKey()) attempts.push(() => callProvider('groq', prompts, 'openai/gpt-oss-20b', false, 0.1));
+    if (hasGroqKey()) attempts.push(() => callProvider('groq', prompts, 'openai/gpt-oss-120b', false, 0.1));
     if (hasOpenRouterKey()) attempts.push(() => callProvider('openrouter', prompts, 'openai/gpt-oss-20b:free', false, 0.1));
     for (const fn of attempts) {
         try {
@@ -2277,7 +2277,7 @@ async function translateToIndonesian(text) {
         { role: 'user', content: text }
     ];
     const attempts = [];
-    if (hasGroqKey()) attempts.push(() => callProvider('groq', prompts, 'openai/gpt-oss-20b', false, 0.1));
+    if (hasGroqKey()) attempts.push(() => callProvider('groq', prompts, 'openai/gpt-oss-120b', false, 0.1));
     if (hasOpenRouterKey()) attempts.push(() => callProvider('openrouter', prompts, 'openai/gpt-oss-20b:free', false, 0.1));
     for (const fn of attempts) {
         try {
@@ -2287,9 +2287,6 @@ async function translateToIndonesian(text) {
             const t = String(data?.choices?.[0]?.message?.content || '').trim()
                 .replace(/^[\s"'"“”「」『』`~]+|[\s"'"“”「」『』`~]+$/g, '');
             if (!t) continue;
-            if (/[\u3040-\u30ff\u4e00-\u9faf]/.test(t)) continue;
-            if (/[a-zA-Z]{8,}/.test(t.replace(/\s/g, '')) && !/[aiueoAIUEO]/.test(t)) continue;
-            if (t.length < 3) continue;
             cacheSet(translateCache, 'id|' + text, t, 400);
             return t;
         } catch (e) {
