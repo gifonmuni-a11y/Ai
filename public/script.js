@@ -1522,7 +1522,6 @@ function buildMsgEl(m) {
         }
         return body;
     };
-    let bubbleText = '';
     (m.content || []).forEach(c => {
         if (!c) return;
         if (c.type === 'text') {
@@ -1535,7 +1534,6 @@ function buildMsgEl(m) {
                     const opsi = extractOpsi(cleanText);
                     if (speakMode === 'jpn') localizeBubble(p, opsi.clean);
                     else p.innerHTML = mdToHtml(opsi.clean);
-                    if (m.role === 'assistant') bubbleText += ' ' + cleanText;
                     bodyOf().appendChild(p);
                     appendOpsiButtons(bodyOf(), opsi.options);
                     if (speakMode === 'jpn') localizeOptions(bodyOf(), opsi.options);
@@ -1596,7 +1594,6 @@ function buildMsgEl(m) {
     if (media) content.appendChild(media);
     addMsgActions(content, role);
     if (m.role === 'assistant') {
-        if (bubbleText.trim() && speakMode !== 'jpn') attachCallTranslation(bubble || content, bubbleText.trim());
         attachAiActions(content, m, lastAssistantIdx() === memoryList.indexOf(m));
     }
     return assembleMsgRow(role, content);
@@ -2438,8 +2435,7 @@ function editAiMessage(bubble, item) {
     ta.focus();
 }
 
-// ===== Terjemahan otomatis mode telfon (bila teks Senka ada huruf Jepang) =====
-const msgTlCache = new Map();
+// ===== Terjemahan otomatis (teks Senka) =====
 const jpTrCache = new Map();
 const idTrCache = new Map();
 
@@ -2515,35 +2511,6 @@ async function localizeUserMessages(messages) {
 
 function hasJapaneseText(text) {
     return /[\u3040-\u30ff\u4e00-\u9faf]/.test(text);
-}
-
-function attachCallTranslation(bubble, text) {
-    if (!bubble || !text || !hasJapaneseText(text)) return;
-    const div = document.createElement('div');
-    div.className = 'call-tl';
-    const lbl = document.createElement('span');
-    lbl.className = 'call-tl-label';
-    lbl.innerHTML = '<i class="fa-solid fa-language"></i> Terjemahan: ';
-    const body = document.createElement('span');
-    body.className = 'call-tl-body';
-    body.textContent = 'menerjemahkan...';
-    div.appendChild(lbl);
-    div.appendChild(body);
-    bubble.appendChild(div);
-    const done = (t) => { body.textContent = t; };
-    if (msgTlCache.has(text)) { done(msgTlCache.get(text)); return; }
-    fetch('/api/translate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text })
-    })
-        .then(r => r.json().catch(() => ({})))
-        .then(d => {
-            if (!d || !d.translated) throw new Error('gagal');
-            msgTlCache.set(text, d.translated);
-            done(d.translated);
-        })
-        .catch(() => { body.textContent = 'Terjemahan gagal. Coba lagi ya.'; });
 }
 
 function attachAiActions(bubble, item, isLast) {
@@ -4464,7 +4431,6 @@ async function streamAssistantReply(payloadMessages) {
         rb.innerHTML = mdToHtml(opsi.clean);
         if (stk) appendStickerImg(msgMediaOf(msgContent), stk);
         if (fileReq) rb.appendChild(makeFileCard(fileReq.meta));
-        if (!fileReq && displayText.trim()) attachCallTranslation(rb, displayText.trim());
         if (!fileReq) appendOpsiButtons(rb, opsi.options);
         addMsgActions(msgContent, 'senka');
 
