@@ -1717,7 +1717,7 @@ function formatPlain(s) {
         '|(\\b' + name + '\\b)' +
         '|(\\b[Ss]enka\\b)' +
         '|([0-9]+)' +
-        '|([.,?!:\u2014])' +
+        '|([.,?!:\u2014\u2022])' +
         '|([\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af\u0400-\u04ff\u0600-\u06ff\u0e00-\u0e7f\u0900-\u097f\u3000-\u303f]+)' +
         '|([;&])' +
         '|([+](?=[0-9]))' +
@@ -2568,6 +2568,29 @@ function protectColorSpans(s, arr) {
     });
 }
 
+function colorizeMarkdownHtml(html) {
+    const wrap = document.createElement('div');
+    wrap.innerHTML = html;
+    const walk = (node) => {
+        if (!node || node.nodeType !== Node.ELEMENT_NODE) return;
+        if (/^(PRE|CODE|SCRIPT|STYLE|SVG|IMG|TABLE|TH|TD)$/i.test(node.tagName)) return;
+        for (const child of [...node.childNodes]) {
+            if (child.nodeType === Node.TEXT_NODE) {
+                const t = child.nodeValue;
+                if (t && t.trim()) {
+                    const frag = document.createElement('span');
+                    frag.innerHTML = formatPlain(t);
+                    child.parentNode.replaceChild(frag, child);
+                }
+            } else {
+                walk(child);
+            }
+        }
+    };
+    walk(wrap);
+    return wrap.innerHTML;
+}
+
 function mdToHtml(raw) {
     if (!raw) return '';
     let s = String(raw).replace(/([0-9])[\uFE0F\u20D0-\u20FF]+\s*/g, '$1. ');
@@ -2585,6 +2608,7 @@ function mdToHtml(raw) {
     out = out.replace(/(<br>\s*)?\uE000SRC(\d+)\uE001(\s*<br>)?/g, (m, b1, i) => formatSumberLine(sumberLines[+i]));
     out = out.replace(/\uE000CLR(\d+)\uE001/g, (m, i) => colorSpans[+i]);
     out = out.replace(/<p>\s*<\/p>/g, '');
+    out = colorizeMarkdownHtml(out);
     return out;
 }
 

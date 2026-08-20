@@ -2,12 +2,14 @@
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap');
 * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Poppins', sans-serif; -webkit-tap-highlight-color: transparent; }
 html, body { height: 100%; }
+html { touch-action: manipulation; }
 body {
     background-color: #060a14;
     height: 100vh; height: 100dvh;
     overflow: hidden; color: #f1f5f9;
     user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
     position: relative;
+    touch-action: manipulation; overscroll-behavior: none;
 }
 .wallpaper {
     position: fixed; inset: 0; z-index: 0;
