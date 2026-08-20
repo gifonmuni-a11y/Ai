@@ -59,7 +59,7 @@ const PROVIDERS = {
 };
 
 const MODELS = [
-    { key: "groq-llama33",   label: "Llama 3.3 70B (Groq)",                 provider: "groq",       id: "llama-3.3-70b-versatile" },
+    { key: "groq-llama33",   label: "GPT-OSS 20B (Groq)",                 provider: "groq",       id: "openai/gpt-oss-20b" },
     { key: "gemini-flash",   label: "Gemini 3.6 Flash (Google)",            provider: "gemini",     id: process.env.GEMINI_MODEL || "gemini-3.6-flash" },
     { key: "horde-rp",       label: "AI Horde (gratis)",                      provider: "horde",      id: "any" },
     { key: "groq-oss120b",   label: "GPT-OSS 120B (Groq)",                  provider: "groq",       id: "openai/gpt-oss-120b" },
@@ -1093,14 +1093,14 @@ async function executeVerifiedSearch(intent, query, rawText, budgetMs = 13000) {
 // ====== ROUTER: pre-flight LLM (timeout cepat) → { intent, query } ======
 async function detectSearchIntent(lastText) {
     const preflights = [];
-    if (hasGroqKey()) preflights.push(['groq', 'llama-3.1-8b-instant']);
+    if (hasGroqKey()) preflights.push(['groq', 'openai/gpt-oss-20b']);
     if (process.env.GEMINI_API_KEY) preflights.push(['gemini', process.env.GEMINI_MODEL || 'gemini-3.6-flash']);
     const res = await Promise.all(preflights.map(([pv, pid]) =>
         withTimeout(
             callProvider(pv, [
                 { role: 'system', content: SEARCH_DETECTOR_SYS },
                 { role: 'user', content: lastText.slice(0, 400) }
-            ], pid, false, 0, { tools: [SEARCH_TOOL], max_tokens: 90 }).then(r => (r && r.ok) ? r.json() : null),
+            ], pid, false, 0, { tools: [SEARCH_TOOL], max_tokens: 300 }).then(r => (r && r.ok) ? r.json() : null),
             4000
         ).catch(() => null)
     ));
@@ -2207,7 +2207,7 @@ async function translateToEnglish(prompt) {
             method: 'POST',
             headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: 'llama-3.1-8b-instant',
+                model: 'openai/gpt-oss-20b',
                 messages: [
                     { role: 'system', content: 'Translate the user text to English. Reply with ONLY the English translation, no quotes, no explanations.' },
                     { role: 'user', content: prompt }
@@ -2247,7 +2247,7 @@ async function translateToJapanese(text) {
         { role: 'user', content: text }
     ];
     const attempts = [];
-    if (hasGroqKey()) attempts.push(() => callProvider('groq', prompts, 'llama-3.1-8b-instant', false, 0.1));
+    if (hasGroqKey()) attempts.push(() => callProvider('groq', prompts, 'openai/gpt-oss-20b', false, 0.1));
     if (hasOpenRouterKey()) attempts.push(() => callProvider('openrouter', prompts, 'openai/gpt-oss-20b:free', false, 0.1));
     for (const fn of attempts) {
         try {
@@ -2277,7 +2277,7 @@ async function translateToIndonesian(text) {
         { role: 'user', content: text }
     ];
     const attempts = [];
-    if (hasGroqKey()) attempts.push(() => callProvider('groq', prompts, 'llama-3.1-8b-instant', false, 0.1));
+    if (hasGroqKey()) attempts.push(() => callProvider('groq', prompts, 'openai/gpt-oss-20b', false, 0.1));
     if (hasOpenRouterKey()) attempts.push(() => callProvider('openrouter', prompts, 'openai/gpt-oss-20b:free', false, 0.1));
     for (const fn of attempts) {
         try {
@@ -2533,7 +2533,7 @@ app.post('/api/chats', async (req, res) => {
         if (!supabase) return res.status(503).json({ error: 'Supabase belum dikonfigurasi.' });
         const tok = decodeToken(req);
         if (!tok || !tok.uid) return res.status(401).json({ error: 'Belum login.' });
-        const { sesiId, tipePesan, isiPesan, pengirim } = req.body || {};
+        const { sesiId, tipePesan, isiPesan, pengirim, nama } = req.body || {};
         if (!pengirim) return res.status(400).json({ error: 'pengirim wajib.' });
         const tipe = ['text', 'image', 'video', 'voice'].includes(tipePesan) ? tipePesan : 'text';
         const client = clientFor(req);
@@ -2552,7 +2552,7 @@ app.post('/api/chats', async (req, res) => {
         if (error) return res.status(500).json({ error: error.message });
         if (sesiId) {
             await client.from('senka_sessions').upsert(
-                { id: String(sesiId), user_id: tok.uid, nama: null, waktu_update: new Date().toISOString() },
+                { id: String(sesiId), user_id: tok.uid, nama: String(nama || 'Sesi').slice(0, 40), waktu_update: new Date().toISOString() },
                 { onConflict: 'id', ignoreDuplicates: false }
             ).eq('user_id', tok.uid).then(({ error: upErr }) => {
                 if (upErr) console.error('Sesi touch error:', upErr.message);

@@ -16,14 +16,6 @@ let lastUserImage = null;
 let isStreaming = false;
 let autospeak = localStorage.getItem('senka_autospeak') === '1';
 let speakMode = localStorage.getItem('senka_speakmode') === 'ind' ? 'ind' : 'jpn';
-let voicevoxSpeakerId = (() => {
-    const v = localStorage.getItem('senka_voicevox');
-    const n = parseInt(v, 10);
-    return Number.isNaN(n) ? 3 : n;
-})();
-let vvSession = 0;
-let audioQueue = [];
-let isVoicevoxPlaying = false;
 let userGender = localStorage.getItem('senka_gender') === 'perempuan' ? 'perempuan' : 'laki';
 let visionAuto = localStorage.getItem('senka_visionauto') !== '0';
 let recognition = null;
@@ -72,10 +64,12 @@ window.onload = async () => {
     }
     setModeBadge();
     initCustomSelects();
+    loadSavedMusicQueue();
+    if (musicQueue.length && ytPlayer) {
+        try { playTrack(currentTrackIndex); } catch (e) { }
+    }
     document.getElementById('panggilan-input').value = panggilan;
     document.getElementById('autospeak-input').checked = autospeak;
-    const vpInit = document.getElementById('voice-picker');
-    if (vpInit) vpInit.value = String(voicevoxSpeakerId);
 
     try {
         const resp = await fetch('/api/config');
@@ -693,8 +687,6 @@ function openSettings() {
     document.getElementById('visionauto-input').checked = visionAuto;
     document.getElementById('speak-jp-input').checked = speakMode === 'jpn';
     document.getElementById('speak-id-input').checked = speakMode === 'ind';
-    const vp = document.getElementById('voice-picker');
-    if (vp) vp.value = String(voicevoxSpeakerId);
     document.getElementById('gender-' + userGender + '-input').checked = true;
     document.getElementById('signout-block').style.display = supabaseEnabled ? 'block' : 'none';
     renderModelPicker();
@@ -2651,7 +2643,7 @@ function addMsgActions(bubble, role) {
 }
 
 let senkaAudio = null;
-function stopSenkaAudio() { if (senkaAudio) { try { senkaAudio.pause(); } catch (e) { } senkaAudio = null; } isVoicevoxPlaying = false; }
+function stopSenkaAudio() { if (senkaAudio) { try { senkaAudio.pause(); } catch (e) { } senkaAudio = null; } }
 
 function playSpeechBlob(b64, type) {
     return new Promise((resolve, reject) => {
@@ -2709,173 +2701,15 @@ async function ttsStreamTo(onSegment, body) {
     return { error: false };
 }
 
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-function translateToJapanese(text) {
-    return fetch('https://translate.googleapis.com/translate_a/single?client=gtx&sl=id&tl=ja&dt=t&q=' + encodeURIComponent(text))
-        .then(r => {
-            if (!r.ok) throw new Error('translate HTTP ' + r.status);
-            return r.json();
-        })
-        .then(d => {
-            const segs = (Array.isArray(d) && Array.isArray(d[0])) ? d[0].map(s => (Array.isArray(s) && s[0]) ? s[0] : '').join('') : '';
-            if (!segs.trim()) throw new Error('translate kosong');
-            return segs.trim();
-        });
-}
-
-async function stubbornTranslate(text) {
-    while (true) {
-        try {
-            const jp = await translateToJapanese(text);
-            if (hasJapaneseText(jp)) return jp;
-        } catch (e) { }
-        await sleep(2000);
-    }
-}
-
-async function stubbornSynth(jpText, speakerId) {
-    while (true) {
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 15000);
-        try {
-            const r = await fetch('https://api.tts.quest/v3/voicevox/synthesis?text=' + encodeURIComponent(jpText) + '&speaker=' + speakerId, { signal: ctrl.signal });
-            clearTimeout(timer);
-            if (r.status === 429) {
-                let wait = 2000;
-                try { const d = await r.json(); if (d && d.retryAfter) wait = (parseFloat(d.retryAfter) || 2) * 1000; } catch (e) { }
-                await sleep(wait);
-                continue;
-            }
-            if (!r.ok) { await sleep(2000); continue; }
-            const d = await r.json().catch(() => ({}));
-            if (d && d.success && d.mp3DownloadUrl) return d.mp3DownloadUrl;
-        } catch (e) { clearTimeout(timer); }
-        await sleep(2000);
-    }
-}
-
-function chunkText(text) {
-    const raw = String(text || '').replace(/\s+/g, ' ').trim();
-    if (!raw) return [];
-    const sentences = raw.split(/(?<=[.!?。！？])\s+/).map(s => s.trim()).filter(Boolean);
-    const chunks = [];
-    for (const s of sentences) {
-        if (s.length <= 70) { chunks.push(s); continue; }
-        const parts = s.split(/(?<=[,，])\s+/).map(p => p.trim()).filter(Boolean);
-        let acc = '';
-        for (const p of parts) {
-            if ((acc + ' ' + p).trim().length <= 70) acc = acc ? acc + ' ' + p : p;
-            else { if (acc) chunks.push(acc.trim()); acc = p; }
-        }
-        if (acc) chunks.push(acc.trim());
-    }
-    return chunks;
-}
-
-async function produceVvSpeech(text) {
-    const mySession = vvSession;
-    const chunks = chunkText(text);
-    for (const c of chunks) {
-        if (mySession !== vvSession) return;
-        const jp = await stubbornTranslate(c);
-        if (!hasJapaneseText(jp)) continue;
-        const url = await stubbornSynth(jp, voicevoxSpeakerId);
-        if (mySession !== vvSession) return;
-        if (url) {
-            audioQueue.push(url);
-            playNextVoicevox();
-        }
-        await sleep(1500);
-    }
-}
-
-function silentAudioUnlock() {
-    try {
-        const a = new Audio('data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU5LjI3LjEwMAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIAD+//7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+AAAAAExhdmYAAAAAAAAAAAAAAAAAAAAAACQAAAAAAAAAASDs9y8AAAAAAAAAAAAAAAAAAAAA//MUZAAAAAGkAAAAAAAAA0gAAAAATEFNRTMuMTAwA8sAAAAAAgAAAEgAAABIAAAABH//OEZCAAAAGkAAAAAAAAA0gAAAAAAAD/5xAAAAAAAAAAAAAAA//OEZAwAAAGkAAAAAAAAA0gAAAAAAAD/5xAAAAAAAAAAAAAAA//OEZEwAAAGkAAAAAAAAA0gAAAAAAAD/5xAAAAAAAAAAAAAAA');
-        a.volume = 0.001;
-        a.play().catch(() => { });
-    } catch (e) { }
-    try {
-        if (!callCtx) callCtx = new (window.AudioContext || window.webkitAudioContext)();
-        if (callCtx && callCtx.state === 'suspended') callCtx.resume().catch(() => { });
-    } catch (e) { }
-}
-
-function playNextVoicevox() {
-    if (isVoicevoxPlaying || audioQueue.length === 0) return;
-    const url = audioQueue.shift();
-    isVoicevoxPlaying = true;
-    const audio = new Audio();
-    senkaAudio = audio;
-    audio.src = url;
-    audio.onended = () => { audio.src = ''; senkaAudio = null; isVoicevoxPlaying = false; playNextVoicevox(); };
-    audio.onerror = () => { audio.src = ''; senkaAudio = null; isVoicevoxPlaying = false; playNextVoicevox(); };
-    audio.play().catch(e => {
-        audio.src = '';
-        senkaAudio = null;
-        isVoicevoxPlaying = false;
-        if (e && e.name === 'NotAllowedError') {
-            showToast('Suara belum aktif — ketuk layar sekali lagi biar izin audio kebuka');
-            document.addEventListener('pointerdown', function unlockTap() {
-                document.removeEventListener('pointerdown', unlockTap);
-                silentAudioUnlock();
-                playNextVoicevox();
-            });
-            return;
-        }
-        playNextVoicevox();
-    });
-}
-
 async function speak(text) {
     if (senkaAudio) stopSenkaAudio();
     try {
         const cleanText = stripStickerTag(String(text || '')).trim();
         if (!cleanText) return;
-        if (voicevoxSpeakerId > 0) {
-            vvSession++;
-            audioQueue.length = 0;
-            isVoicevoxPlaying = false;
-            produceVvSpeech(cleanText);
-            return;
-        }
         await ttsStreamTo((b64, type) => playSpeechBlob(b64, type), { text: cleanText, mode: speakMode });
     } catch (e) {
         // teks tetap tampil di chat; suara hanyalah bonus
     }
-}
-
-let prevSpeakMode = speakMode;
-function setVoicevoxVoice(id) {
-    const vv = parseInt(id, 10) || 0;
-    voicevoxSpeakerId = vv;
-    localStorage.setItem('senka_voicevox', String(vv));
-    if (vv > 0) {
-        if (prevSpeakMode === speakMode) prevSpeakMode = speakMode;
-        speakMode = 'jpn';
-        document.getElementById('speak-jp-input').checked = true;
-        document.getElementById('speak-id-input').checked = false;
-        localStorage.setItem('senka_speakmode', 'jpn');
-    } else {
-        speakMode = prevSpeakMode;
-        document.getElementById('speak-jp-input').checked = speakMode === 'jpn';
-        document.getElementById('speak-id-input').checked = speakMode === 'ind';
-        localStorage.setItem('senka_speakmode', speakMode);
-    }
-    showToast(vv > 0 ? 'Suara Voicevox aktif' : 'Kembali ke TikTok TTS');
-}
-
-async function testVoicevox(id) {
-    const jpText = await stubbornTranslate('こんにちは、Senkaです〜 よろしくね！');
-    const url = await stubbornSynth(jpText, parseInt(id, 10));
-    if (!url) { showToast('Voicevox speaker ' + id + ' gagal'); return; }
-    vvSession++;
-    audioQueue.length = 0;
-    isVoicevoxPlaying = false;
-    audioQueue.push(url);
-    playNextVoicevox();
-    showToast('Voicevox speaker ' + id + ' jalan!');
 }
 
 // ====== Voice Note (Pesan Suara) ======
@@ -3485,15 +3319,6 @@ async function speakCallText(text) {
     callSpeaking = true;
     setCallUI(true, 'Senka bicara...');
     try {
-        if (voicevoxSpeakerId > 0) {
-            vvSession++;
-            audioQueue.length = 0;
-            isVoicevoxPlaying = false;
-            await produceVvSpeech(text);
-            while (audioQueue.length > 0 || isVoicevoxPlaying) await sleep(200);
-            afterCallSpeech();
-            return;
-        }
         const result = await ttsStreamTo(async (b64, type) => {
             if (!callActive) return;
             const blob = base64ToBlob(b64, type || 'audio/mpeg');
@@ -3749,7 +3574,6 @@ async function sendToSenka() {
     const text = messageInput.value.trim();
     if (!text && !base64Image) return;
     if (isStreaming) return;
-    silentAudioUnlock();
 
     if (!modelKey) {
         openSettings();
@@ -3865,6 +3689,7 @@ async function handleSenkaCommand(text) {
         }
         musicQueue = [{ id: videoId, url: text.trim() }];
         currentTrackIndex = 0;
+        saveMusicQueue();
         playTrack(0);
         if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User memutar lagu. Berikan respon asik. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu]'), null));
         return true;
@@ -3880,6 +3705,7 @@ async function handleSenkaCommand(text) {
         }
         const wasEmpty = musicQueue.length === 0;
         musicQueue.push({ id: videoId, url: text.trim() });
+        saveMusicQueue();
         appendMessage('senka', 'Ditambahkan ke antrean musik 🎵');
         scrollToBottom(true);
         if (wasEmpty) playTrack(0);
@@ -3907,6 +3733,7 @@ async function handleSenkaCommand(text) {
         if (ytPlayer) { try { ytPlayer.pauseVideo(); } catch (e) { } }
         musicQueue = [];
         currentTrackIndex = 0;
+        saveMusicQueue();
         isLooping = false;
         resetShuffleState();
         document.getElementById('loop-btn').classList.remove('active');
@@ -3997,6 +3824,7 @@ async function handleSenkaCommand(text) {
         resetShuffleState();
         musicQueue = lists[name].slice();
         currentTrackIndex = 0;
+        saveMusicQueue();
         playTrack(0);
         if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User memutar playlist tersimpan. Berikan respon asik. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu]'), null));
         return true;
@@ -4037,6 +3865,7 @@ function extractYouTubeId(url) {
 }
 
 /* ===== Floating Music Player (YouTube Iframe API + Queue) ===== */
+const MUSIC_QUEUE_KEY = 'senka_music_queue';
 let musicQueue = [];
 let currentTrackIndex = 0;
 let isLooping = false;
@@ -4044,6 +3873,22 @@ let ytPlayer = null;
 let ytApiReady = false;
 let ytApiInjected = false;
 let pendingVideoId = null;
+
+function saveMusicQueue() {
+    try {
+        localStorage.setItem(MUSIC_QUEUE_KEY, JSON.stringify({ queue: musicQueue, index: currentTrackIndex }));
+    } catch (e) { }
+}
+
+function loadSavedMusicQueue() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(MUSIC_QUEUE_KEY));
+        if (raw && Array.isArray(raw.queue)) {
+            musicQueue = raw.queue.filter(t => t && t.id && t.url);
+            currentTrackIndex = Number.isInteger(raw.index) ? Math.min(Math.max(raw.index, 0), Math.max(musicQueue.length - 1, 0)) : 0;
+        }
+    } catch (e) { }
+}
 
 window.onYouTubeIframeAPIReady = function () {
     ytApiReady = true;
@@ -4095,6 +3940,7 @@ let titlePoll = null;
 function playTrack(index) {
     if (!musicQueue.length) return;
     currentTrackIndex = ((index % musicQueue.length) + musicQueue.length) % musicQueue.length;
+    saveMusicQueue();
     const videoId = musicQueue[currentTrackIndex].id;
     if (ytPlayer) {
         ytPlayer.loadVideoById(videoId);

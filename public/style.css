@@ -515,10 +515,6 @@ textarea.modal-input { resize: none; font-family: inherit; }
 .speak-row { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
 .speak-row .switch { margin-top: 0; flex-shrink: 0; }
 .speak-label { color: #e0f2fe; font-size: 14px; }
-.voice-picker { appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' stroke='%2338bdf8' stroke-width='2' fill='none' stroke-linecap='round'/></svg>"); background-repeat: no-repeat; background-position: right 14px center; cursor: pointer; }
-.voice-picker option { background: #0b1220; color: #e0f2fe; }
-.voice-test-row { display: flex; gap: 10px; margin-top: 10px; }
-.voice-test-row .modal-btn { margin-top: 0; flex: 1; }
 
 .model-picker { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; padding-right: 4px; scroll-behavior: smooth; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
 .model-picker::-webkit-scrollbar { width: 4px; }
