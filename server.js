@@ -182,6 +182,32 @@ Your sticker list:
 ${list(SENKA_STICKERS)}`;
 }
 
+function buildSongPrompt(song) {
+    if (!song || !song.title || !String(song.title).trim()) return null;
+    const judul = String(song.title).trim().slice(0, 120);
+    const artis = song.artist ? String(song.artist).trim().slice(0, 120) : '';
+    const url = song.url ? String(song.url).trim().slice(0, 200) : '';
+    return {
+        role: 'system',
+        content: `[LAGU SEDANG DIPUTAR]
+Pengguna sedang memutar lagu berikut (disalurkan oleh sistem):
+- Judul Lagu: ${judul}${artis ? `\n- Artis: ${artis}` : ''}${url ? `\n- URL: ${url}` : ''}
+
+### 1. IDENTIFIKASI LAGU ###
+Gunakan data [Judul Lagu] dan [Artis] di atas. Konfirmasi ke pengguna lagu apa yang sedang diputar/dideteksi.
+
+### 2. PENJELASAN MAKNA ###
+Analisis lagu tersebut berdasarkan database pengetahuanmu. Berikan rangkuman tentang makna, cerita, atau emosi dari lagu tersebut jika pengguna menanyakannya.
+
+### 3. PENYAJIAN LIRIK ###
+Tampilkan teks lirik lagu tersebut secara akurat jika pengguna meminta liriknya. (Opsional) Jika lirik terlalu panjang, tampilkan bagian utamanya saja lalu arahkan pengguna.
+
+[ATURAN KETAT]
+- Jangan pernah menyebutkan sumber data atau membocorkan proses teknis backend (misal: "Menurut data sistem...").
+- Fokus berikan jawaban spesifik hanya seputar musik yang sedang diputar.`
+    };
+}
+
 function buildNormalSystemPrompt(callName, gender, jpnMode = false) {
     const g = gender === 'perempuan'
         ? 'Perempuan (wanita). Treat her like a close best friend / sister-like soulmate: warm, playful, supportive. You may call her "kamu, sayang, dek, bestie". NEVER call her by male terms ("bro", "bang", "kak" as a man) — if complimenting her looks, say "cantik" or "cakep", never "ganteng".'
@@ -787,8 +813,15 @@ async function bingSearch(query, maxResults = 3, timeoutMs = 12000) {
         const html = await r.text();
         const results = [];
         const re = /<li class="b_algo"[^>]*>[\s\S]*?<h2[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>(.*?)<\/a>[\s\S]*?<p[^>]*>(.*?)<\/p>/g;
+        const re2 = /<h2[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>(.*?)<\/a>[\s\S]*?<p[^>]*>(.*?)<\/p>/g;
         let m;
         while ((m = re.exec(html)) && results.length < maxResults) {
+            const title = decodeEntities(m[2]);
+            if (!title) continue;
+            const snippet = decodeEntities(m[3]).slice(0, 400);
+            results.push({ title, url: decodeBingUrl(m[1]), snippet, source: 'Bing' });
+        }
+        while ((m = re2.exec(html)) && results.length < maxResults) {
             const title = decodeEntities(m[2]);
             if (!title) continue;
             const snippet = decodeEntities(m[3]).slice(0, 400);
@@ -1352,6 +1385,72 @@ app.get('/api/yt-title', async (req, res) => {
     res.json({ title: null });
 });
 
+app.get('/api/lyrics', async (req, res) => {
+    const title = String(req.query.title || '').trim().slice(0, 100);
+    const artist = String(req.query.artist || '').trim().slice(0, 100);
+    if (!title) return res.json({ lyrics: null });
+    const clean = s => s.replace(/\[(?:[^\]]*)\]|\((?:[^)]*)\)|Official (?:Audio|Video|MV)|Lyrics?|OST|Cover/gi, '').trim();
+    const cTitle = clean(title);
+    const cArtist = clean(artist);
+    const tryFetch = async (url) => {
+        try {
+            const r = await fetch(url, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+                    'Accept-Language': 'id,en;q=0.8'
+                },
+                signal: AbortSignal.timeout(8000)
+            });
+            if (!r.ok) return null;
+            return await r.text();
+        } catch (e) { return null; }
+    };
+    const stripHtml = h => String(h || '')
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<[^>]+>/g, '\n')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+
+    if (cArtist) {
+        const ovh = await tryFetch(`https://api.lyrics.ovh/v1/${encodeURIComponent(cArtist)}/${encodeURIComponent(cTitle)}`);
+        if (ovh) {
+            try {
+                const d = JSON.parse(ovh);
+                if (d && d.lyrics && d.lyrics.trim().length > 40) {
+                    return res.json({ lyrics: d.lyrics.trim(), source: 'lyricsovh' });
+                }
+            } catch (e) { }
+        }
+    }
+    const q = `lirik lagu ${cTitle}${cArtist ? ' ' + cArtist : ''}`;
+    const results = [];
+    if (process.env.TAVILY_API_KEY) results.push(...(await tavilySearch(q, 5, 8000).catch(() => [])));
+    if (process.env.EXA_API_KEY) results.push(...(await exaSearch(q, 5, 8000).catch(() => [])));
+    results.push(...(await ddgSearch(q, 4, 7000).catch(() => [])));
+    results.push(...(await bingSearch(q, 4, 7000).catch(() => [])));
+    const seen = new Set();
+    for (const r of results) {
+        const url = r.url || '';
+        if (!url || seen.has(url) || !/lyric|music|lagu|chord|azlyrics|genius|musixmatch/i.test(url)) continue;
+        seen.add(url);
+        const html = await tryFetch(url);
+        if (!html) continue;
+        let body = stripHtml(html);
+        const idx = body.search(/lirik|lyrics?/i);
+        if (idx > -1) body = body.slice(Math.max(0, idx - 200));
+        const junk = /^(home|genius|lyrics|chart|charts|videos|sign up|log in|get verified|promote your music|live tracklist|track \d+ on|viewer|contributors?|producer|release|released|nov\.?|dec\.?|jan\.?|feb\.?|mar\.?|apr\.?|may|jun\.?|jul\.?|aug\.?|sep\.?|oct\.?|[0-9]{1,2} viewer|[0-9]+ contributors?)$/i;
+        const lines = body.split('\n').map(l => l.trim()).filter(l => l && l.length < 200 && !junk.test(l));
+        const lyricBlock = lines.join('\n').slice(0, 4000);
+        if (lyricBlock.length > 120) return res.json({ lyrics: lyricBlock, source: url });
+    }
+    res.json({ lyrics: null });
+});
+
 const ADMIN_MASTER_PASS = process.env.ADMIN_MASTER_PASS || null;
 
 app.get('/api/access-code', async (req, res) => {
@@ -1438,8 +1537,9 @@ app.post('/api/chat', async (req, res) => {
                 ? buildNormalSystemPrompt(getCallName(panggilan), gender)
                 : buildChatSystemPrompt(getCallName(panggilan), gender, { persona, length, lorebook, mode });
         if (call) systemPrompt = withCallMode(systemPrompt);
-        const finalMessages = await prepareMessagesForAI(messages, isVision, mode === 'storyall' && /NEY LANGLEY/i.test(lorebook || ''), normalMode);
-        let baseMessages = [systemPrompt, ...finalMessages];
+        const songPrompt = buildSongPrompt(req.body.song);
+        if (songPrompt) baseMessages = [systemPrompt, songPrompt, ...finalMessages];
+        else baseMessages = [systemPrompt, ...finalMessages];
         let rag = null;
         if (!isVision) {
             const res = await applyWebSearch(baseMessages);
@@ -1527,7 +1627,8 @@ app.post('/api/chat/stream', async (req, res) => {
                 : buildChatSystemPrompt(getCallName(panggilan), gender, { persona, length, lorebook, mode, jpnMode });
         if (call) systemPrompt = withCallMode(systemPrompt);
         const finalMessages = await prepareMessagesForAI(messages, isVision, mode === 'storyall' && /NEY LANGLEY/i.test(lorebook || ''), normalMode);
-        let baseMessages = [systemPrompt, ...finalMessages];
+        const songPrompt = buildSongPrompt(req.body.song);
+        let baseMessages = songPrompt ? [systemPrompt, songPrompt, ...finalMessages] : [systemPrompt, ...finalMessages];
         let rag = null;
         if (!isVision) {
             const res = await applyWebSearch(baseMessages);
