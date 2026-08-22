@@ -1518,7 +1518,7 @@ app.get('/api/search-debug', async (req, res) => {
 
 app.post('/api/chat', async (req, res) => {
     try {
-        const { messages, modelKey, panggilan, useVision, call, gender, persona, length, lorebook, mode } = req.body;
+        const { messages, modelKey, panggilan, useVision, call, callLang, gender, persona, length, lorebook, mode } = req.body;
 
         if (!Array.isArray(messages) || messages.length === 0) {
             return res.status(400).json({ error: "Pesan harus diisi dulu." });
@@ -1536,7 +1536,7 @@ app.post('/api/chat', async (req, res) => {
             : normalMode
                 ? buildNormalSystemPrompt(getCallName(panggilan), gender)
                 : buildChatSystemPrompt(getCallName(panggilan), gender, { persona, length, lorebook, mode });
-        if (call) systemPrompt = withCallMode(systemPrompt);
+        if (call) systemPrompt = withCallMode(systemPrompt, callLang);
         const finalMessages = await prepareMessagesForAI(messages, isVision, mode === 'storyall' && /NEY LANGLEY/i.test(lorebook || ''), normalMode);
         const songPrompt = buildSongPrompt(req.body.song);
         let baseMessages = songPrompt ? [systemPrompt, songPrompt, ...finalMessages] : [systemPrompt, ...finalMessages];
@@ -1606,7 +1606,7 @@ app.post('/api/chat', async (req, res) => {
 
 app.post('/api/chat/stream', async (req, res) => {
     try {
-        const { messages, modelKey, panggilan, useVision, call, gender, persona, length, lorebook, mode } = req.body;
+        const { messages, modelKey, panggilan, useVision, call, callLang, gender, persona, length, lorebook, mode } = req.body;
 
         if (!Array.isArray(messages) || messages.length === 0) {
             return res.status(400).json({ error: "Pesan harus diisi dulu." });
@@ -1625,7 +1625,7 @@ app.post('/api/chat/stream', async (req, res) => {
             : normalMode
                 ? buildNormalSystemPrompt(getCallName(panggilan), gender, jpnMode)
                 : buildChatSystemPrompt(getCallName(panggilan), gender, { persona, length, lorebook, mode, jpnMode });
-        if (call) systemPrompt = withCallMode(systemPrompt);
+        if (call) systemPrompt = withCallMode(systemPrompt, callLang);
         const finalMessages = await prepareMessagesForAI(messages, isVision, mode === 'storyall' && /NEY LANGLEY/i.test(lorebook || ''), normalMode);
         const songPrompt = buildSongPrompt(req.body.song);
         let baseMessages = songPrompt ? [systemPrompt, songPrompt, ...finalMessages] : [systemPrompt, ...finalMessages];
@@ -1805,14 +1805,17 @@ async function openRouterImage(prompt) {
     return { url: imgUrl };
 }
 
-function withCallMode(systemPrompt) {
+function withCallMode(systemPrompt, callLang) {
+    const langLine = callLang === 'ja'
+        ? `- The user is SPEAKING JAPANESE on this call (they are learning Japanese). Reply in natural spoken Japanese — casual & anime-style (ね、よ、だよ、〜、あらあら、ふふっ), never stiff or textbook Japanese. Keep your usual warm playful Senka personality, keep saying "Senka" about yourself and keep calling the user by their nickname naturally.`
+        : '- Mirror the user\'s language (default Indonesian). Warm, natural, like a real voice call.';
     return {
         ...systemPrompt,
         content: systemPrompt.content + `
 CALL MODE (ACTIVE NOW - STRICTLY ENFORCED):
 - The user is calling you on a voice call right now. Reply SHORT: 1-3 sentences, maximum 50 words.
 - Output ONLY your spoken dialogue. NO narration, NO actions, NO asterisks, NO character prefixes, NO stickers, NO file blocks, NO markdown, NO bullet lists.
-- Mirror the user's language (default Indonesian). Warm, natural, like a real voice call.
+${langLine}
 - Never mention you are an AI, a bot, or that this is a text chat.`
     };
 }

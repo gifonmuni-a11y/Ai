@@ -30,6 +30,75 @@ let cloudTipe = 'anonymous';
 let cloudSessions = [];
 let cloudSid = '';
 
+/* ===== Anti-freeze GIF: mobile Chrome menghentikan animasi <img> gif saat scroll.
+   Solusi: ganti dengan <video muted loop playsinline> yang tetap jalan saat scroll. ===== */
+function makeLoopVideo(src, img) {
+    const v = document.createElement('video');
+    v.className = img.className;
+    v.alt = img.alt || '';
+    if (img.id) v.id = img.id;
+    v.setAttribute('aria-hidden', img.getAttribute('aria-hidden') || 'false');
+    v.muted = true;
+    v.defaultMuted = true;
+    v.loop = true;
+    v.autoplay = true;
+    v.playsInline = true;
+    v.disablePictureInPicture = true;
+    v.setAttribute('muted', '');
+    v.setAttribute('loop', '');
+    v.setAttribute('playsinline', '');
+    v.setAttribute('autoplay', '');
+    v.preload = 'auto';
+    let settled = false;
+    const revert = () => {
+        if (settled) return;
+        settled = true;
+        if (loopVideoObserver) loopVideoObserver.unobserve(v);
+        if (v.parentNode) v.parentNode.replaceChild(img, v);
+    };
+    v.addEventListener('canplay', () => {
+        if (settled) return;
+        settled = true;
+        const p = v.play();
+        if (p && p.catch) p.catch(() => { });
+    }, { once: true });
+    v.addEventListener('error', revert);
+    v.src = src;
+    if (loopVideoObserver) loopVideoObserver.observe(v);
+    return v;
+}
+
+const loopVideoObserver = ('IntersectionObserver' in window) ? new IntersectionObserver(entries => {
+    entries.forEach(en => {
+        const v = en.target;
+        if (en.isIntersecting) {
+            if (v.paused) { const p = v.play(); if (p && p.catch) p.catch(() => { }); }
+        } else if (!v.paused) {
+            v.pause();
+        }
+    });
+}, { rootMargin: '80px' }) : null;
+
+function upgradeGifToVideo(selector, src) {
+    document.querySelectorAll(selector).forEach(img => {
+        if (img.tagName !== 'IMG' || img.dataset.gifUpgraded) return;
+        img.dataset.gifUpgraded = '1';
+        const v = makeLoopVideo(src, img);
+        if (img.parentNode) img.parentNode.replaceChild(v, img);
+    });
+}
+upgradeGifToVideo('.chat-header .avatar-wrap .avatar', 'assets/avatarsenka.webm');
+upgradeGifToVideo('.chat-header .avatar-wrap .avatar-border', 'assets/bordersenka.webm');
+upgradeGifToVideo('#call-screen .call-avatar-border', 'assets/BoarderSenkaTelfon.webm');
+
+function playLoopVideosIn(root) {
+    (root || document).querySelectorAll('video').forEach(v => {
+        if (!v.paused) return;
+        const p = v.play();
+        if (p && p.catch) p.catch(() => { });
+    });
+}
+
 document.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('touchstart', e => {
     if (e.target.closest('input, textarea')) return;
@@ -1227,6 +1296,7 @@ const ROLE_ICON_USER = 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/obje
 const ROLE_ICON_SENKA = 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Role/Senka/senkaprofilebubble.webp';
 const SENKA_BUBBLE_AVATAR = 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Profile/profilebubblechatsenka.webp';
 const SENKA_BUBBLE_DECO = 'https://wlioszpxlecrwcxjyjnu.supabase.co/storage/v1/object/public/Stiker/Boarder/Untitled%20folder/fresh_boardersenka.gif';
+const SENKA_BUBBLE_DECO_VIDEO = 'assets/boardersenka-msg.webm';
 
 function formatMsgTime(ts) {
     const d = ts ? new Date(ts) : new Date();
@@ -1269,12 +1339,15 @@ function makeSenkaAvatar() {
     img.alt = '';
     img.loading = 'lazy';
     img.onerror = () => { img.src = 'assets/avatarsenka.gif'; };
-    const deco = document.createElement('img');
-    deco.className = 'senka-avatar-deco';
-    deco.src = SENKA_BUBBLE_DECO;
-    deco.alt = '';
-    deco.loading = 'lazy';
-    deco.onerror = () => deco.remove();
+    const deco = makeLoopVideo(SENKA_BUBBLE_DECO_VIDEO, (() => {
+        const fb = document.createElement('img');
+        fb.className = 'senka-avatar-deco';
+        fb.src = SENKA_BUBBLE_DECO;
+        fb.alt = '';
+        fb.loading = 'lazy';
+        fb.onerror = () => fb.remove();
+        return fb;
+    })());
     wrap.appendChild(img);
     wrap.appendChild(deco);
     return wrap;
@@ -2945,12 +3018,35 @@ let callRecog = null;
 let pendingMicAction = null;
 let callCtx = null;
 let callMicMuted = false;
-let callSpeakerOn = false;
+let callSpeakerOn = true;
 let callMinimized = false;
 let callConnectedAt = 0;
 let callTimerInt = null;
+let callLang = localStorage.getItem('senka_call_lang') === 'ja' ? 'ja' : 'id';
 const CALL_PROFILE_IMG = 'assets/profiletelfonsenka.webp';
 const CALL_WALLPAPER_IMG = 'assets/wallpapertelfonsenka.webp';
+
+function callRecogLang() { return callLang === 'ja' ? 'ja-JP' : 'id-ID'; }
+function callListenLabel() {
+    if (!callActive) return '';
+    return callSpeaking ? 'Senka bicara...' : (callLang === 'ja' ? '聞いてる... (日本語)' : 'Mendengarkan...');
+}
+function updateCallLangBtn() {
+    const btn = document.getElementById('call-lang-btn');
+    const label = document.getElementById('call-lang-label');
+    if (label) label.innerText = callLang === 'ja' ? '日本語 JP' : 'Indonesia';
+    if (btn) btn.classList.toggle('jp', callLang === 'ja');
+}
+function toggleCallLang() {
+    callLang = callLang === 'ja' ? 'id' : 'ja';
+    localStorage.setItem('senka_call_lang', callLang);
+    updateCallLangBtn();
+    if (callRecog) callRecog.lang = callRecogLang();
+    showToast(callLang === 'ja' ? 'Mode 日本語 aktif — ngomong bahasa Jepang aja, Senka jawab pakai Jepang' : 'Kembali ke bahasa Indonesia');
+    if (callActive && !callSpeaking && !callMicMuted && callRecog) {
+        try { callRecog.stop(); } catch (e) { }
+    }
+}
 
 function formatCallDur(ms) {
     const total = Math.max(0, Math.floor(ms / 1000));
@@ -3001,7 +3097,10 @@ function restoreCall() {
     callMinimized = false;
     const screen = document.getElementById('call-screen');
     const pill = document.getElementById('call-pill');
-    if (screen) screen.style.display = 'flex';
+    if (screen) {
+        screen.style.display = 'flex';
+        playLoopVideosIn(screen);
+    }
     if (pill) pill.style.display = 'none';
     updateCallTimer();
 }
@@ -3139,6 +3238,7 @@ function setCallUI(on, label) {
     }
     if (!screen) return;
     screen.style.display = (on && !callMinimized) ? 'flex' : 'none';
+    if (on && !callMinimized) playLoopVideosIn(screen);
     screen.classList.toggle('ringing', on && /(Memanggil|Menghubungi)/i.test(label || ''));
     if (stateText) {
         stateText.innerText = label || (on ? 'Memanggil' : '');
@@ -3165,11 +3265,11 @@ function toggleCallSpeaker() {
     callSpeakerOn = !callSpeakerOn;
     const btn = document.getElementById('call-speaker-btn');
     if (btn) {
-        btn.classList.toggle('on', callSpeakerOn);
+        btn.classList.toggle('on', !callSpeakerOn);
         btn.title = callSpeakerOn ? 'Matikan speaker' : 'Aktifkan speaker';
-        btn.innerHTML = callSpeakerOn ? '<i class="fa-solid fa-volume-high"></i>' : '<i class="fa-solid fa-volume-off"></i>';
+        btn.innerHTML = callSpeakerOn ? '<i class="fa-solid fa-volume-high"></i>' : '<i class="fa-solid fa-volume-xmark"></i>';
     }
-    if (callAudio) callAudio.muted = callSpeakerOn;
+    if (callAudio) callAudio.muted = !callSpeakerOn;
 }
 
 async function toggleCall() {
@@ -3199,7 +3299,7 @@ function startCall() {
     pendingMicAction = null;
     callActive = true;
     callMicMuted = false;
-    callSpeakerOn = false;
+    callSpeakerOn = true;
     callMinimized = false;
     stopCallTimer();
     const pill = document.getElementById('call-pill');
@@ -3216,21 +3316,24 @@ function startCall() {
     }
     unlockAudio();
     initCallScreenAssets();
+    updateCallLangBtn();
     setCallUI(true, 'Memanggil');
-    appendMessage('senka', '📞 Panggilan dimulai — ngomong aja, aku dengerin.');
+    appendMessage('senka', callLang === 'ja'
+        ? '📞 Panggilan dimulai — 日本語で話してね、Senka dengerin.'
+        : '📞 Panggilan dimulai — ngomong aja, aku dengerin.');
     scrollToBottom(true);
     startCallRecognition();
 }
 
 function startCallRecognition() {
-    if (!callActive || callSpeaking) return;
+    if (!callActive || callSpeaking || callMicMuted) return;
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return;
-    setCallUI(true, 'Mendengarkan...');
+    setCallUI(true, callListenLabel());
     startCallTimer();
     if (!callRecog) {
         callRecog = new SR();
-        callRecog.lang = 'id-ID';
+        callRecog.lang = callRecogLang();
         callRecog.interimResults = false;
         callRecog.maxAlternatives = 1;
         callRecog.onresult = (e) => {
@@ -3249,7 +3352,7 @@ function startCallRecognition() {
             }
         };
         callRecog.onend = () => {
-            if (callActive && !callSpeaking) setTimeout(startCallRecognition, 350);
+            if (callActive && !callSpeaking && !callMicMuted) setTimeout(startCallRecognition, 350);
         };
     }
     try { callRecog.start(); } catch (e) { }
@@ -3258,6 +3361,8 @@ function startCallRecognition() {
 function handleCallSpeech(text) {
     if (!callActive) return;
     setCallUI(true, 'Senka mikir...');
+    callSpeaking = true;
+    if (callRecog) { try { callRecog.stop(); } catch (e) { } }
     const cTs = Date.now();
     const bubble = appendMessage('user', text, false, cTs, formatMsgTime(cTs));
     memoryList.push({ role: 'user', content: [{ type: 'text', text }], ts: cTs, time: formatMsgTime(cTs) });
@@ -3273,7 +3378,7 @@ async function sendCallMessage(text) {
         const response = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages: [...memoryList], modelKey, panggilan, call: true, gender: userGender, song: currentSong })
+            body: JSON.stringify({ messages: [...memoryList], modelKey, panggilan, call: true, callLang, gender: userGender, song: currentSong })
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
@@ -3309,25 +3414,26 @@ function cleanCallText(raw) {
 
 async function speakCallText(text) {
     callSpeaking = true;
+    if (callRecog) { try { callRecog.stop(); } catch (e) { } }
     setCallUI(true, 'Senka bicara...');
     try {
         const result = await ttsStreamTo(async (b64, type) => {
             if (!callActive) return;
             const blob = base64ToBlob(b64, type || 'audio/mpeg');
             await playCallBlob(blob);
-        }, { text, mode: speakMode });
+        }, { text, mode: callLang === 'ja' ? 'jpn' : speakMode });
         if (result.error) throw new Error('TTS gagal');
     } catch (e) {
         showToast(`Suara Senka gagal diputar: ${String(e.message || e).slice(0, 40)} — teksnya udah tampil di chat`);
     } finally {
         callSpeaking = false;
-        if (callActive) setTimeout(startCallRecognition, 400);
+        if (callActive && !callMicMuted) setTimeout(startCallRecognition, 400);
     }
 }
 
 function afterCallSpeech() {
     callSpeaking = false;
-    if (callActive) setTimeout(startCallRecognition, 400);
+    if (callActive && !callMicMuted) setTimeout(startCallRecognition, 400);
 }
 
 function playCallBlob(blob) {
@@ -3335,7 +3441,7 @@ function playCallBlob(blob) {
         const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
         callAudio = audio;
-        if (callSpeakerOn) audio.muted = true;
+        if (!callSpeakerOn) audio.muted = true;
         audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
         audio.onerror = () => { URL.revokeObjectURL(url); reject(new Error('audio rusak')); };
         audio.play().catch(err => {
@@ -3356,7 +3462,7 @@ function endCall() {
     callActive = false;
     callSpeaking = false;
     callMicMuted = false;
-    callSpeakerOn = false;
+    callSpeakerOn = true;
     callMinimized = false;
     stopCallTimer();
     const pill = document.getElementById('call-pill');
