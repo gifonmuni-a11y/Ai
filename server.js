@@ -1537,9 +1537,9 @@ app.post('/api/chat', async (req, res) => {
                 ? buildNormalSystemPrompt(getCallName(panggilan), gender)
                 : buildChatSystemPrompt(getCallName(panggilan), gender, { persona, length, lorebook, mode });
         if (call) systemPrompt = withCallMode(systemPrompt);
+        const finalMessages = await prepareMessagesForAI(messages, isVision, mode === 'storyall' && /NEY LANGLEY/i.test(lorebook || ''), normalMode);
         const songPrompt = buildSongPrompt(req.body.song);
-        if (songPrompt) baseMessages = [systemPrompt, songPrompt, ...finalMessages];
-        else baseMessages = [systemPrompt, ...finalMessages];
+        let baseMessages = songPrompt ? [systemPrompt, songPrompt, ...finalMessages] : [systemPrompt, ...finalMessages];
         let rag = null;
         if (!isVision) {
             const res = await applyWebSearch(baseMessages);
@@ -1754,7 +1754,11 @@ app.post('/api/chat/stream', async (req, res) => {
         res.status(502).json({ error: "Semua model lagi penuh. Coba lagi ya." });
     } catch (error) {
         console.error("Error stream:", error);
-        res.status(500).json({ error: "Waduh, koneksi bermasalah. Coba lagi ya." });
+        if (!res.headersSent) {
+            res.status(500).json({ error: "Waduh, koneksi bermasalah. Coba lagi ya." });
+        } else {
+            try { res.end(); } catch (_) {}
+        }
     }
 });
 
