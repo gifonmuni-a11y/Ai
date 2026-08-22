@@ -2307,6 +2307,13 @@ app.get('/api/search', async (req, res) => {
 
 const VIDEO_SPACE = 'https://zai-org-cogvideox-5b-space.hf.space'; // THUDM/CogVideoX-5B-Space (pindah ke zai-org)
 const VIDEO_API = '/gradio_api/call/generate';
+const MUSIC_SPACE = 'https://facebook-musicgen.hf.space'; // facebook/MusicGen
+const MUSIC_API = '/gradio_api/call/predict_batched';
+
+// Token HF (opsional): atribusi quota ZeroGPU ke akun & bypass limit IP anonim.
+// Setara Client.connect(space, { token }) pada @gradio/client -> header Bearer.
+const HF_TOKEN = String(process.env.HF_TOKEN || '').trim();
+const hfHeaders = () => (HF_TOKEN ? { 'Authorization': 'Bearer ' + HF_TOKEN } : {});
 
 async function translateToEnglish(prompt) {
     const key = groqKey();
@@ -2425,7 +2432,7 @@ app.post('/api/translate', async (req, res) => {
 async function videoSubmit(enPrompt) {
     const sub = await fetch(`${VIDEO_SPACE}${VIDEO_API}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...hfHeaders() },
         body: JSON.stringify({
             // Skema /generate CogVideoX-5B: [prompt, image_input, video_input,
             // video_strength, seed_value, scale_status, rife_status]
@@ -2446,7 +2453,7 @@ function videoJobHealthy(eventId, ms = 7000) {
     return new Promise(resolve => {
         const ctrl = new AbortController();
         const timer = setTimeout(() => { ctrl.abort(); resolve(true); }, ms);
-        fetch(`${VIDEO_SPACE}${VIDEO_API}/${eventId}`, { signal: ctrl.signal })
+        fetch(`${VIDEO_SPACE}${VIDEO_API}/${eventId}`, { signal: ctrl.signal, headers: hfHeaders() })
             .then(async r => {
                 if (!r.ok || !r.body) { clearTimeout(timer); return resolve(false); }
                 const reader = r.body.getReader();
@@ -2543,7 +2550,7 @@ app.get('/api/video/status', async (req, res) => {
         const timer = setTimeout(() => ctrl.abort(), 45000);
         let text = '';
         try {
-            const r = await fetch(url, { signal: ctrl.signal });
+            const r = await fetch(url, { signal: ctrl.signal, headers: hfHeaders() });
             text = await r.text();
         } catch (e) {
             return res.json({ status: 'IN_PROGRESS' });
@@ -2598,7 +2605,7 @@ app.get('/api/video/file', async (req, res) => {
         const u = (req.query.u || '').toString();
         if (!u) return res.status(400).json({ error: "URL file kosong." });
         const target = u.startsWith('/tmp/gradio/') ? `${VIDEO_SPACE}/gradio_api/file=${encodeURIComponent(u)}` : u;
-        const r = await fetch(target);
+        const r = await fetch(target, { headers: hfHeaders() });
         if (!r.ok) return res.status(502).json({ error: 'Video sudah tidak tersedia. Generate ulang ya.' });
         res.setHeader('Content-Type', 'video/mp4');
         res.setHeader('Cache-Control', 'public, max-age=3600');
@@ -2608,6 +2615,165 @@ app.get('/api/video/file', async (req, res) => {
     } catch (error) {
         console.error('Error video file:', error);
         res.status(502).json({ error: 'Gagal ambil video.' });
+    }
+});
+
+async function musicSubmit(enPrompt) {
+    const sub = await fetch(`${MUSIC_SPACE}${MUSIC_API}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...hfHeaders() },
+        body: JSON.stringify({
+            // Skema /predict_batched MusicGen: [texts (string), melodies (file/null)]
+            data: [enPrompt, null]
+        })
+    });
+    const data = await sub.json().catch(() => ({}));
+    if (!sub.ok || !data.event_id) {
+        throw new Error(data.error || data.detail || `Space musik gagal (${sub.status})`);
+    }
+    return data.event_id;
+}
+
+function musicJobHealthy(eventId, ms = 7000) {
+    return new Promise(resolve => {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => { ctrl.abort(); resolve(true); }, ms);
+        fetch(`${MUSIC_SPACE}${MUSIC_API}/${eventId}`, { signal: ctrl.signal, headers: hfHeaders() })
+            .then(async r => {
+                if (!r.ok || !r.body) { clearTimeout(timer); return resolve(false); }
+                const reader = r.body.getReader();
+                const dec = new TextDecoder();
+                let buf = '';
+                while (true) {
+                    const chunk = await reader.read().catch(() => ({ done: true }));
+                    if (chunk.done) break;
+                    buf += dec.decode(chunk.value, { stream: true });
+                    if (/event:\s*error/.test(buf)) {
+                        clearTimeout(timer);
+                        try { reader.cancel(); } catch (e) { }
+                        return resolve(false);
+                    }
+                    if (/event:\s*(complete|generating|process)/.test(buf)) {
+                        clearTimeout(timer);
+                        try { reader.cancel(); } catch (e) { }
+                        return resolve(true);
+                    }
+                }
+                clearTimeout(timer);
+                resolve(true);
+            })
+            .catch(() => { clearTimeout(timer); resolve(true); });
+    });
+}
+
+app.post('/api/music', async (req, res) => {
+    try {
+        const { prompt } = req.body;
+        if (!prompt || !prompt.trim()) {
+            return res.status(400).json({ error: "Deskripsi musiknya kosong." });
+        }
+        const enPrompt = await translateToEnglish(prompt.trim());
+        let lastErr = null;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            let eventId;
+            try {
+                eventId = await musicSubmit(enPrompt);
+            } catch (e) {
+                lastErr = e;
+                continue;
+            }
+            const statusUrl = `${MUSIC_SPACE}${MUSIC_API}/${eventId}`;
+            if (await musicJobHealthy(eventId)) {
+                return res.json({ jobId: eventId, statusUrl });
+            }
+            lastErr = new Error('GPU space penuh/error instan');
+            console.error(`[music] attempt ${attempt}: job langsung error (GPU quota/restart), submit ulang...`);
+        }
+        console.error('Error music submit:', lastErr);
+        res.status(502).json({ error: 'Server musik lagi penuh/gangguan. Coba lagi beberapa saat ya.' });
+    } catch (error) {
+        console.error('Error music submit:', error);
+        res.status(500).json({ error: "Gagal mulai bikin musik. Coba lagi." });
+    }
+});
+
+const AUDIO_CT = { wav: 'audio/wav', mp3: 'audio/mpeg', flac: 'audio/flac', ogg: 'audio/ogg', m4a: 'audio/mp4' };
+
+app.get('/api/music/status', async (req, res) => {
+    try {
+        const url = (req.query.url || '').toString();
+        if (!url) return res.status(400).json({ error: "URL status kosong." });
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 45000);
+        let text = '';
+        try {
+            const r = await fetch(url, { signal: ctrl.signal, headers: hfHeaders() });
+            text = await r.text();
+        } catch (e) {
+            return res.json({ status: 'IN_PROGRESS' });
+        } finally {
+            clearTimeout(timer);
+        }
+        if (text.includes('"complete"') || /event:\s*complete/.test(text)) {
+            const filePath = parseSseComplete(text);
+            if (filePath) {
+                const tok = decodeToken(req);
+                const extMatch = String(filePath).toLowerCase().match(/\.(wav|mp3|flac|ogg|m4a)$/);
+                const ext = extMatch ? extMatch[1] : 'wav';
+                if (supabase && tok && tok.uid) {
+                    try {
+                        const target = filePath.startsWith('/tmp/gradio/') ? `${MUSIC_SPACE}/gradio_api/file=${encodeURIComponent(filePath)}` : filePath;
+                        const fr = await fetch(target, { headers: hfHeaders() });
+                        if (fr.ok) {
+                            const buf = Buffer.from(await fr.arrayBuffer());
+                            const saved = await supabaseUpload(clientFor(req), buf, AUDIO_CT[ext], ext, tok.uid);
+                            return res.json({ status: 'COMPLETED', audioUrl: saved.url });
+                        }
+                    } catch (e) {
+                        console.error('Music save to bucket error:', e.message);
+                    }
+                }
+                return res.json({ status: 'COMPLETED', audioUrl: '/api/music/file?u=' + encodeURIComponent(filePath) + '&ext=' + ext });
+            }
+            return res.json({ status: 'COMPLETED', audioUrl: null });
+        }
+        if (/event:\s*error/.test(text)) {
+            const m = text.match(/data:\s*"([^"]*)"/s) || text.match(/data:\s*(\{.*\})/s);
+            let msg = '';
+            if (m && m[1]) {
+                try { const j = JSON.parse(m[1]); msg = j && j.error ? String(j.error) : String(m[1]); }
+                catch (e) { msg = String(m[1]); }
+            }
+            // Sama seperti video: 404/pesan kosong/null = gangguan sementara -> RETRY.
+            if (/404|not found/i.test(msg) || !msg.trim()) {
+                return res.json({ status: 'RETRY', reason: msg || 'gpu' });
+            }
+            return res.json({ status: 'ERROR', error: msg });
+        }
+        res.json({ status: 'IN_PROGRESS' });
+    } catch (error) {
+        console.error('Error music status:', error);
+        res.status(500).json({ error: "Gagal cek status musik." });
+    }
+});
+
+app.get('/api/music/file', async (req, res) => {
+    try {
+        const u = (req.query.u || '').toString();
+        if (!u) return res.status(400).json({ error: "URL file kosong." });
+        const target = u.startsWith('/tmp/gradio/') ? `${MUSIC_SPACE}/gradio_api/file=${encodeURIComponent(u)}` : u;
+        const r = await fetch(target, { headers: hfHeaders() });
+        if (!r.ok) return res.status(502).json({ error: 'Musik sudah tidak tersedia. Generate ulang ya.' });
+        const ct = AUDIO_CT[(req.query.ext || '').toString().toLowerCase()] || 'audio/wav';
+        res.setHeader('Content-Type', ct);
+        res.setHeader('Cache-Control', 'public, max-age=3600');
+        const cl = r.headers.get('content-length');
+        if (cl) res.setHeader('Content-Length', cl);
+        const buf = Buffer.from(await r.arrayBuffer());
+        res.send(buf);
+    } catch (error) {
+        console.error('Error music file:', error);
+        res.status(502).json({ error: 'Gagal ambil musik.' });
     }
 });
 

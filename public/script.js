@@ -895,7 +895,7 @@ function removeProfileEffect() {
     showToast('Efek profil dihapus');
 }
 function closeAllModals() {
-    ['settings-modal', 'image-modal', 'video-modal', 'sessions-modal', 'search-modal', 'confirm-delete-modal', 'profile-modal', 'deco-modal', 'senka-profile-modal', 'effect-modal', 'command-menu-modal'].forEach(id => document.getElementById(id).style.display = 'none');
+    ['settings-modal', 'image-modal', 'video-modal', 'music-modal', 'sessions-modal', 'search-modal', 'confirm-delete-modal', 'profile-modal', 'deco-modal', 'senka-profile-modal', 'effect-modal', 'command-menu-modal'].forEach(id => document.getElementById(id).style.display = 'none');
 }
 document.querySelectorAll('.modal-overlay').forEach(ov => ov.addEventListener('click', e => { if (e.target === ov) ov.style.display = 'none'; }));
 
@@ -3512,6 +3512,96 @@ function openVideoModal() {
     setTimeout(() => document.getElementById('video-prompt').focus(), 100);
 }
 function closeVideoModal() { document.getElementById('video-modal').style.display = 'none'; }
+
+function openMusicModal() {
+    document.getElementById('music-modal').style.display = 'flex';
+    setTimeout(() => document.getElementById('music-prompt').focus(), 100);
+}
+function closeMusicModal() { document.getElementById('music-modal').style.display = 'none'; }
+
+function generateMusic() {
+    const prompt = document.getElementById('music-prompt').value.trim();
+    if (!prompt) { document.getElementById('music-prompt').focus(); return; }
+    closeMusicModal();
+    document.getElementById('music-prompt').value = '';
+    generateMusicWithPrompt(prompt);
+}
+
+async function generateMusicWithPrompt(prompt) {
+    appendMessage('user', prompt);
+    const loading = appendMessage('senka', '');
+    const setLoadingText = (t) => {
+        msgBodyOf(loading).innerHTML = t + '<span class="tind"><i></i><i></i><i></i></span>';
+        scrollToBottom(true);
+    };
+    setLoadingText('Senka lagi bikin musikmu');
+    // Sama seperti video: server-nya gratis & suka gangguan, jadi submit ulang
+    // diam-diam saat status RETRY sampai deadline total.
+    const deadline = Date.now() + 6 * 60 * 1000;
+    try {
+        while (Date.now() < deadline) {
+            const resp = await fetch('/api/music', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prompt })
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                if (resp.status === 400 || Date.now() >= deadline - 8000) {
+                    throw new Error(data.error || `API error (${resp.status})`);
+                }
+                await new Promise(r => setTimeout(r, 8000));
+                continue;
+            }
+            if (!data.statusUrl) throw new Error('Server tidak kasih status URL.');
+            let needResubmit = false;
+            while (Date.now() < deadline) {
+                await new Promise(r => setTimeout(r, 8000));
+                const sr = await fetch('/api/music/status?url=' + encodeURIComponent(data.statusUrl), { headers: await authHeaders() });
+                const sd = await sr.json().catch(() => ({}));
+                if (sd.status === 'COMPLETED') {
+                    if (!sd.audioUrl) throw new Error('Musik sudah tidak tersedia. Generate ulang ya.');
+                    const media = msgMediaOf(loading);
+                    media.innerHTML = '';
+                    msgBodyOf(loading).innerHTML = '';
+                    const tag = document.createElement('div');
+                    tag.className = 'msg-tag';
+                    tag.innerText = 'Musik AI';
+                    media.appendChild(tag);
+                    const a = document.createElement('audio');
+                    a.src = sd.audioUrl;
+                    a.controls = true;
+                    a.preload = 'metadata';
+                    a.classList.add('chat-audio');
+                    media.appendChild(a);
+                    const actions = document.createElement('div');
+                    actions.className = 'msg-actions';
+                    const dl = document.createElement('button');
+                    dl.className = 'msg-action';
+                    dl.title = 'Download musik';
+                    dl.innerHTML = '<i class="fa-solid fa-download"></i>';
+                    dl.onclick = () => downloadImage(sd.audioUrl, 'senka-musik-' + Date.now() + '.wav');
+                    actions.appendChild(dl);
+                    media.appendChild(actions);
+                    remoteSave('senka', 'voice', sd.audioUrl);
+                    scrollToBottom(true);
+                    return;
+                }
+                if (sd.status === 'ERROR') throw new Error(sd.error || 'Gagal bikin musik.');
+                if (sd.status === 'RETRY') { needResubmit = true; break; }
+            }
+            if (needResubmit && Date.now() < deadline) {
+                setLoadingText('Generasinya keganggu, Senka coba lagi');
+            } else if (Date.now() >= deadline) {
+                throw new Error('Waktu generasi habis. Coba lagi ya.');
+            }
+        }
+        throw new Error('Waktu generasi habis. Coba lagi ya.');
+    } catch (e) {
+        msgBodyOf(loading).innerText = 'Gagal: ' + e.message;
+        scrollToBottom(true);
+    }
+}
 
 function generateVideo() {
     const prompt = document.getElementById('video-prompt').value.trim();
