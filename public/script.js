@@ -3524,50 +3524,70 @@ function generateVideo() {
 async function generateVideoWithPrompt(prompt) {
     appendMessage('user', prompt);
     const loading = appendMessage('senka', '');
-    msgBodyOf(loading).innerHTML = 'Senka lagi bikin videomu<span class="tind"><i></i><i></i><i></i></span>';
-    scrollToBottom(true);
+    const setLoadingText = (t) => {
+        msgBodyOf(loading).innerHTML = t + '<span class="tind"><i></i><i></i><i></i></span>';
+        scrollToBottom(true);
+    };
+    setLoadingText('Senka lagi bikin videomu');
+    // Server video-nya gratis & sering gangguan (GPU quota penuh / space restart).
+    // Kalau render gagal sementara, submit ulang diam-diam sampai deadline total.
+    const deadline = Date.now() + 6 * 60 * 1000;
     try {
-        const resp = await fetch('/api/video', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt })
-        });
-        const data = await resp.json().catch(() => ({}));
-        if (!resp.ok) throw new Error(data.error || `API error (${resp.status})`);
-        if (!data.statusUrl) throw new Error('Server tidak kasih status URL.');
-        for (let i = 0; i < 45; i++) {
-            await new Promise(r => setTimeout(r, 8000));
-            const sr = await fetch('/api/video/status?url=' + encodeURIComponent(data.statusUrl), { headers: await authHeaders() });
-            const sd = await sr.json().catch(() => ({}));
-            if (sd.status === 'COMPLETED' && sd.videoUrl) {
-                const media = msgMediaOf(loading);
-                media.innerHTML = '';
-                msgBodyOf(loading).innerHTML = '';
-                const tag = document.createElement('div');
-                tag.className = 'msg-tag';
-                tag.innerText = 'Video AI';
-                media.appendChild(tag);
-                const v = document.createElement('video');
-                v.src = sd.videoUrl;
-                v.controls = true;
-                v.preload = 'metadata';
-                v.classList.add('chat-video');
-                media.appendChild(v);
-                const actions = document.createElement('div');
-                actions.className = 'msg-actions';
-                const dl = document.createElement('button');
-                dl.className = 'msg-action';
-                dl.title = 'Download video';
-                dl.innerHTML = '<i class="fa-solid fa-download"></i>';
-                dl.onclick = () => downloadImage(sd.videoUrl, 'senka-video-' + Date.now() + '.mp4');
-                actions.appendChild(dl);
-                media.appendChild(actions);
-                remoteSave('senka', 'video', sd.videoUrl);
-                scrollToBottom(true);
-                return;
+        while (Date.now() < deadline) {
+            const resp = await fetch('/api/video', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prompt })
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                if (resp.status === 400 || Date.now() >= deadline - 8000) {
+                    throw new Error(data.error || `API error (${resp.status})`);
+                }
+                await new Promise(r => setTimeout(r, 8000));
+                continue;
             }
-            if (sd.status !== 'IN_QUEUE' && sd.status !== 'IN_PROGRESS' && sd.status !== 'PENDING') {
-                throw new Error(sd.error || 'Gagal render video.');
+            if (!data.statusUrl) throw new Error('Server tidak kasih status URL.');
+            let needResubmit = false;
+            while (Date.now() < deadline) {
+                await new Promise(r => setTimeout(r, 8000));
+                const sr = await fetch('/api/video/status?url=' + encodeURIComponent(data.statusUrl), { headers: await authHeaders() });
+                const sd = await sr.json().catch(() => ({}));
+                if (sd.status === 'COMPLETED') {
+                    if (!sd.videoUrl) throw new Error('Video sudah tidak tersedia. Generate ulang ya.');
+                    const media = msgMediaOf(loading);
+                    media.innerHTML = '';
+                    msgBodyOf(loading).innerHTML = '';
+                    const tag = document.createElement('div');
+                    tag.className = 'msg-tag';
+                    tag.innerText = 'Video AI';
+                    media.appendChild(tag);
+                    const v = document.createElement('video');
+                    v.src = sd.videoUrl;
+                    v.controls = true;
+                    v.preload = 'metadata';
+                    v.classList.add('chat-video');
+                    media.appendChild(v);
+                    const actions = document.createElement('div');
+                    actions.className = 'msg-actions';
+                    const dl = document.createElement('button');
+                    dl.className = 'msg-action';
+                    dl.title = 'Download video';
+                    dl.innerHTML = '<i class="fa-solid fa-download"></i>';
+                    dl.onclick = () => downloadImage(sd.videoUrl, 'senka-video-' + Date.now() + '.mp4');
+                    actions.appendChild(dl);
+                    media.appendChild(actions);
+                    remoteSave('senka', 'video', sd.videoUrl);
+                    scrollToBottom(true);
+                    return;
+                }
+                if (sd.status === 'ERROR') throw new Error(sd.error || 'Gagal render video.');
+                if (sd.status === 'RETRY') { needResubmit = true; break; }
+            }
+            if (needResubmit && Date.now() < deadline) {
+                setLoadingText('Render-nya keganggu, Senka submit ulang');
+            } else if (Date.now() >= deadline) {
+                throw new Error('Waktu render habis. Coba lagi ya.');
             }
         }
         throw new Error('Waktu render habis. Coba lagi ya.');

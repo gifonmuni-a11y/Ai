@@ -2421,6 +2421,56 @@ app.post('/api/translate', async (req, res) => {
     }
 });
 
+async function ltxSubmit(enPrompt) {
+    const sub = await fetch(`${LTX_SPACE}/gradio_api/call/text_to_video`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            data: [enPrompt, "worst quality, inconsistent motion, blurry, jittery, distorted", null, null, 512, 704, "text-to-video", 4, 9, 42, true, 1, true]
+        })
+    });
+    const data = await sub.json().catch(() => ({}));
+    if (!sub.ok || !data.event_id) {
+        throw new Error(data.error || data.detail || `Space video gagal (${sub.status})`);
+    }
+    return data.event_id;
+}
+
+// Space ZeroGPU sering error instan (quota GPU penuh / worker mati): stream SSE
+// langsung kirim "event: error" beberapa detik setelah submit. Baca stream sebentar;
+// kalau muncul error -> job rusak dan layak disubmit ulang. Tanpa error -> sehat.
+function ltxProbeHealthy(eventId, ms = 7000) {
+    return new Promise(resolve => {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => { ctrl.abort(); resolve(true); }, ms);
+        fetch(`${LTX_SPACE}/gradio_api/call/text_to_video/${eventId}`, { signal: ctrl.signal })
+            .then(async r => {
+                if (!r.ok || !r.body) { clearTimeout(timer); return resolve(false); }
+                const reader = r.body.getReader();
+                const dec = new TextDecoder();
+                let buf = '';
+                while (true) {
+                    const chunk = await reader.read().catch(() => ({ done: true }));
+                    if (chunk.done) break;
+                    buf += dec.decode(chunk.value, { stream: true });
+                    if (/event:\s*error/.test(buf)) {
+                        clearTimeout(timer);
+                        try { reader.cancel(); } catch (e) { }
+                        return resolve(false);
+                    }
+                    if (/event:\s*(complete|generating|process)/.test(buf)) {
+                        clearTimeout(timer);
+                        try { reader.cancel(); } catch (e) { }
+                        return resolve(true);
+                    }
+                }
+                clearTimeout(timer);
+                resolve(true);
+            })
+            .catch(() => { clearTimeout(timer); resolve(true); });
+    });
+}
+
 app.post('/api/video', async (req, res) => {
     try {
         const { prompt } = req.body;
@@ -2428,18 +2478,24 @@ app.post('/api/video', async (req, res) => {
             return res.status(400).json({ error: "Deskripsi videonya kosong." });
         }
         const enPrompt = await translateToEnglish(prompt.trim());
-        const sub = await fetch(`${LTX_SPACE}/gradio_api/call/text_to_video`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                data: [enPrompt, "worst quality, inconsistent motion, blurry, jittery, distorted", null, null, 512, 704, "text-to-video", 4, 9, 42, true, 1, true]
-            })
-        });
-        const data = await sub.json().catch(() => ({}));
-        if (!sub.ok || !data.event_id) {
-            return res.status(502).json({ error: data.error || data.detail || `Space video gagal (${sub.status})` });
+        let lastErr = null;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            let eventId;
+            try {
+                eventId = await ltxSubmit(enPrompt);
+            } catch (e) {
+                lastErr = e;
+                continue;
+            }
+            const statusUrl = `${LTX_SPACE}/gradio_api/call/text_to_video/${eventId}`;
+            if (await ltxProbeHealthy(eventId)) {
+                return res.json({ jobId: eventId, statusUrl });
+            }
+            lastErr = new Error('GPU space penuh/error instan');
+            console.error(`[video] attempt ${attempt}: job langsung error (GPU quota/restart), submit ulang...`);
         }
-        res.json({ jobId: data.event_id, statusUrl: `${LTX_SPACE}/gradio_api/call/text_to_video/${data.event_id}` });
+        console.error('Error video submit:', lastErr);
+        res.status(502).json({ error: 'Server video lagi penuh/gangguan. Coba lagi beberapa saat ya.' });
     } catch (error) {
         console.error('Error video submit:', error);
         res.status(500).json({ error: "Gagal mulai render video. Coba lagi." });
@@ -2506,9 +2562,18 @@ app.get('/api/video/status', async (req, res) => {
             return res.json({ status: 'COMPLETED', videoUrl: null });
         }
         if (/event:\s*error/.test(text)) {
-            const m = text.match(/data:\s*"([^"]+)"/s) || text.match(/data:\s*(\{.*\})/s);
-            let msg = 'Gagal render video.';
-            if (m) { try { msg = JSON.parse(m[1]).error || msg; } catch (e) { msg = m[1].replace(/\\"/g, '"'); } }
+            const m = text.match(/data:\s*"([^"]*)"/s) || text.match(/data:\s*(\{.*\})/s);
+            let msg = '';
+            if (m && m[1]) {
+                try { const j = JSON.parse(m[1]); msg = j && j.error ? String(j.error) : String(m[1]); }
+                catch (e) { msg = String(m[1]); }
+            }
+            // 404 = antrian event hilang karena space restart; pesan kosong/null = GPU
+            // worker gagal instan (quota ZeroGPU). Dua-duanya sementara -> minta client
+            // submit ulang, bukan gagal permanen.
+            if (/404|not found/i.test(msg) || !msg.trim()) {
+                return res.json({ status: 'RETRY', reason: msg || 'gpu' });
+            }
             return res.json({ status: 'ERROR', error: msg });
         }
         res.json({ status: 'IN_PROGRESS' });
