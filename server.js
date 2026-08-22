@@ -2305,7 +2305,8 @@ app.get('/api/search', async (req, res) => {
     }
 });
 
-const LTX_SPACE = 'https://lightricks-ltx-video-distilled.hf.space';
+const VIDEO_SPACE = 'https://zai-org-cogvideox-5b-space.hf.space'; // THUDM/CogVideoX-5B-Space (pindah ke zai-org)
+const VIDEO_API = '/gradio_api/call/generate';
 
 async function translateToEnglish(prompt) {
     const key = groqKey();
@@ -2421,12 +2422,14 @@ app.post('/api/translate', async (req, res) => {
     }
 });
 
-async function ltxSubmit(enPrompt) {
-    const sub = await fetch(`${LTX_SPACE}/gradio_api/call/text_to_video`, {
+async function videoSubmit(enPrompt) {
+    const sub = await fetch(`${VIDEO_SPACE}${VIDEO_API}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            data: [enPrompt, "worst quality, inconsistent motion, blurry, jittery, distorted", null, null, 512, 704, "text-to-video", 4, 9, 42, true, 1, true]
+            // Skema /generate CogVideoX-5B: [prompt, image_input, video_input,
+            // video_strength, seed_value, scale_status, rife_status]
+            data: [enPrompt, null, null, 0.8, -1, false, false]
         })
     });
     const data = await sub.json().catch(() => ({}));
@@ -2439,11 +2442,11 @@ async function ltxSubmit(enPrompt) {
 // Space ZeroGPU sering error instan (quota GPU penuh / worker mati): stream SSE
 // langsung kirim "event: error" beberapa detik setelah submit. Baca stream sebentar;
 // kalau muncul error -> job rusak dan layak disubmit ulang. Tanpa error -> sehat.
-function ltxProbeHealthy(eventId, ms = 7000) {
+function videoJobHealthy(eventId, ms = 7000) {
     return new Promise(resolve => {
         const ctrl = new AbortController();
         const timer = setTimeout(() => { ctrl.abort(); resolve(true); }, ms);
-        fetch(`${LTX_SPACE}/gradio_api/call/text_to_video/${eventId}`, { signal: ctrl.signal })
+        fetch(`${VIDEO_SPACE}${VIDEO_API}/${eventId}`, { signal: ctrl.signal })
             .then(async r => {
                 if (!r.ok || !r.body) { clearTimeout(timer); return resolve(false); }
                 const reader = r.body.getReader();
@@ -2482,13 +2485,13 @@ app.post('/api/video', async (req, res) => {
         for (let attempt = 1; attempt <= 3; attempt++) {
             let eventId;
             try {
-                eventId = await ltxSubmit(enPrompt);
+                eventId = await videoSubmit(enPrompt);
             } catch (e) {
                 lastErr = e;
                 continue;
             }
-            const statusUrl = `${LTX_SPACE}/gradio_api/call/text_to_video/${eventId}`;
-            if (await ltxProbeHealthy(eventId)) {
+            const statusUrl = `${VIDEO_SPACE}${VIDEO_API}/${eventId}`;
+            if (await videoJobHealthy(eventId)) {
                 return res.json({ jobId: eventId, statusUrl });
             }
             lastErr = new Error('GPU space penuh/error instan');
@@ -2503,6 +2506,11 @@ app.post('/api/video', async (req, res) => {
 });
 
 function parseSseComplete(text) {
+    const pick = (o) => {
+        if (!o || typeof o !== 'object') return null;
+        const u = o.video?.url || o.video?.path || o.url || o.path;
+        return typeof u === 'string' && u ? u : null;
+    };
     const lines = text.split('\n');
     for (let i = 0; i < lines.length; i++) {
         if (lines[i].trim() !== 'event: complete') continue;
@@ -2511,13 +2519,15 @@ function parseSseComplete(text) {
             if (!l.startsWith('data:')) continue;
             try {
                 const arr = JSON.parse(l.slice(5).trim());
-                const a = Array.isArray(arr) ? arr[0] : arr;
-                const url = a?.video?.url || a?.video?.path || a?.url || a?.path;
-                if (typeof url === 'string' && url) return url;
-                if (Array.isArray(arr[0]) && arr[0][0]) {
-                    const b = arr[0][0];
-                    const u2 = b?.video?.url || b?.video?.path || b?.url || b?.path;
-                    if (typeof u2 === 'string' && u2) return u2;
+                // CogVideoX /generate balas tuple: [video, file_download, gif, seed];
+                // LTX lama cuma [video]. Scan beberapa elemen pertama.
+                const items = Array.isArray(arr) ? arr.slice(0, 4) : [arr];
+                for (const it of items) {
+                    const u = typeof it === 'string' ? it : pick(it);
+                    if (u) return u;
+                    const inner = Array.isArray(it) ? it[0] : null;
+                    const u2 = inner ? pick(inner) : null;
+                    if (u2) return u2;
                 }
             } catch (e) { }
         }
@@ -2546,7 +2556,7 @@ app.get('/api/video/status', async (req, res) => {
                 const tok = decodeToken(req);
                 if (supabase && tok && tok.uid) {
                     try {
-                        const target = filePath.startsWith('/tmp/gradio/') ? `${LTX_SPACE}/gradio_api/file=${encodeURIComponent(filePath)}` : filePath;
+                        const target = filePath.startsWith('/tmp/gradio/') ? `${VIDEO_SPACE}/gradio_api/file=${encodeURIComponent(filePath)}` : filePath;
                         const fr = await fetch(target);
                         if (fr.ok) {
                             const buf = Buffer.from(await fr.arrayBuffer());
@@ -2587,7 +2597,7 @@ app.get('/api/video/file', async (req, res) => {
     try {
         const u = (req.query.u || '').toString();
         if (!u) return res.status(400).json({ error: "URL file kosong." });
-        const target = u.startsWith('/tmp/gradio/') ? `${LTX_SPACE}/gradio_api/file=${encodeURIComponent(u)}` : u;
+        const target = u.startsWith('/tmp/gradio/') ? `${VIDEO_SPACE}/gradio_api/file=${encodeURIComponent(u)}` : u;
         const r = await fetch(target);
         if (!r.ok) return res.status(502).json({ error: 'Video sudah tidak tersedia. Generate ulang ya.' });
         res.setHeader('Content-Type', 'video/mp4');
