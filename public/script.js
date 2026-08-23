@@ -3607,7 +3607,9 @@ async function generateVideoWithPrompt(prompt) {
             });
             const data = await resp.json().catch(() => ({}));
             if (!resp.ok) {
-                // LTX flaky + kredit cadangan kosong = terus cari window sehat, jangan nyerah
+                const errMsg = String(data.error || '');
+                // Kredit habis = stop total, jangan ngulang terus
+                if (/habis|kredit|insufficient|WORKS_INSUFFICIENT|kuota/i.test(errMsg)) throw new Error(errMsg);
                 setLoadingText('Semua studio lagi rewel, Senka terus mencari peluang');
                 await new Promise(r => setTimeout(r, 15000));
                 continue;
@@ -3872,7 +3874,7 @@ async function handleSenkaCommand(text) {
         currentTrackIndex = 0;
         saveMusicQueue();
         playTrack(0);
-        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User memutar lagu. Berikan respon asik. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu]'), null));
+        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User memutar lagu. Berikan respon asik. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu. WAJIB jawab dalam Bahasa Indonesia gaul khas Senka walau judul lagu/liriknya berbahasa Inggris — jangan pernah membalas penuh Bahasa Inggris]'), null));
         return true;
     }
 
@@ -3890,7 +3892,7 @@ async function handleSenkaCommand(text) {
         appendMessage('senka', 'Ditambahkan ke antrean musik 🎵');
         scrollToBottom(true);
         if (wasEmpty) playTrack(0);
-        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User menambahkan lagu ke antrean musik. Berikan respon asik. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu]'), null));
+        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User menambahkan lagu ke antrean musik. Berikan respon asik. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu. WAJIB jawab dalam Bahasa Indonesia gaul khas Senka walau judul lagu/liriknya berbahasa Inggris — jangan pernah membalas penuh Bahasa Inggris]'), null));
         return true;
     }
 
@@ -3903,7 +3905,7 @@ async function handleSenkaCommand(text) {
         const info = 'Judul: ' + currentSong.title + (currentSong.artist ? ' — Artis: ' + currentSong.artist : '');
         appendMessage('senka', '🎵 Lagu yang sedang diputar:\n' + info);
         scrollToBottom(true);
-        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User menanyakan judul lagu yang sedang diputar (' + info + '). Konfirmasi judul dan artis lagunya dengan hangat, dengan interaksi khas Senka di awal dan akhir kalimat. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu]'), null));
+        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User menanyakan judul lagu yang sedang diputar (' + info + '). Konfirmasi judul dan artis lagunya dengan hangat, dengan interaksi khas Senka di awal dan akhir kalimat. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu. WAJIB jawab dalam Bahasa Indonesia gaul khas Senka walau judul lagu/liriknya berbahasa Inggris — jangan pernah membalas penuh Bahasa Inggris]'), null));
         return true;
     }
 
@@ -3914,7 +3916,7 @@ async function handleSenkaCommand(text) {
             return true;
         }
         const info = 'Judul: ' + currentSong.title + (currentSong.artist ? ' — Artis: ' + currentSong.artist : '');
-        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User menanyakan makna lagu yang sedang diputar (' + info + '). Jelaskan makna, cerita, dan emosi dari lagu tersebut dengan hangat, dengan interaksi khas Senka di awal dan akhir kalimat. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu]'), null));
+        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User menanyakan makna lagu yang sedang diputar (' + info + '). Tampilkan HANYA penjelasan makna, cerita, dan emosi dari lagu tersebut — langsung ke intinya, TANPA sapaan/pembuka, TANPA interaksi Senka di awal/akhir kalimat, TANPA menyebut sumber atau tool apa pun. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu. WAJIB jawab dalam Bahasa Indonesia gaul khas Senka walau judul lagu/liriknya berbahasa Inggris — jangan pernah membalas penuh Bahasa Inggris]'), null));
         return true;
     }
 
@@ -3940,8 +3942,6 @@ async function handleSenkaCommand(text) {
         }
         appendMessage('senka', '📜 Lirik "' + currentSong.title + '"' + (currentSong.artist ? ' — ' + currentSong.artist : '') + '\n\n' + lyrics.slice(0, 3500));
         scrollToBottom(true);
-        const note = '[System: User sedang memutar lagu "' + currentSong.title + '"' + (currentSong.artist ? ' (' + currentSong.artist + ')' : '') + '. Sistem SUDAH menampilkan lirik penuhnya langsung di layar obrolan. Tugasmu hanyalah: (1) Jelaskan secara singkat dan hangat apa makna dan tema dari lagu ini, (2) Kutip MAKSIMAL 4 baris lirik yang paling berkesan (boleh lebih sedikit), (3) Jika user butuh versi lirik yang lain, arahkan dia untuk mencarinya di Google Search. JANGAN menampilkan lirik penuh — itu sudah ditampilkan sistem. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu]';
-        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote(note), null));
         return true;
     }
 
@@ -3976,7 +3976,7 @@ async function handleSenkaCommand(text) {
         if (mn) mn.style.display = 'none';
         appendMessage('senka', '⏹️ Musik dihentikan dan antrean dikosongkan.');
         scrollToBottom(true);
-        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User menghentikan musik. Berikan respon singkat dan natural. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu]'), null));
+        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User menghentikan musik. Berikan respon singkat dan natural. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu. WAJIB jawab dalam Bahasa Indonesia gaul khas Senka walau judul lagu/liriknya berbahasa Inggris — jangan pernah membalas penuh Bahasa Inggris]'), null));
         return true;
     }
 
@@ -4008,14 +4008,14 @@ async function handleSenkaCommand(text) {
         }, 1000);
         appendMessage('senka', '⏲️ Timer musik: musik akan berhenti dalam ' + formatDuration(total) + '. Selamat tidur ya~ 💤');
         scrollToBottom(true);
-        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User mengatur sleep timer musik. Berikan respon hangat untuk menemani tidurnya. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu]'), null));
+        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User mengatur sleep timer musik. Berikan respon hangat untuk menemani tidurnya. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu. WAJIB jawab dalam Bahasa Indonesia gaul khas Senka walau judul lagu/liriknya berbahasa Inggris — jangan pernah membalas penuh Bahasa Inggris]'), null));
         return true;
     }
         if (low === '/senkashuffle') {
         const turnedOn = shuffleQueue();
         appendMessage('senka', turnedOn ? '🎵 Playlist berhasil diacak!' : '🔀 Shuffle dimatikan, urutan awal dikembalikan.');
         scrollToBottom(true);
-        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User mengacak antrean musik. Berikan respon asik. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu]'), null));
+        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User mengacak antrean musik. Berikan respon asik. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu. WAJIB jawab dalam Bahasa Indonesia gaul khas Senka walau judul lagu/liriknya berbahasa Inggris — jangan pernah membalas penuh Bahasa Inggris]'), null));
         return true;
     }
 
@@ -4031,7 +4031,7 @@ async function handleSenkaCommand(text) {
         savePlaylists(lists);
         appendMessage('senka', '💾 Playlist "' + name + '" disimpan (' + musicQueue.length + ' lagu).');
         scrollToBottom(true);
-        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User menyimpan playlist musik. Berikan respon asik. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu]'), null));
+        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User menyimpan playlist musik. Berikan respon asik. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu. WAJIB jawab dalam Bahasa Indonesia gaul khas Senka walau judul lagu/liriknya berbahasa Inggris — jangan pernah membalas penuh Bahasa Inggris]'), null));
         return true;
     }
 
@@ -4059,7 +4059,7 @@ async function handleSenkaCommand(text) {
         currentTrackIndex = 0;
         saveMusicQueue();
         playTrack(0);
-        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User memutar playlist tersimpan. Berikan respon asik. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu]'), null));
+        if (modelKey) await streamAssistantReply(await getWebPayload(secretNote('[System: User memutar playlist tersimpan. Berikan respon asik. DILARANG KERAS menyertakan link/URL YouTube di jawabanmu. WAJIB jawab dalam Bahasa Indonesia gaul khas Senka walau judul lagu/liriknya berbahasa Inggris — jangan pernah membalas penuh Bahasa Inggris]'), null));
         return true;
     }
 

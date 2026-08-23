@@ -203,6 +203,7 @@ Analisis lagu tersebut berdasarkan database pengetahuanmu. Berikan rangkuman ten
 Tampilkan teks lirik lagu tersebut secara akurat jika pengguna meminta liriknya. (Opsional) Jika lirik terlalu panjang, tampilkan bagian utamanya saja lalu arahkan pengguna.
 
 [ATURAN KETAT]
+- WAJIB menjawab dalam Bahasa Indonesia gaul (gaya khas Senka), APAPUN bahasa judul, artis, atau lagunya. DILARANG KERAS membalas penuh dengan Bahasa Inggris hanya karena lagu/liriknya berbahasa Inggris — boleh mengutip potongan lirik aslinya seperlunya, tapi semua kalimatmu tetap Bahasa Indonesia.
 - Jangan pernah menyebutkan sumber data atau membocorkan proses teknis backend (misal: "Menurut data sistem...").
 - Fokus berikan jawaban spesifik hanya seputar musik yang sedang diputar.`
     };
@@ -2234,12 +2235,49 @@ app.post('/api/image', async (req, res) => {
         if (!prompt || !prompt.trim()) {
             return res.status(400).json({ error: "Deskripsi gambarnya kosong." });
         }
+        const enPrompt = await translateToEnglish(prompt.trim());
 
-        const dataUrl = await pollinationsImage(prompt.trim());
-        if (dataUrl) {
-            return res.json({ url: dataUrl, model: "Pollinations FLUX (gratis)" });
+        // --- PRIMARY: TensorArt text2image (Z Image), rotasi 4 key otomatis ---
+        if (TENSORART_KEYS.length) {
+            try {
+                const created = await tartPost('/task', {
+                    toolName: 'photoreal_studio_z_image',
+                    inputs: [
+                        { type: 'STRING', value: enPrompt.slice(0, 800) },
+                        { type: 'INTEGER', value: '1024' },
+                        { type: 'INTEGER', value: '1024' },
+                        { type: 'INTEGER', value: '1' }
+                    ]
+                });
+                const t = created.data?.task;
+                if (!t?.id) throw new Error('Task id kosong dari provider.');
+                tartRecordJobKey(t.id, created.key);
+                console.error(`[image] task TensorArt dibuat: ${t.id}`);
+                // Polling max ~15x / deadline ~47s (Vercel cap 60s, harus < 55s)
+                const taDeadline = Date.now() + 47000;
+                for (let poll = 0; poll < 15 && Date.now() < taDeadline; poll++) {
+                    await new Promise(r => setTimeout(r, 3000));
+                    const st = await tartPost('/task/query', { taskIds: [String(t.id)] }, created.key);
+                    const job = (st.data?.tasks || [])[0] || {};
+                    if (job.status === 'FINISH') {
+                        const outp = (job.outputs || []).find(o => typeof o.value === 'string' && /^https?:\/\//.test(o.value));
+                        if (outp) return res.json({ url: outp.value, model: "TensorArt Z Image" });
+                        break; // FINISH tapi tanpa URL -> jatuh ke cadangan
+                    }
+                    if (job.status === 'EXCEPTION' || job.status === 'CANCELED') break;
+                }
+            } catch (e) {
+                console.error('[image] TensorArt gagal:', e.message);
+            }
         }
 
+        // --- Cadangan #1: Pollinations FLUX (gratis) ---
+        const dataUrl = await pollinationsImage(enPrompt);
+        if (dataUrl) {
+            return res.json({ url: dataUrl, model: "Pollinations FLUX (gratis) [backup]" });
+        }
+
+        // --- Cadangan #2: OpenRouter ---
         if (hasOpenRouterKey()) {
             const fallback = await openRouterImage(prompt.trim());
             if (fallback.url) return res.json({ url: fallback.url, model: "FLUX.2 Klein (OpenRouter)" });
@@ -2249,7 +2287,7 @@ app.post('/api/image', async (req, res) => {
             return res.status(fallback.status || 502).json({ error: fallback.error });
         }
 
-        res.status(502).json({ error: "Pollinations lagi sibuk. Coba lagi beberapa saat." });
+        res.status(502).json({ error: "TensorArt & Pollinations sama-sama rewel. Coba lagi nanti." });
     } catch (error) {
         console.error("Error image:", error);
         res.status(500).json({ error: "Gagal generate gambar. Coba lagi." });
@@ -2421,9 +2459,16 @@ app.post('/api/translate', async (req, res) => {
 });
 
 // ===== Media generatif =====
-// Video: jalur UTAMA LTX Space via gradio API; cadangan TensorArt bila LTX rewel.
+// Video & gambar: jalur UTAMA TensorArt (rotasi 4 key otomatis); cadangan: LTX Space utk video, Pollinations/OpenRouter utk gambar.
 const LTX_SPACE = 'https://lightricks-ltx-video-distilled.hf.space';
-const TENSORART_KEY = String(process.env.TENSORART_API_KEY || '').trim();
+const TENSORART_KEYS = [process.env.TENSORART_API_KEY, process.env.TENSORART_API_KEY_BACKUP, process.env.TENSORART_API_KEY_BACKUP2, process.env.TENSORART_API_KEY_BACKUP3].map(v => String(v || '').trim()).filter(Boolean);
+let tartKeyIdx = 0;
+// Affinity job->key: query status harus pakai key yang bikin task-nya
+const tartJobKeys = new Map();
+function tartRecordJobKey(taskId, key) {
+    tartJobKeys.set(String(taskId), key);
+    if (tartJobKeys.size > 200) tartJobKeys.delete(tartJobKeys.keys().next().value);
+}
 const TENSORART_BASE = 'https://openapi.tensor.art/openworks/v1';
 const S = (v) => ({ type: 'STRING', value: v });
 // dicoba termurah dulu; urutan input tiap tool BEDA
@@ -2484,15 +2529,41 @@ function ltxProbeHealthy(eventId, ms = 7000) {
 }
 
 
-function tartHeaders() {
-    return { 'Content-Type': 'application/json', 'Echo-Access-Key': TENSORART_KEY };
+function tartHeaders(key) {
+    return { 'Content-Type': 'application/json', 'Echo-Access-Key': key };
 }
 
-async function tartPost(path, body) {
-    const r = await fetch(TENSORART_BASE + path, { method: 'POST', headers: tartHeaders(), body: JSON.stringify(body) });
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok || String(d.code ?? '') !== '0') throw new Error(d.message || d.msg || `HTTP ${r.status}`);
-    return d;
+// POST dengan rotasi key: mulai dari tartKeyIdx (atau preferredKey utk job lama),
+// maju ke key berikutnya tiap gagal; sukses -> kunci index key yang jalan.
+async function tartPost(path, body, preferredKey) {
+    if (!TENSORART_KEYS.length) throw new Error('TENSORART_API_KEY belum diset.');
+    let startIdx = tartKeyIdx;
+    if (preferredKey) {
+        const pi = TENSORART_KEYS.indexOf(preferredKey);
+        if (pi >= 0) startIdx = pi;
+    }
+    const badKeyErr = /401|access key not found|WORKS_INSUFFICIENT|insufficient|credit/i;
+    let lastErr = null;
+    for (let n = 0; n < TENSORART_KEYS.length; n++) {
+        const idx = (startIdx + n) % TENSORART_KEYS.length;
+        try {
+            const r = await fetch(TENSORART_BASE + path, { method: 'POST', headers: tartHeaders(TENSORART_KEYS[idx]), body: JSON.stringify(body) });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok || String(d.code ?? '') !== '0') {
+                const msg = d.message || d.msg || `HTTP ${r.status}`;
+                lastErr = new Error(msg);
+                console.error(`[tensorart] key #${idx + 1} ditolak (${badKeyErr.test(msg) ? 'key bermasalah/habis' : 'error lain'}): ${msg}`);
+                tartKeyIdx = (idx + 1) % TENSORART_KEYS.length;
+                continue;
+            }
+            tartKeyIdx = idx;
+            return { data: d.data, key: TENSORART_KEYS[idx] };
+        } catch (e) {
+            lastErr = e;
+            tartKeyIdx = (idx + 1) % TENSORART_KEYS.length;
+        }
+    }
+    throw lastErr || new Error('Semua key TensorArt gagal.');
 }
 
 
@@ -2507,6 +2578,7 @@ async function tartCreateVideo(enPrompt) {
                 const d = await tartPost('/task', body);
                 const t = d.data?.task;
                 if (!t?.id) throw new Error('Task id kosong dari provider.');
+                tartRecordJobKey(t.id, d.key);
                 console.error(`[video] task TensorArt dibuat via ${tool.name}: ${t.id}`);
                 return t;
             } catch (e) {
@@ -2529,7 +2601,18 @@ app.post('/api/video', async (req, res) => {
         }
         const enPrompt = await translateToEnglish(prompt.trim());
         let lastErr = null;
-        // --- Jalur utama: LTX Space (gratis, terbukti jalan dari Vercel) ---
+        // --- Jalur UTAMA: TensorArt (rotasi 4 key) ---
+        if (TENSORART_KEYS.length) {
+            try {
+                const task = await tartCreateVideo(enPrompt);
+                console.error(`[video] task TensorArt dibuat: ${task.id}`);
+                return res.json({ provider: 'tensorart', jobId: String(task.id) });
+            } catch (e) {
+                lastErr = e;
+                console.error('[video] TensorArt gagal:', e.message);
+            }
+        }
+        // --- Cadangan #1: LTX Space (gratis, via gradio API) ---
         for (let attempt = 1; attempt <= 3; attempt++) {
             let eventId;
             try {
@@ -2545,23 +2628,12 @@ app.post('/api/video', async (req, res) => {
             lastErr = new Error('LTX GPU penuh/error instan');
             console.error(`[video] LTX attempt ${attempt} ditolak GPU, submit ulang...`);
         }
-        // --- Cadangan: TensorArt ---
-        if (TENSORART_KEY) {
-            try {
-                const task = await tartCreateVideo(enPrompt);
-                console.error(`[video] task TensorArt dibuat: ${task.id}`);
-                return res.json({ provider: 'tensorart', jobId: String(task.id) });
-            } catch (e) {
-                lastErr = e;
-                console.error('[video] TensorArt juga gagal:', e.message);
-            }
-        }
         throw lastErr || new Error('Semua provider video gagal.');
     } catch (error) {
         console.error('Error video submit:', error.message);
         const msg = String(error.message || '');
         let friendly = 'Studio video lagi penuh semua — coba lagi beberapa saat ya.';
-        if (/WORKS_INSUFFICIENT/i.test(msg)) friendly = 'Kredit cadangan videonya habis — coba lagi besok ya.';
+        if (/WORKS_INSUFFICIENT/i.test(msg)) friendly = 'Kredit videonya habis semua — coba lagi besok ya.';
         else if (/mapping/i.test(msg)) friendly = 'Provider cadangan sesaat rewel — coba lagi ya.';
         else if (!/LTX GPU|Semua provider/.test(msg)) friendly = 'Gagal mulai render video: ' + msg;
         res.status(502).json({ error: friendly });
@@ -2594,11 +2666,11 @@ function parseSseComplete(text) {
 app.get('/api/video/status', async (req, res) => {
     try {
         if (req.query.p === 'ta') {
-            // === Provider cadangan: TensorArt ===
+            // === Provider UTAMA: TensorArt ===
             const jobId = (req.query.job || '').toString();
             if (!jobId) return res.status(400).json({ error: "Job ID kosong." });
             try {
-                const d = await tartPost('/task/query', { taskIds: [jobId] });
+                const d = await tartPost('/task/query', { taskIds: [jobId] }, tartJobKeys.get(jobId));
                 const t = (d.data?.tasks || [])[0] || {};
                 if (t.status === 'FINISH') {
                     const outp = (t.outputs || []).find(o => typeof o.value === 'string' && /^https?:\/\//.test(o.value));
