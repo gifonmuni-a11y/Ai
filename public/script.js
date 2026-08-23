@@ -3643,20 +3643,27 @@ const HF_VIDEO_API = '/gradio_api/call/generate';
 async function hfGradioFlow({ base, api, makeData, prompt, deadline, setLoadingText, busyText, retryText }) {
     const enPrompt = await translateEn(prompt);
     while (Date.now() < deadline) {
-        let ev = null;
-        for (let i = 1; i <= 3 && !ev; i++) {
+        let ev = null, lastErr = '';
+        // coba dengan token lalu tanpa token (quota anonim per-IP bisa masih hidup)
+        for (let i = 1; i <= 4 && !ev; i++) {
+            const withTok = i % 2 === 1;
             try {
+                const headers = { 'Content-Type': 'application/json' };
+                if (withTok) Object.assign(headers, await hfAuthHeaders());
                 const resp = await fetch(base + api, {
                     method: 'POST',
-                    headers: await hfAuthHeaders({ 'Content-Type': 'application/json' }),
+                    headers,
                     body: JSON.stringify({ data: makeData(enPrompt) })
                 });
                 const d = await resp.json().catch(() => ({}));
-                if (resp.ok && d.event_id) ev = d.event_id;
-            } catch (e) { }
-            if (!ev && i < 3 && Date.now() < deadline) await new Promise(r => setTimeout(r, 3000));
+                if (resp.ok && d.event_id) { ev = d.event_id; break; }
+                lastErr = `HTTP ${resp.status} ${JSON.stringify(d).slice(0, 120)}`;
+            } catch (e) {
+                lastErr = 'network: ' + String(e && e.message || e).slice(0, 100);
+            }
+            if (!ev && i < 4 && Date.now() < deadline) await new Promise(r => setTimeout(r, 3000));
         }
-        if (!ev) throw new Error('Studionya lagi penuh. Coba beberapa saat lagi ya.');
+        if (!ev) throw new Error('Studionya menolak permintaan (' + lastErr + '). Coba beberapa saat lagi ya.');
         const streamUrl = `${base}${api}/${ev}`;
         setLoadingText(busyText);
         let retryJob = false;

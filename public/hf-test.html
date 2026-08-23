@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Diagnosa HF Music/Video</title>
+<style>
+body { font-family: monospace; background: #0f172a; color: #e2e8f0; padding: 16px; max-width: 720px; margin: auto; }
+h3 { color: #38bdf8; }
+button { background: #0ea5e9; border: none; color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 1rem; cursor: pointer; }
+#log div { padding: 4px 0; border-bottom: 1px dashed rgba(255,255,255,.15); word-break: break-all; }
+.ok { color: #4ade80; } .fail { color: #f87171; } .info { color: #fbbf24; }
+</style>
+</head>
+<body>
+<h3>🔧 Diagnosa Generate Musik/Video (langsung dari browser kamu)</h3>
+<p>Halaman ini menelusuri langkah demi langkah kenapa generate gagal. Buka dari HP yang sama seperti saat pakai aplikasi.</p>
+<button onclick="run()">Mulai Tes</button>
+<div id="log"></div>
+<script>
+const MUSIC = 'https://facebook-musicgen.hf.space';
+const MAPI = '/gradio_api/call/predict_batched';
+const VIDEO = 'https://zai-org-cogvideox-5b-space.hf.space';
+const VAPI = '/gradio_api/call/generate';
+const logEl = document.getElementById('log');
+function log(msg, cls) {
+    const d = document.createElement('div');
+    d.className = cls || 'info';
+    d.innerText = msg;
+    logEl.appendChild(d);
+}
+async function step(name, fn) {
+    const mark = document.createElement('div');
+    mark.className = 'info';
+    mark.innerText = '⏳ ' + name + ' ...';
+    logEl.appendChild(mark);
+    try {
+        const r = await fn();
+        if (r === true) { mark.className = 'ok'; mark.innerText = '✅ ' + name; return true; }
+        mark.className = 'fail';
+        mark.innerText = '❌ ' + name + ' → ' + r;
+        return false;
+    } catch (e) {
+        mark.className = 'fail';
+        mark.innerText = '❌ ' + name + ' → EXCEPTION: ' + (e && e.message || e);
+        return false;
+    }
+}
+async function run() {
+    logEl.innerHTML = '';
+    // 1. token
+    let tok = '';
+    await step('Ambil token dari /api/hf-config', async () => {
+        const r = await fetch('/api/hf-config');
+        const d = await r.json();
+        tok = d.hfToken || '';
+        log('token prefix: ' + (tok ? tok.slice(0, 8) : '(kosong)'));
+        return tok ? true : 'token kosong di env server';
+    });
+    // 2. DNS/network ke HF
+    await step('Jangkau facebook-musicgen.hf.space', async () => {
+        const c = await fetch(MUSIC + '/gradio_api/info', { method: 'GET' });
+        return c.ok ? true : 'HTTP ' + c.status;
+    });
+    // 3. submit TANPA token
+    let evAnon = null;
+    await step('Submit MusicGen TANPA token (anonim IP-mu)', async () => {
+        const r = await fetch(MUSIC + MAPI, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data: ['test upbeat pop loop', null] })
+        });
+        const txt = await r.text();
+        log('status ' + r.status + ': ' + txt.slice(0, 150));
+        try { evAnon = JSON.parse(txt).event_id; } catch (e) { }
+        return (r.ok && evAnon) ? true : ('ditolak: ' + txt.slice(0, 120));
+    });
+    // 4. submit DENGAN token
+    let evTok = null;
+    if (tok) await step('Submit MusicGen DENGAN token', async () => {
+        const r = await fetch(MUSIC + MAPI, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
+            body: JSON.stringify({ data: ['test upbeat pop loop', null] })
+        });
+        const txt = await r.text();
+        log('status ' + r.status + ': ' + txt.slice(0, 150));
+        try { evTok = JSON.parse(txt).event_id; } catch (e) { }
+        return (r.ok && evTok) ? true : ('ditolak: ' + txt.slice(0, 120));
+    });
+    // 5. baca stream event (pakai event_id yang berhasil)
+    const ev = evAnon || evTok;
+    if (ev) {
+        await step('Baca aliran status job (max 25 detik)', () => new Promise((resolve) => {
+            const ctrl = new AbortController();
+            setTimeout(() => ctrl.abort(), 25000);
+            const base = evAnon ? MUSIC : MUSIC;
+            fetch(base + MAPI + '/' + ev, {
+                signal: ctrl.signal,
+                headers: (evTok && !evAnon && tok) ? { 'Authorization': 'Bearer ' + tok } : {}
+            }).then(r => {
+                log('stream HTTP ' + r.status);
+                const reader = r.body.getReader();
+                const dec = new TextDecoder();
+                let buf = '', done = false;
+                function pump() {
+                    reader.read().then(({ value, done: dv }) => {
+                        if (dv) { if (!done) resolve('stream tutup tanpa hasil'); return; }
+                        buf += dec.decode(value, { stream: true });
+                        const lines = buf.split('\n'); buf = lines.pop();
+                        for (const l of lines) {
+                            const t = l.trim();
+                            if (t.startsWith('event:')) {
+                                const evn = t.slice(6).trim();
+                                log('event: ' + evn);
+                                if (evn === 'error') { done = true; resolve(false); return; }
+                                if (evn === 'complete') { done = true; resolve(true); return; }
+                                if (evn === 'process_generating' || evn === 'generating') { done = true; resolve(true); return; }
+                            }
+                        }
+                        pump();
+                    }).catch(e => { if (!done) { done = true; resolve('timeout/batal — ini NORMAL kalau cuma heartbeat (job masih diproses)'); } });
+                }
+                pump();
+            }).catch(e => resolve('network: ' + e.message));
+        }));
+    } else {
+        log('Lewati tes stream karena submit gagal semua.', 'fail');
+    }
+    // 6. video space
+    await step('Jangkau zai-org-cogvideox-5b-space.hf.space', async () => {
+        const c = await fetch(VIDEO + '/gradio_api/info', { method: 'GET' });
+        return c.ok ? true : 'HTTP ' + c.status;
+    });
+    await step('Submit CogVideoX TANPA token', async () => {
+        const r = await fetch(VIDEO + VAPI, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data: ['a cat walking', null, null, 0.8, -1, false, false] })
+        });
+        const txt = await r.text();
+        log('status ' + r.status + ': ' + txt.slice(0, 150));
+        let ev2 = null; try { ev2 = JSON.parse(txt).event_id; } catch (e) { }
+        if (!(r.ok && ev2)) return 'ditolak: ' + txt.slice(0, 120);
+        // baca singkat
+        const ctrl = new AbortController();
+        setTimeout(() => ctrl.abort(), 20000);
+        try {
+            const sres = await fetch(VIDEO + VAPI + '/' + ev2, { signal: ctrl.signal });
+            const reader = sres.body.getReader();
+            const dec = new TextDecoder();
+            let buf = '', seen = [];
+            const t0 = Date.now();
+            while (Date.now() - t0 < 18000) {
+                const { value, done } = await reader.read().catch(() => ({ done: true }));
+                if (done) break;
+                buf += dec.decode(value, { stream: true });
+                for (const l of buf.split('\n')) {
+                    const t = l.trim();
+                    if (t.startsWith('event:') && !seen.includes(t)) { seen.push(t); log('video event: ' + t.slice(7)); }
+                }
+                buf = buf.split('\n').pop();
+                if (/event:\s*error/.test(buf)) return false;
+                if (/event:\s*(complete|generating|process)/.test(buf)) return true;
+            }
+            return 'timeout 18 detik tanpa error — kemungkinan job diterima & diproses';
+        } catch (e) { return 'timeout baca stream (normal kalau tadi tidak ada event error)'; }
+    });
+    log('');
+    log('Selesai. Kirim semua tulisan di atas ke developer ya.', 'ok');
+}
+</script>
+</body>
+</html>
