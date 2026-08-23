@@ -2454,14 +2454,26 @@ app.post('/api/video', async (req, res) => {
             return res.status(500).json({ error: "TENSORART_API_KEY belum diset di server." });
         }
         const enPrompt = await translateToEnglish(prompt.trim());
-        const d = await tartPost('/task', {
+        const body = {
             toolName: TENSORART_VIDEO_TOOL,
             inputs: [
                 { type: 'STRING', value: enPrompt.slice(0, 800) },
                 { type: 'STRING', value: '5' },
                 { type: 'STRING', value: '16:9-921600' }
             ]
-        });
+        };
+        // Provider kadang gagal sesaat (CDN mapping timeout) -> coba ulang senyap
+        let d = null, lastE = null;
+        for (let i = 1; i <= 3 && !d; i++) {
+            try {
+                d = await tartPost('/task', body);
+            } catch (e) {
+                lastE = e;
+                console.error(`[video] create task gagal (${i}/3):`, e.message);
+                if (/mapping|timeout|deadline/i.test(e.message) && i < 3) await new Promise(r => setTimeout(r, 2500));
+                else throw e;
+            }
+        }
         const task = d.data?.task;
         if (!task?.id) throw new Error('Task id kosong dari provider.');
         console.error(`[video] task TensorArt dibuat: ${task.id}`);
