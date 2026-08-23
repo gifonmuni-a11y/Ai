@@ -2468,7 +2468,11 @@ app.post('/api/video', async (req, res) => {
         res.json({ jobId: String(task.id), provider: 'tensorart' });
     } catch (error) {
         console.error('Error video submit:', error.message);
-        res.status(502).json({ error: 'Gagal mulai render video: ' + error.message });
+        const msg = String(error.message || '');
+        let friendly = 'Gagal mulai render video: ' + msg;
+        if (/WORKS_INSUFFICIENT/i.test(msg)) friendly = 'Kredit videonya (TensorArt) udah habis, jadi Senka coba lewat studio lain ya.';
+        else if (/mapping/i.test(msg)) friendly = 'Provider videonya sesaat rewel — coba lagi ya.';
+        res.status(502).json({ error: friendly });
     }
 });
 
