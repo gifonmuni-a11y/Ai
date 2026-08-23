@@ -2446,14 +2446,26 @@ app.get('/api/hf-probe', async (req, res) => {
         }
         out.eventId = d.event_id;
         const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 20000);
+        const timer = setTimeout(() => ctrl.abort(), 50000);
         try {
             const r = await fetch(`${BASE}${API}/${d.event_id}`, {
                 signal: ctrl.signal,
                 headers: tok ? { Authorization: 'Bearer ' + tok } : {}
             });
-            const txt = await r.text();
+            let txt = '';
+            try {
+                const reader = r.body.getReader();
+                const dec = new TextDecoder();
+                while (true) {
+                    const ch = await reader.read();
+                    if (ch.done) break;
+                    txt += dec.decode(ch.value, { stream: true });
+                }
+            } catch (e) {
+                out.langkah.push('stream terputus (abort/timeout)');
+            }
             const events = [...txt.matchAll(/event:\s*(\w+)/g)].map(m => m[1]);
+            out.jumlahEvent = events.length;
             out.langkah.push(`stream: HTTP ${r.status} events=[${[...new Set(events)].join(',')}]`);
             const errM = txt.match(/data:\s*"([^"]*)"/s);
             if (/event:\s*error/.test(txt)) {
