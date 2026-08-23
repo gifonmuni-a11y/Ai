@@ -3519,7 +3519,20 @@ function openMusicModal() {
 }
 function closeMusicModal() { document.getElementById('music-modal').style.display = 'none'; }
 
+/* Musik: fitur libur sementara. Semua penyedia gratis sedang bermasalah:
+   - facebook/MusicGen (HF): blokir embed/CORS + GPU worker error
+   - HF Inference API: model musicgen tidak didukung
+   - Cloudflare Workers AI: model musik sudah dihentikan
+   - fal.ai: akun terkunci; TensorArt: tidak ada tool audio
+   Struktur kodenya disiapkan supaya gampang diaktifkan lagi nanti. */
+const MUSIC_ENABLED = false;
+
 function generateMusic() {
+    if (!MUSIC_ENABLED) {
+        appendMessage('senka', '🎵 Fitur musiknya libur dulu ya — penyedianya semua lagi bermasalah. Nanti Senka kabari kalau udah aktif lagi!');
+        scrollToBottom(true);
+        return;
+    }
     const prompt = document.getElementById('music-prompt').value.trim();
     if (!prompt) { document.getElementById('music-prompt').focus(); return; }
     closeMusicModal();
@@ -3527,219 +3540,21 @@ function generateMusic() {
     generateMusicWithPrompt(prompt);
 }
 
-/* Musik: generate LANGSUNG dari browser ke HF MusicGen — ZeroGPU memblokir IP
-   datacenter (Vercel/server), tapi IP rumah/HP user aman.
-   Token HF diambil dari /api/hf-config (diset lewat env HF_TOKEN server).
-   CATATAN: token tetap terlihat publik di network tab — ini sementara. */
-const HF_MUSIC_SPACE = 'https://facebook-musicgen.hf.space';
-const HF_MUSIC_API = '/gradio_api/call/predict_batched';
-
-let _hfTokCache = null;
-async function hfToken() {
-    if (_hfTokCache !== null) return _hfTokCache;
-    try {
-        const r = await fetch('/api/hf-config');
-        const d = await r.json().catch(() => ({}));
-        _hfTokCache = (r.ok && d.hfToken) ? String(d.hfToken) : '';
-    } catch (e) { _hfTokCache = ''; }
-    return _hfTokCache;
-}
-async function hfAuthHeaders(extra = {}) {
-    const t = await hfToken();
-    return t ? { ...extra, 'Authorization': 'Bearer ' + t } : { ...extra };
-}
-
-function hfExtractMediaUrl(dataVal) {
-    let arr;
-    try { arr = JSON.parse(dataVal); } catch (e) { return null; }
-    const pick = (o) => {
-        if (typeof o === 'string') return /^https?:\/\//.test(o) || o.startsWith('/tmp/gradio/') ? o : null;
-        if (!o || typeof o !== 'object') return null;
-        const u = o.video?.url || o.video?.path || o.audio?.url || o.audio?.path || o.url || o.path;
-        return (typeof u === 'string' && u) ? u : null;
-    };
-    const items = Array.isArray(arr) ? arr.slice(0, 4) : [arr];
-    for (const it of items) {
-        const u = pick(it);
-        if (u) return u;
-        const inner = Array.isArray(it) ? it[0] : null;
-        const u2 = inner ? pick(inner) : null;
-        if (u2) return u2;
-    }
-    return null;
-}
-
-// Baca satu koneksi SSE gradio sampai event terminal / timeout.
-// Hasil: {type:'progress'} | {type:'complete', url} | {type:'error', message}
-// message '__retry__' berarti gangguan sementara (space restart / quota GPU).
-async function hfStreamEvent(url, maxMs) {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), maxMs);
-    try {
-        const r = await fetch(url, {
-            signal: ctrl.signal,
-            headers: await hfAuthHeaders()
-        });
-        if (!r.ok || !r.body) { clearTimeout(timer); return { type: 'error', message: 'HTTP ' + r.status }; }
-        const reader = r.body.getReader();
-        const dec = new TextDecoder();
-        let buf = '', pendingEv = '';
-        while (true) {
-            const chunk = await reader.read().catch(() => ({ done: true }));
-            if (chunk.done) break;
-            buf += dec.decode(chunk.value, { stream: true });
-            const lines = buf.split('\n');
-            buf = lines.pop();
-            for (const raw of lines) {
-                const l = raw.trim();
-                if (!l) continue;
-                if (l.startsWith('event:')) { pendingEv = l.slice(6).trim(); continue; }
-                if (!l.startsWith('data:')) continue;
-                const data = l.slice(5).trim();
-                if (pendingEv === 'error') {
-                    clearTimeout(timer);
-                    try { reader.cancel(); } catch (e) { }
-                    const msg = (data === 'null' || data === '""') ? '' : data.replace(/^"|"$/g, '');
-                    if (/404|not found/i.test(msg) || !msg) return { type: 'error', message: '__retry__' };
-                    return { type: 'error', message: msg };
-                }
-                if (pendingEv === 'complete') {
-                    clearTimeout(timer);
-                    try { reader.cancel(); } catch (e) { }
-                    return { type: 'complete', url: hfExtractMediaUrl(data) };
-                }
-                pendingEv = '';
-            }
-        }
-    } catch (e) { }
-    clearTimeout(timer);
-    return { type: 'progress' };
-}
-
-function hfResolveMedia(base, u) {
-    if (!u) return null;
-    if (/^https?:\/\//i.test(u)) return u;
-    return `${base}/gradio_api/file=${encodeURIComponent(u)}`;
-}
-
-async function translateEn(text) {
-    try {
-        const r = await fetch('/api/translate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text, target: 'en' })
-        });
-        const d = await r.json().catch(() => ({}));
-        if (r.ok && d.translated) return d.translated;
-    } catch (e) { }
-    return text;
-}
-
-const HF_VIDEO_SPACE = 'https://zai-org-cogvideox-5b-space.hf.space';
-const HF_VIDEO_API = '/gradio_api/call/generate';
-
-// Alur generik: submit + probe + poll SSE ke space gradio HF, langsung dari browser.
-// Kembali URL media final setelah dirender ke bubble chat.
-async function hfGradioFlow({ base, api, makeData, prompt, deadline, setLoadingText, busyText, retryText }) {
-    const enPrompt = await translateEn(prompt);
-    while (Date.now() < deadline) {
-        let ev = null, lastErr = '';
-        // coba dengan token lalu tanpa token (quota anonim per-IP bisa masih hidup)
-        for (let i = 1; i <= 4 && !ev; i++) {
-            const withTok = i % 2 === 1;
-            try {
-                const headers = { 'Content-Type': 'application/json' };
-                if (withTok) Object.assign(headers, await hfAuthHeaders());
-                const resp = await fetch(base + api, {
-                    method: 'POST',
-                    headers,
-                    body: JSON.stringify({ data: makeData(enPrompt) })
-                });
-                const d = await resp.json().catch(() => ({}));
-                if (resp.ok && d.event_id) { ev = d.event_id; break; }
-                lastErr = `HTTP ${resp.status} ${JSON.stringify(d).slice(0, 120)}`;
-            } catch (e) {
-                lastErr = 'network: ' + String(e && e.message || e).slice(0, 100);
-            }
-            if (!ev && i < 4 && Date.now() < deadline) await new Promise(r => setTimeout(r, 3000));
-        }
-        if (!ev) throw new Error('Studionya menolak permintaan (' + lastErr + '). Coba beberapa saat lagi ya.');
-        const streamUrl = `${base}${api}/${ev}`;
-        setLoadingText(busyText);
-        let retryJob = false;
-        while (Date.now() < deadline) {
-            await new Promise(r => setTimeout(r, 8000));
-            const st = await hfStreamEvent(streamUrl, 25000);
-            if (st.type === 'complete') {
-                const url = hfResolveMedia(base, st.url);
-                if (!url) throw new Error('Hasilnya sudah tidak tersedia. Generate ulang ya.');
-                return url;
-            }
-            if (st.type === 'error') {
-                if (st.message === '__retry__') { retryJob = true; break; }
-                throw new Error(st.message);
-            }
-        }
-        if (Date.now() >= deadline) break;
-        if (retryJob) setLoadingText(retryText);
-    }
-    throw new Error('Waktu pengerjaan habis. Coba lagi ya.');
-}
-
-function renderMediaResult(loading, url, { tag, fileExt, saveType, fileName }) {
-    const media = msgMediaOf(loading);
-    media.innerHTML = '';
-    msgBodyOf(loading).innerHTML = '';
-    const t = document.createElement('div');
-    t.className = 'msg-tag';
-    t.innerText = tag;
-    media.appendChild(t);
-    let el;
-    if (saveType === 'video') {
-        el = document.createElement('video');
-        el.classList.add('chat-video');
-    } else {
-        el = document.createElement('audio');
-        el.classList.add('chat-audio');
-    }
-    el.src = url;
-    el.controls = true;
-    el.preload = 'metadata';
-    media.appendChild(el);
-    const actions = document.createElement('div');
-    actions.className = 'msg-actions';
-    const dl = document.createElement('button');
-    dl.className = 'msg-action';
-    dl.title = 'Download ' + tag.toLowerCase();
-    dl.innerHTML = '<i class="fa-solid fa-download"></i>';
-    dl.onclick = () => downloadImage(url, fileName + Date.now() + fileExt);
-    actions.appendChild(dl);
-    media.appendChild(actions);
-    remoteSave('senka', saveType === 'video' ? 'video' : 'voice', url);
-    scrollToBottom(true);
-}
-
 async function generateMusicWithPrompt(prompt) {
     appendMessage('user', prompt);
     const loading = appendMessage('senka', '');
-    const setLoadingText = (t) => {
-        msgBodyOf(loading).innerHTML = t + '<span class="tind"><i></i><i></i><i></i></span>';
-        scrollToBottom(true);
-    };
-    setLoadingText('Senka lagi bikin musikmu');
-    const deadline = Date.now() + 6 * 60 * 1000;
+    msgBodyOf(loading).innerHTML = 'Senka lagi bikin musikmu<span class="tind"><i></i><i></i><i></i></span>';
+    scrollToBottom(true);
     try {
-        const url = await hfGradioFlow({
-            base: HF_MUSIC_SPACE,
-            api: HF_MUSIC_API,
-            makeData: (en) => [en, null], // skema MusicGen: [texts, melodies]
-            prompt,
-            deadline,
-            setLoadingText,
-            busyText: 'Musiknya lagi digarap',
-            retryText: 'Generasinya keganggu, Senka coba lagi'
+        // Saat provider musik siap, panggil POST /api/music di sini.
+        const resp = await fetch('/api/music', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt })
         });
-        renderMediaResult(loading, url, { tag: 'Musik AI', fileExt: '.wav', saveType: 'audio', fileName: 'senka-musik-' });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data.audioUrl) throw new Error(data.error || 'Gagal bikin musik.');
+        renderMediaResult(loading, data.audioUrl, { tag: 'Musik AI', fileExt: '.wav', saveType: 'audio', fileName: 'senka-musik-' });
     } catch (e) {
         msgBodyOf(loading).innerText = 'Gagal: ' + e.message;
         scrollToBottom(true);
@@ -3764,8 +3579,7 @@ async function generateVideoWithPrompt(prompt) {
     setLoadingText('Senka lagi bikin videomu');
     const deadline = Date.now() + 6 * 60 * 1000;
     try {
-        // Jalur 1: server (TensorArt) — cepat kalau kreditnya masih ada
-        let jobId = null, serverErr = '';
+        let jobId = null, lastErr = '';
         for (let i = 1; i <= 2 && !jobId; i++) {
             try {
                 const resp = await fetch('/api/video', {
@@ -3778,42 +3592,33 @@ async function generateVideoWithPrompt(prompt) {
                 if (!data.jobId) throw new Error('Server tidak kasih job ID.');
                 jobId = data.jobId;
             } catch (e) {
-                serverErr = e.message;
+                lastErr = e.message;
+                if (/habis/i.test(lastErr)) break; // kredit habis -> jangan ulang
                 if (i < 2 && Date.now() < deadline) await new Promise(r => setTimeout(r, 4000));
             }
         }
-        if (jobId) {
-            while (Date.now() < deadline) {
-                await new Promise(r => setTimeout(r, 8000));
-                const sr = await fetch('/api/video/status?job=' + encodeURIComponent(jobId), { headers: await authHeaders() });
-                const sd = await sr.json().catch(() => ({}));
-                if (sd.status === 'COMPLETED' && sd.videoUrl) {
-                    renderMediaResult(loading, sd.videoUrl, { tag: 'Video AI', fileExt: '.mp4', saveType: 'video', fileName: 'senka-video-' });
-                    return;
-                }
-                if (sd.status === 'ERROR') { serverErr = sd.error || 'Gagal render video.'; break; }
-            }
-            // selesai tanpa COMPLETED -> jatuh ke jalur langsung di bawah
-            if (Date.now() >= deadline) throw new Error('Waktu render habis. Coba lagi ya.');
+        if (!jobId) {
+            if (/habis/i.test(lastErr)) throw new Error('Kredit videonya habis buat hari ini — coba lagi besok ya, maaf!');
+            throw new Error(lastErr || 'Gagal mulai render video.');
         }
-        // Jalur 2: langsung dari browser ke HF CogVideoX (IP rumah/HP tidak diblokir)
-        setLoadingText(serverErr ? `TensorArt: ${serverErr.slice(0, 40)} — Senka coba jalur lain` : 'Senka coba studio lain ya');
-        const url = await hfGradioFlow({
-            base: HF_VIDEO_SPACE,
-            api: HF_VIDEO_API,
-            makeData: (en) => [en, null, null, 0.8, -1, false, false], // skema /generate CogVideoX
-            prompt,
-            deadline,
-            setLoadingText,
-            busyText: 'Videonya lagi digarap',
-            retryText: 'Render-nya keganggu, Senka coba lagi'
-        });
-        renderMediaResult(loading, url, { tag: 'Video AI', fileExt: '.mp4', saveType: 'video', fileName: 'senka-video-' });
+        while (Date.now() < deadline) {
+            await new Promise(r => setTimeout(r, 8000));
+            const sr = await fetch('/api/video/status?job=' + encodeURIComponent(jobId), { headers: await authHeaders() });
+            const sd = await sr.json().catch(() => ({}));
+            if (sd.status === 'COMPLETED') {
+                if (!sd.videoUrl) throw new Error('Video sudah tidak tersedia. Generate ulang ya.');
+                renderMediaResult(loading, sd.videoUrl, { tag: 'Video AI', fileExt: '.mp4', saveType: 'video', fileName: 'senka-video-' });
+                return;
+            }
+            if (sd.status === 'ERROR') throw new Error(sd.error || 'Gagal render video.');
+        }
+        throw new Error('Waktu render habis. Coba lagi ya.');
     } catch (e) {
         msgBodyOf(loading).innerText = 'Gagal: ' + e.message;
         scrollToBottom(true);
     }
 }
+
 
 const SEARCH_RE = /(^|[\s,.?!])(siapa|siapakah|kapan|dimana|di\s+mana|berapa|kenapa|mengapa|bagaimana|apakah|kepanjangan|definisi|arti|sejarah|perbedaan|info\s+tentang|berita\s+tentang|tentang|jelaskan|cari|search)\b/i;
 

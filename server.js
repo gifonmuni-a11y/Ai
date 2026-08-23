@@ -2428,10 +2428,9 @@ app.get('/hf-test.html', (req, res) => {
     res.sendFile('hf-test.html', { root: 'public' });
 });
 
-// Token HF untuk pemakaian langsung dari browser (musik). Sengaja diekspos ke
-// client atas permintaan owner — ganti mekanismenya kalau nanti mau aman.
-app.get('/api/hf-config', (req, res) => {
-    res.json({ hfToken: String(process.env.HF_TOKEN || '').trim() });
+// Musik libur sementara: semua penyedia gratis bermasalah (lihat script.js).
+app.post('/api/music', (req, res) => {
+    res.status(503).json({ error: 'Fitur musik lagi libur — penyedianya semua bermasalah. Nanti aktif lagi ya.' });
 });
 
 // Video via TensorArt OpenAPI (key di env server, TIDAK dikirim ke frontend).
