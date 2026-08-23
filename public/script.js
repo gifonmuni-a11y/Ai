@@ -4972,6 +4972,11 @@ async function getWebPayload(baseMessages, lastText) {
     return context ? [...baseMessages, { role: 'system', content: context }] : baseMessages;
 }
 
+// Cegah loop kata beruntun (mis. "Senka Senka Senka...") dari model free
+function collapseWordSpam(t) {
+    return String(t || '').replace(/\b([\w'-]{2,20})([\s,.!~]{0,5}\1\b){2,}/gi, '$1');
+}
+
 async function streamAssistantReply(payloadMessages) {
     const createdTs = Date.now();
     const msgContent = makeMsgContent('senka', createdTs, formatMsgTime(createdTs));
@@ -5051,7 +5056,7 @@ async function streamAssistantReply(payloadMessages) {
         if (!started) throw new Error('empty');
         if (ragReplacement !== null) streamBuf = ragReplacement;
 
-        const fullReply = streamBuf;
+        const fullReply = collapseWordSpam(streamBuf);
         const stk = extractSticker(fullReply);
         const fileReq = parseFileRequest(fullReply);
         let displayText = fileReq ? fileReq.displayText.trim() : fullReply;
