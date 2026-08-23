@@ -2421,82 +2421,63 @@ app.post('/api/translate', async (req, res) => {
 });
 
 // ===== Media generatif =====
-// [SEMENTARA] Probe: apakah ZeroGPU mau menerima job dari IP Vercel + token env?
-app.get('/api/hf-probe', async (req, res) => {
-    const tok = String(process.env.HF_TOKEN || '').trim();
-    const targets = {
-        music: ['https://facebook-musicgen.hf.space', '/gradio_api/call/predict_batched', ['short test beat', null]],
-        cogvideo: ['https://zai-org-cogvideox-5b-space.hf.space', '/gradio_api/call/generate', ['a cat walking slowly', null, null, 0.8, -1, false, false]],
-        ltx: ['https://lightricks-ltx-video-distilled.hf.space', '/gradio_api/call/text_to_video', ['a cat walking slowly', 'worst quality', null, null, 512, 704, 'text-to-video', 4, 9, 42, true, 1, true]]
-    };
-    const key = String(req.query.s || 'music').toLowerCase();
-    const [BASE, API, DATA] = targets[key] || targets.music;
-    const out = { target: key, tokenAda: !!tok, langkah: [] };
-    try {
-        const sub = await fetch(BASE + API, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}) },
-            body: JSON.stringify({ data: DATA })
-        });
-        const d = await sub.json().catch(() => ({}));
-        out.langkah.push(`submit: HTTP ${sub.status} ${JSON.stringify(d).slice(0, 120)}`);
-        if (!sub.ok || !d.event_id) {
-            out.hasil = 'SUBMIT_DITOLAK';
-            return res.json(out);
-        }
-        out.eventId = d.event_id;
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 50000);
-        try {
-            const r = await fetch(`${BASE}${API}/${d.event_id}`, {
-                signal: ctrl.signal,
-                headers: tok ? { Authorization: 'Bearer ' + tok } : {}
-            });
-            let txt = '';
-            try {
-                const reader = r.body.getReader();
-                const dec = new TextDecoder();
-                while (true) {
-                    const ch = await reader.read();
-                    if (ch.done) break;
-                    txt += dec.decode(ch.value, { stream: true });
-                }
-            } catch (e) {
-                out.langkah.push('stream terputus (abort/timeout)');
-            }
-            const events = [...txt.matchAll(/event:\s*(\w+)/g)].map(m => m[1]);
-            out.jumlahEvent = events.length;
-            out.langkah.push(`stream: HTTP ${r.status} events=[${[...new Set(events)].join(',')}]`);
-            const errM = txt.match(/data:\s*"([^"]*)"/s);
-            if (/event:\s*error/.test(txt)) {
-                out.hasil = 'GPU_TOLAK';
-                out.detail = errM ? errM[1] : '(pesan kosong — khas ZeroGPU quota/blokir)';
-            } else if (/event:\s*(complete|generating|process)/.test(txt)) {
-                out.hasil = 'DITERIMA_GPU';
-            } else {
-                out.hasil = 'TANPA_EVENT';
-            }
-        } finally {
-            clearTimeout(timer);
-        }
-    } catch (e) {
-        out.langkah.push('exception: ' + e.message);
-        out.hasil = 'EXCEPTION';
-    }
-    res.json(out);
-});
-
-// Halaman diagnosa generate video dari browser user.
-// Route eksplisit sebagai jaring pengaman selain express.static.
-app.get('/hf-test.html', (req, res) => {
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.sendFile('hf-test.html', { root: 'public' });
-});
-
-// Video via TensorArt OpenAPI (key di env server, TIDAK dikirim ke frontend).
+// Video: jalur UTAMA LTX Space via gradio API; cadangan TensorArt bila LTX rewel.
+const LTX_SPACE = 'https://lightricks-ltx-video-distilled.hf.space';
 const TENSORART_KEY = String(process.env.TENSORART_API_KEY || '').trim();
 const TENSORART_BASE = 'https://openapi.tensor.art/openworks/v1';
 const TENSORART_VIDEO_TOOL = 'text2video_wan22'; // durasi 3/4/5 dtk, rasio mis. "16:9-921600"
+
+async function ltxSubmit(enPrompt) {
+    const sub = await fetch(`${LTX_SPACE}/gradio_api/call/text_to_video`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            data: [enPrompt, "worst quality, inconsistent motion, blurry, jittery, distorted", null, null, 512, 704, "text-to-video", 4, 9, 42, true, 1, true]
+        })
+    });
+    const data = await sub.json().catch(() => ({}));
+    if (!sub.ok || !data.event_id) {
+        throw new Error(data.error || data.detail || `Space video gagal (${sub.status})`);
+    }
+    return data.event_id;
+}
+
+// Space ZeroGPU sering error instan (quota GPU penuh / worker mati): stream SSE
+// langsung kirim "event: error" beberapa detik setelah submit. Baca stream sebentar;
+// kalau muncul error -> job rusak dan layak disubmit ulang. Tanpa error -> sehat.
+
+function ltxProbeHealthy(eventId, ms = 7000) {
+    return new Promise(resolve => {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => { ctrl.abort(); resolve(true); }, ms);
+        fetch(`${LTX_SPACE}/gradio_api/call/text_to_video/${eventId}`, { signal: ctrl.signal })
+            .then(async r => {
+                if (!r.ok || !r.body) { clearTimeout(timer); return resolve(false); }
+                const reader = r.body.getReader();
+                const dec = new TextDecoder();
+                let buf = '';
+                while (true) {
+                    const chunk = await reader.read().catch(() => ({ done: true }));
+                    if (chunk.done) break;
+                    buf += dec.decode(chunk.value, { stream: true });
+                    if (/event:\s*error/.test(buf)) {
+                        clearTimeout(timer);
+                        try { reader.cancel(); } catch (e) { }
+                        return resolve(false);
+                    }
+                    if (/event:\s*(complete|generating|process)/.test(buf)) {
+                        clearTimeout(timer);
+                        try { reader.cancel(); } catch (e) { }
+                        return resolve(true);
+                    }
+                }
+                clearTimeout(timer);
+                resolve(true);
+            })
+            .catch(() => { clearTimeout(timer); resolve(true); });
+    });
+}
+
 
 function tartHeaders() {
     return { 'Content-Type': 'application/json', 'Echo-Access-Key': TENSORART_KEY };
@@ -2509,85 +2490,211 @@ async function tartPost(path, body) {
     return d;
 }
 
+
+
+// Buat task TensorArt dengan retry (CDN-nya suka timeout sekali jalan)
+async function tartCreateVideo(enPrompt) {
+    const body = {
+        toolName: TENSORART_VIDEO_TOOL,
+        inputs: [
+            { type: 'STRING', value: enPrompt.slice(0, 800) },
+            { type: 'STRING', value: '5' },
+            { type: 'STRING', value: '16:9-921600' }
+        ]
+    };
+    let lastErr = null;
+    for (let i = 1; i <= 3; i++) {
+        try {
+            const d = await tartPost('/task', body);
+            const t = d.data?.task;
+            if (!t?.id) throw new Error('Task id kosong dari provider.');
+            return t;
+        } catch (e) {
+            lastErr = e;
+            console.error(`[video] tensorart create gagal (${i}/3):`, e.message);
+            if (/mapping|timeout|deadline/i.test(e.message) && i < 3) await new Promise(r => setTimeout(r, 2500));
+            else throw e;
+        }
+    }
+    throw lastErr || new Error('TensorArt gagal berulang.');
+}
+
 app.post('/api/video', async (req, res) => {
     try {
         const { prompt } = req.body;
         if (!prompt || !prompt.trim()) {
             return res.status(400).json({ error: "Deskripsi videonya kosong." });
         }
-        if (!TENSORART_KEY) {
-            return res.status(500).json({ error: "TENSORART_API_KEY belum diset di server." });
-        }
         const enPrompt = await translateToEnglish(prompt.trim());
-        const body = {
-            toolName: TENSORART_VIDEO_TOOL,
-            inputs: [
-                { type: 'STRING', value: enPrompt.slice(0, 800) },
-                { type: 'STRING', value: '5' },
-                { type: 'STRING', value: '16:9-921600' }
-            ]
-        };
-        // Provider kadang gagal sesaat (CDN mapping timeout) -> coba ulang senyap
-        let d = null, lastE = null;
-        for (let i = 1; i <= 3 && !d; i++) {
+        let lastErr = null;
+        // --- Jalur utama: LTX Space (gratis, terbukti jalan dari Vercel) ---
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            let eventId;
             try {
-                d = await tartPost('/task', body);
+                eventId = await ltxSubmit(enPrompt);
             } catch (e) {
-                lastE = e;
-                console.error(`[video] create task gagal (${i}/3):`, e.message);
-                if (/mapping|timeout|deadline/i.test(e.message) && i < 3) await new Promise(r => setTimeout(r, 2500));
-                else throw e;
+                lastErr = e;
+                continue;
+            }
+            const statusUrl = `${LTX_SPACE}/gradio_api/call/text_to_video/${eventId}`;
+            if (await ltxProbeHealthy(eventId)) {
+                return res.json({ provider: 'ltx', jobId: eventId, statusUrl });
+            }
+            lastErr = new Error('LTX GPU penuh/error instan');
+            console.error(`[video] LTX attempt ${attempt} ditolak GPU, submit ulang...`);
+        }
+        // --- Cadangan: TensorArt ---
+        if (TENSORART_KEY) {
+            try {
+                const task = await tartCreateVideo(enPrompt);
+                console.error(`[video] task TensorArt dibuat: ${task.id}`);
+                return res.json({ provider: 'tensorart', jobId: String(task.id) });
+            } catch (e) {
+                lastErr = e;
+                console.error('[video] TensorArt juga gagal:', e.message);
             }
         }
-        const task = d.data?.task;
-        if (!task?.id) throw new Error('Task id kosong dari provider.');
-        console.error(`[video] task TensorArt dibuat: ${task.id}`);
-        res.json({ jobId: String(task.id), provider: 'tensorart' });
+        throw lastErr || new Error('Semua provider video gagal.');
     } catch (error) {
         console.error('Error video submit:', error.message);
         const msg = String(error.message || '');
-        let friendly = 'Gagal mulai render video: ' + msg;
-        if (/WORKS_INSUFFICIENT/i.test(msg)) friendly = 'Kredit videonya (TensorArt) udah habis, jadi Senka coba lewat studio lain ya.';
-        else if (/mapping/i.test(msg)) friendly = 'Provider videonya sesaat rewel — coba lagi ya.';
+        let friendly = 'Studio video lagi penuh semua — coba lagi beberapa saat ya.';
+        if (/WORKS_INSUFFICIENT/i.test(msg)) friendly = 'Kredit cadangan videonya habis — coba lagi besok ya.';
+        else if (/mapping/i.test(msg)) friendly = 'Provider cadangan sesaat rewel — coba lagi ya.';
+        else if (!/LTX GPU|Semua provider/.test(msg)) friendly = 'Gagal mulai render video: ' + msg;
         res.status(502).json({ error: friendly });
     }
 });
 
+function parseSseComplete(text) {
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        if (lines[i].trim() !== 'event: complete') continue;
+        for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
+            const l = lines[j].trim();
+            if (!l.startsWith('data:')) continue;
+            try {
+                const arr = JSON.parse(l.slice(5).trim());
+                const a = Array.isArray(arr) ? arr[0] : arr;
+                const url = a?.video?.url || a?.video?.path || a?.url || a?.path;
+                if (typeof url === 'string' && url) return url;
+                if (Array.isArray(arr[0]) && arr[0][0]) {
+                    const b = arr[0][0];
+                    const u2 = b?.video?.url || b?.video?.path || b?.url || b?.path;
+                    if (typeof u2 === 'string' && u2) return u2;
+                }
+            } catch (e) { }
+        }
+    }
+    return null;
+}
+
 app.get('/api/video/status', async (req, res) => {
     try {
-        const jobId = (req.query.job || '').toString();
-        if (!jobId) return res.status(400).json({ error: "Job ID kosong." });
-        const d = await tartPost('/task/query', { taskIds: [jobId] });
-        const t = (d.data?.tasks || [])[0] || {};
-        if (t.status === 'FINISH') {
-            const out = (t.outputs || []).find(o => typeof o.value === 'string' && /^https?:\/\//.test(o.value));
-            if (!out) return res.json({ status: 'ERROR', error: 'Provider tidak kirim URL video.' });
-            const url = out.value;
-            // URL provider bertanda tangan & kedaluwarsa ~1 jam. Kalau user login
-            // Supabase, pindahkan ke bucket biar permanen tersimpan di chat.
-            const tok = decodeToken(req);
-            if (supabase && tok && tok.uid) {
-                try {
-                    const fr = await fetch(url);
-                    if (fr.ok) {
-                        const buf = Buffer.from(await fr.arrayBuffer());
-                        const saved = await supabaseUpload(clientFor(req), buf, 'video/mp4', 'mp4', tok.uid);
-                        return res.json({ status: 'COMPLETED', videoUrl: saved.url });
+        if (req.query.p === 'ta') {
+            // === Provider cadangan: TensorArt ===
+            const jobId = (req.query.job || '').toString();
+            if (!jobId) return res.status(400).json({ error: "Job ID kosong." });
+            try {
+                const d = await tartPost('/task/query', { taskIds: [jobId] });
+                const t = (d.data?.tasks || [])[0] || {};
+                if (t.status === 'FINISH') {
+                    const outp = (t.outputs || []).find(o => typeof o.value === 'string' && /^https?:\/\//.test(o.value));
+                    if (!outp) return res.json({ status: 'ERROR', error: 'Provider tidak kirim URL video.' });
+                    const tok2 = decodeToken(req);
+                    if (supabase && tok2 && tok2.uid) {
+                        try {
+                            const fr = await fetch(outp.value);
+                            if (fr.ok) {
+                                const buf = Buffer.from(await fr.arrayBuffer());
+                                const saved = await supabaseUpload(clientFor(req), buf, 'video/mp4', 'mp4', tok2.uid);
+                                return res.json({ status: 'COMPLETED', videoUrl: saved.url });
+                            }
+                        } catch (e) { console.error('Video save to bucket error:', e.message); }
                     }
-                } catch (e) {
-                    console.error('Video save to bucket error:', e.message);
+                    return res.json({ status: 'COMPLETED', videoUrl: outp.value });
                 }
+                if (t.status === 'EXCEPTION' || t.status === 'CANCELED') {
+                    return res.json({ status: 'ERROR', error: `Render gagal di provider (${t.status}).` });
+                }
+                return res.json({ status: 'IN_PROGRESS' });
+            } catch (error) {
+                console.error('Error video status TA:', error.message);
+                return res.json({ status: 'IN_PROGRESS' });
             }
-            return res.json({ status: 'COMPLETED', videoUrl: url });
         }
-        if (t.status === 'EXCEPTION' || t.status === 'CANCELED') {
-            return res.json({ status: 'ERROR', error: `Render gagal di provider (${t.status}).` });
+
+        const url = (req.query.url || '').toString();
+        if (!url) return res.status(400).json({ error: "URL status kosong." });
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 45000);
+        let text = '';
+        try {
+            const r = await fetch(url, { signal: ctrl.signal });
+            text = await r.text();
+        } catch (e) {
+            return res.json({ status: 'IN_PROGRESS' });
+        } finally {
+            clearTimeout(timer);
+        }
+        if (text.includes('"complete"') || /event:\s*complete/.test(text)) {
+            const filePath = parseSseComplete(text);
+            if (filePath) {
+                const tok = decodeToken(req);
+                if (supabase && tok && tok.uid) {
+                    try {
+                        const target = filePath.startsWith('/tmp/gradio/') ? `${LTX_SPACE}/gradio_api/file=${encodeURIComponent(filePath)}` : filePath;
+                        const fr = await fetch(target);
+                        if (fr.ok) {
+                            const buf = Buffer.from(await fr.arrayBuffer());
+                            const saved = await supabaseUpload(clientFor(req), buf, 'video/mp4', 'mp4', tok.uid);
+                            return res.json({ status: 'COMPLETED', videoUrl: saved.url });
+                        }
+                    } catch (e) {
+                        console.error('Video save to bucket error:', e.message);
+                    }
+                }
+                return res.json({ status: 'COMPLETED', videoUrl: '/api/video/file?u=' + encodeURIComponent(filePath) });
+            }
+            return res.json({ status: 'COMPLETED', videoUrl: null });
+        }
+        if (/event:\s*error/.test(text)) {
+            const m = text.match(/data:\s*"([^"]*)"/s) || text.match(/data:\s*(\{.*\})/s);
+            let msg = '';
+            if (m && m[1]) {
+                try { const j = JSON.parse(m[1]); msg = j && j.error ? String(j.error) : String(m[1]); }
+                catch (e) { msg = String(m[1]); }
+            }
+            // 404 = antrian event hilang karena space restart; pesan kosong/null = GPU
+            // worker gagal instan (quota ZeroGPU). Dua-duanya sementara -> minta client
+            // submit ulang, bukan gagal permanen.
+            if (/404|not found/i.test(msg) || !msg.trim()) {
+                return res.json({ status: 'RETRY', reason: msg || 'gpu' });
+            }
+            return res.json({ status: 'ERROR', error: msg });
         }
         res.json({ status: 'IN_PROGRESS' });
     } catch (error) {
-        // query sesaat gagal (jaringan/CDN provider) -> jangan bunuh render, anggap masih proses
-        console.error('Error video status:', error.message);
-        res.json({ status: 'IN_PROGRESS' });
+        console.error('Error video status:', error);
+        res.status(500).json({ error: "Gagal cek status video." });
+    }
+});
+
+app.get('/api/video/file', async (req, res) => {
+    try {
+        const u = (req.query.u || '').toString();
+        if (!u) return res.status(400).json({ error: "URL file kosong." });
+        const target = u.startsWith('/tmp/gradio/') ? `${LTX_SPACE}/gradio_api/file=${encodeURIComponent(u)}` : u;
+        const r = await fetch(target);
+        if (!r.ok) return res.status(502).json({ error: 'Video sudah tidak tersedia. Generate ulang ya.' });
+        res.setHeader('Content-Type', 'video/mp4');
+        res.setHeader('Cache-Control', 'public, max-age=3600');
+        res.setHeader('Content-Length', r.headers.get('content-length') || '');
+        const buf = Buffer.from(await r.arrayBuffer());
+        res.send(buf);
+    } catch (error) {
+        console.error('Error video file:', error);
+        res.status(502).json({ error: 'Gagal ambil video.' });
     }
 });
 

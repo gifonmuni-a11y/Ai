@@ -3529,40 +3529,52 @@ async function generateVideoWithPrompt(prompt) {
         scrollToBottom(true);
     };
     setLoadingText('Senka lagi bikin videomu');
+    // Server pilih provider sendiri: LTX utama, TensorArt cadangan.
+    // Kalau LTX rewel (RETRY), submit ulang diam-diam sampai deadline.
     const deadline = Date.now() + 6 * 60 * 1000;
     try {
-        let jobId = null, lastErr = '';
-        for (let i = 1; i <= 2 && !jobId; i++) {
-            try {
-                const resp = await fetch('/api/video', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ prompt })
-                });
-                const data = await resp.json().catch(() => ({}));
-                if (!resp.ok) throw new Error(data.error || `API error (${resp.status})`);
-                if (!data.jobId) throw new Error('Server tidak kasih job ID.');
-                jobId = data.jobId;
-            } catch (e) {
-                lastErr = e.message;
-                if (/habis/i.test(lastErr)) break; // kredit habis -> jangan ulang
-                if (i < 2 && Date.now() < deadline) await new Promise(r => setTimeout(r, 4000));
-            }
-        }
-        if (!jobId) {
-            if (/habis/i.test(lastErr)) throw new Error('Kredit videonya habis buat hari ini — coba lagi besok ya, maaf!');
-            throw new Error(lastErr || 'Gagal mulai render video.');
-        }
         while (Date.now() < deadline) {
-            await new Promise(r => setTimeout(r, 8000));
-            const sr = await fetch('/api/video/status?job=' + encodeURIComponent(jobId), { headers: await authHeaders() });
-            const sd = await sr.json().catch(() => ({}));
-            if (sd.status === 'COMPLETED') {
-                if (!sd.videoUrl) throw new Error('Video sudah tidak tersedia. Generate ulang ya.');
-                renderMediaResult(loading, sd.videoUrl, { tag: 'Video AI', fileExt: '.mp4', saveType: 'video', fileName: 'senka-video-' });
-                return;
+            let data = null, lastErr = '';
+            for (let i = 1; i <= 2 && !data; i++) {
+                try {
+                    const resp = await fetch('/api/video', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ prompt })
+                    });
+                    const d = await resp.json().catch(() => ({}));
+                    if (!resp.ok) throw new Error(d.error || `API error (${resp.status})`);
+                    if (!d.jobId) throw new Error('Server tidak kasih job ID.');
+                    data = d;
+                } catch (e) {
+                    lastErr = e.message;
+                    if (/habis/i.test(lastErr)) break;
+                    if (i < 2 && Date.now() < deadline) await new Promise(r => setTimeout(r, 4000));
+                }
             }
-            if (sd.status === 'ERROR') throw new Error(sd.error || 'Gagal render video.');
+            if (!data) {
+                if (/habis/i.test(lastErr)) throw new Error('Kredit videonya habis buat hari ini — coba lagi besok ya, maaf!');
+                throw new Error(lastErr || 'Gagal mulai render video.');
+            }
+            const q = data.statusUrl
+                ? 'url=' + encodeURIComponent(data.statusUrl)
+                : 'job=' + encodeURIComponent(data.jobId) + '&p=' + encodeURIComponent(data.provider || 'ta');
+            let needResubmit = false;
+            while (Date.now() < deadline) {
+                await new Promise(r => setTimeout(r, 8000));
+                const sr = await fetch('/api/video/status?' + q, { headers: await authHeaders() });
+                const sd = await sr.json().catch(() => ({}));
+                if (sd.status === 'COMPLETED') {
+                    if (!sd.videoUrl) throw new Error('Video sudah tidak tersedia. Generate ulang ya.');
+                    renderMediaResult(loading, sd.videoUrl, { tag: 'Video AI', fileExt: '.mp4', saveType: 'video', fileName: 'senka-video-' });
+                    return;
+                }
+                if (sd.status === 'ERROR') throw new Error(sd.error || 'Gagal render video.');
+                if (sd.status === 'RETRY') { needResubmit = true; break; }
+            }
+            if (needResubmit && Date.now() < deadline) {
+                setLoadingText('Render-nya keganggu, Senka submit ulang');
+            }
         }
         throw new Error('Waktu render habis. Coba lagi ya.');
     } catch (e) {
