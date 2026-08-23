@@ -3489,6 +3489,7 @@ let kaiwaActive = false;
 let kaiwaWs = null;
 let kaiwaReady = false;
 let kaiwaStopping = false;
+let kaiwaConnectTimer = null;
 let kaiwaMicStream = null;
 let kaiwaCtx = null;
 let kaiwaSrcNode = null;
@@ -3542,6 +3543,14 @@ async function startKaiwaLive() {
     setKaiwaBtn(true);
     setCallUI(true, 'Menghubungkan Kaiwa Live...');
     startCallTimer();
+    // Timeout koneksi: kalau setupComplete gak datang, jangan nyangkut selamanya
+    clearTimeout(kaiwaConnectTimer);
+    kaiwaConnectTimer = setTimeout(() => {
+        if (kaiwaActive && !kaiwaReady) {
+            showToast('Server Gemini gak nanggepin — coba lagi atau pakai mode panggilan biasa');
+            stopKaiwaLive(true);
+        }
+    }, 15000);
     try {
         const r = await fetch('/api/live/token', { headers: await authHeaders() });
         const d = await r.json().catch(() => ({}));
@@ -3574,7 +3583,12 @@ function openKaiwaWs(key, model) {
         }));
         startKaiwaMic();
     };
-    ws.onmessage = (ev) => { if (kaiwaWs === ws) handleKaiwaMsg(ev.data); };
+    ws.onmessage = (ev) => {
+        if (kaiwaWs !== ws) return;
+        if (typeof ev.data === 'string') { handleKaiwaMsg(ev.data); return; }
+        if (ev.data instanceof Blob) { ev.data.text().then(t => handleKaiwaMsg(t)).catch(() => { }); return; }
+        if (ev.data instanceof ArrayBuffer) { try { handleKaiwaMsg(new TextDecoder().decode(ev.data)); } catch (e) { } }
+    };
     ws.onerror = () => { };
     ws.onclose = () => {
         if (kaiwaWs !== ws) return;
@@ -3720,6 +3734,7 @@ function handleKaiwaMsg(raw) {
     try { msg = JSON.parse(raw); } catch (e) { return; }
     if (msg.setupComplete) {
         kaiwaReady = true;
+        clearTimeout(kaiwaConnectTimer);
         setCallUI(true, 'Kaiwa Live aktif - ngomong aja, Senka dengerin');
         appendMessage('senka', '🎧 Kaiwa Live aktif — ngomong langsung aja bahasa Jepang/Indonesia, Senka dengerin real-time.');
         scrollToBottom(true);
@@ -3780,6 +3795,7 @@ function stopKaiwaLive(silent) {
     kaiwaStopping = true;
     kaiwaActive = false;
     kaiwaReady = false;
+    clearTimeout(kaiwaConnectTimer);
     setKaiwaBtn(false);
     if (kaiwaWs) {
         const ws = kaiwaWs;
