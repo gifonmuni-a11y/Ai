@@ -895,7 +895,7 @@ function removeProfileEffect() {
     showToast('Efek profil dihapus');
 }
 function closeAllModals() {
-    ['settings-modal', 'image-modal', 'video-modal', 'music-modal', 'sessions-modal', 'search-modal', 'confirm-delete-modal', 'profile-modal', 'deco-modal', 'senka-profile-modal', 'effect-modal', 'command-menu-modal'].forEach(id => document.getElementById(id).style.display = 'none');
+    ['settings-modal', 'image-modal', 'video-modal', 'sessions-modal', 'search-modal', 'confirm-delete-modal', 'profile-modal', 'deco-modal', 'senka-profile-modal', 'effect-modal', 'command-menu-modal'].forEach(id => document.getElementById(id).style.display = 'none');
 }
 document.querySelectorAll('.modal-overlay').forEach(ov => ov.addEventListener('click', e => { if (e.target === ov) ov.style.display = 'none'; }));
 
@@ -3512,54 +3512,6 @@ function openVideoModal() {
     setTimeout(() => document.getElementById('video-prompt').focus(), 100);
 }
 function closeVideoModal() { document.getElementById('video-modal').style.display = 'none'; }
-
-function openMusicModal() {
-    document.getElementById('music-modal').style.display = 'flex';
-    setTimeout(() => document.getElementById('music-prompt').focus(), 100);
-}
-function closeMusicModal() { document.getElementById('music-modal').style.display = 'none'; }
-
-/* Musik: fitur libur sementara. Semua penyedia gratis sedang bermasalah:
-   - facebook/MusicGen (HF): blokir embed/CORS + GPU worker error
-   - HF Inference API: model musicgen tidak didukung
-   - Cloudflare Workers AI: model musik sudah dihentikan
-   - fal.ai: akun terkunci; TensorArt: tidak ada tool audio
-   Struktur kodenya disiapkan supaya gampang diaktifkan lagi nanti. */
-const MUSIC_ENABLED = false;
-
-function generateMusic() {
-    if (!MUSIC_ENABLED) {
-        appendMessage('senka', '🎵 Fitur musiknya libur dulu ya — penyedianya semua lagi bermasalah. Nanti Senka kabari kalau udah aktif lagi!');
-        scrollToBottom(true);
-        return;
-    }
-    const prompt = document.getElementById('music-prompt').value.trim();
-    if (!prompt) { document.getElementById('music-prompt').focus(); return; }
-    closeMusicModal();
-    document.getElementById('music-prompt').value = '';
-    generateMusicWithPrompt(prompt);
-}
-
-async function generateMusicWithPrompt(prompt) {
-    appendMessage('user', prompt);
-    const loading = appendMessage('senka', '');
-    msgBodyOf(loading).innerHTML = 'Senka lagi bikin musikmu<span class="tind"><i></i><i></i><i></i></span>';
-    scrollToBottom(true);
-    try {
-        // Saat provider musik siap, panggil POST /api/music di sini.
-        const resp = await fetch('/api/music', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt })
-        });
-        const data = await resp.json().catch(() => ({}));
-        if (!resp.ok || !data.audioUrl) throw new Error(data.error || 'Gagal bikin musik.');
-        renderMediaResult(loading, data.audioUrl, { tag: 'Musik AI', fileExt: '.wav', saveType: 'audio', fileName: 'senka-musik-' });
-    } catch (e) {
-        msgBodyOf(loading).innerText = 'Gagal: ' + e.message;
-        scrollToBottom(true);
-    }
-}
 
 function generateVideo() {
     const prompt = document.getElementById('video-prompt').value.trim();

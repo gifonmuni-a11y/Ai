@@ -2421,20 +2421,14 @@ app.post('/api/translate', async (req, res) => {
 });
 
 // ===== Media generatif =====
-// Halaman diagnosa generate musik/video dari browser user.
+// Halaman diagnosa generate video dari browser user.
 // Route eksplisit sebagai jaring pengaman selain express.static.
 app.get('/hf-test.html', (req, res) => {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.sendFile('hf-test.html', { root: 'public' });
 });
 
-// Musik libur sementara: semua penyedia gratis bermasalah (lihat script.js).
-app.post('/api/music', (req, res) => {
-    res.status(503).json({ error: 'Fitur musik lagi libur — penyedianya semua bermasalah. Nanti aktif lagi ya.' });
-});
-
 // Video via TensorArt OpenAPI (key di env server, TIDAK dikirim ke frontend).
-// Musik via HF MusicGen langsung dari browser user (lihat script.js).
 const TENSORART_KEY = String(process.env.TENSORART_API_KEY || '').trim();
 const TENSORART_BASE = 'https://openapi.tensor.art/openworks/v1';
 const TENSORART_VIDEO_TOOL = 'text2video_wan22'; // durasi 3/4/5 dtk, rasio mis. "16:9-921600"
