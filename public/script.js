@@ -5084,8 +5084,9 @@ async function streamAssistantReply(payloadMessages) {
         if (error.message === 'empty') {
             memoryList.pop();
             saveSessions();
-            const sr = msgContent.closest('.msg-row');
-            if (sr) sr.remove(); else msgContent.remove();
+            // Jangan hilang diam-diam — kasih tau & kasih tombol coba lagi
+            msgBodyOf(msgDiv).innerHTML = `Hmm, jawabannya kepotong di jalan (servernya lagi berat). <span class="retry-btn" onclick="retryLast()">coba lagi</span>`;
+            scrollToBottom(true);
             return;
         }
         const errContent = makeMsgContent('senka');

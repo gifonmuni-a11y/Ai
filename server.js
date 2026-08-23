@@ -667,14 +667,22 @@ async function callProvider(provider, messages, modelId, stream = false, tempera
     }
     const failover = provider === 'groq' ? groqFailover : provider === 'openrouter' ? openRouterFailover : null;
     const bearerKey = failover ? failover.pick() : process.env[p.env];
-    const doFetch = (key) => fetch(`${p.base}/chat/completions`, {
-        method: "POST",
-        headers: {
-            "Authorization": `Bearer ${key}`,
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify(body)
-    });
+    // Timeout SAMPAI header respons saja — biar provider yang hang gak menggantung
+    // sampai Vercel bunuh fungsi (60d), tapi stream yang udah jalan gak dipotong.
+    const firstByteMs = stream ? 25000 : 45000;
+    const doFetch = (key) => {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), firstByteMs);
+        return fetch(`${p.base}/chat/completions`, {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${key}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(body),
+            signal: ctrl.signal
+        }).finally(() => clearTimeout(timer));
+    };
     let r = await doFetch(bearerKey);
     if (!r.ok && failover) {
         const t = await r.clone().text();
