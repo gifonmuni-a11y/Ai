@@ -2421,6 +2421,52 @@ app.post('/api/translate', async (req, res) => {
 });
 
 // ===== Media generatif =====
+// [SEMENTARA] Probe: apakah ZeroGPU mau menerima job dari IP Vercel + token env?
+app.get('/api/hf-probe', async (req, res) => {
+    const tok = String(process.env.HF_TOKEN || '').trim();
+    const out = { tokenAda: !!tok, langkah: [] };
+    try {
+        const sub = await fetch('https://facebook-musicgen.hf.space/gradio_api/call/predict_batched', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}) },
+            body: JSON.stringify({ data: ['short test beat', null] })
+        });
+        const d = await sub.json().catch(() => ({}));
+        out.langkah.push(`submit: HTTP ${sub.status} ${JSON.stringify(d).slice(0, 120)}`);
+        if (!sub.ok || !d.event_id) {
+            out.hasil = 'SUBMIT_DITOLAK';
+            return res.json(out);
+        }
+        out.eventId = d.event_id;
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 20000);
+        try {
+            const r = await fetch(`https://facebook-musicgen.hf.space/gradio_api/call/predict_batched/${d.event_id}`, {
+                signal: ctrl.signal,
+                headers: tok ? { Authorization: 'Bearer ' + tok } : {}
+            });
+            const txt = await r.text();
+            const events = [...txt.matchAll(/event:\s*(\w+)/g)].map(m => m[1]);
+            out.langkah.push(`stream: HTTP ${r.status} events=[${[...new Set(events)].join(',')}]`);
+            const errM = txt.match(/data:\s*"([^"]*)"/s);
+            if (/event:\s*error/.test(txt)) {
+                out.hasil = 'GPU_TOLAK';
+                out.detail = errM ? errM[1] : '(pesan kosong — khas ZeroGPU quota/blokir)';
+            } else if (/event:\s*(complete|generating|process)/.test(txt)) {
+                out.hasil = 'DITERIMA_GPU';
+            } else {
+                out.hasil = 'TANPA_EVENT';
+            }
+        } finally {
+            clearTimeout(timer);
+        }
+    } catch (e) {
+        out.langkah.push('exception: ' + e.message);
+        out.hasil = 'EXCEPTION';
+    }
+    res.json(out);
+});
+
 // Halaman diagnosa generate video dari browser user.
 // Route eksplisit sebagai jaring pengaman selain express.static.
 app.get('/hf-test.html', (req, res) => {
