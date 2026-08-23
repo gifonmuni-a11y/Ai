@@ -3031,6 +3031,14 @@ app.post('/api/transcribe', upload.single('audio'), async (req, res) => {
     }
 });
 
+// Token Kaiwa Live (Gemini Multimodal Live via WebSocket) — key disimpan di env,
+// frontend ambil saat runtime lewat rute ini (wajib login, sama seperti rute lain)
+app.get('/api/live/token', (req, res) => {
+    const tok = decodeToken(req);
+    if (!tok || !tok.uid) return res.status(401).json({ error: 'Belum login.' });
+    res.json({ key: String(process.env.GEMINI_LIVE_API_KEY || ''), model: 'models/gemini-2.0-flash-exp' });
+});
+
 const isVercel = process.env.VERCEL === '1';
 if (!isVercel) {
     app.listen(port, () => {

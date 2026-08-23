@@ -342,6 +342,13 @@ video.avatar, video.avatar-border, video.call-avatar-border, video.senka-avatar-
     border-color: rgba(248, 113, 113, 0.6);
     box-shadow: 0 0 16px rgba(248, 113, 113, 0.35);
 }
+.call-mode-row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 12px; }
+.call-mode-row .call-lang-chip { margin-top: 0; }
+.call-lang-chip.kaiwa.on {
+    background: linear-gradient(135deg, rgba(74, 222, 128, 0.35), rgba(22, 163, 74, 0.4));
+    border-color: rgba(74, 222, 128, 0.65);
+    box-shadow: 0 0 16px rgba(74, 222, 128, 0.35);
+}
 .call-pill {
     position: fixed; bottom: 84px; left: 50%; transform: translateX(-50%); z-index: 999;
     display: flex; align-items: center; gap: 10px;

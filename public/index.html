@@ -115,7 +115,10 @@
             <div class="call-name">Senka 千花</div>
             <div class="call-state" id="call-state-text">Memanggil</div>
             <div class="call-timer" id="call-timer">00:00</div>
-            <button class="call-lang-chip" id="call-lang-btn" onclick="toggleCallLang()" title="Bahasa bicara kamu di panggilan"><i class="fa-solid fa-language"></i> <span id="call-lang-label">Indonesia</span></button>
+            <div class="call-mode-row">
+                <button class="call-lang-chip" id="call-lang-btn" onclick="toggleCallLang()" title="Bahasa bicara kamu di panggilan"><i class="fa-solid fa-language"></i> <span id="call-lang-label">Indonesia</span></button>
+                <button class="call-lang-chip kaiwa" id="call-kaiwa-btn" onclick="toggleKaiwaLive()" title="Mode Kaiwa Live (Gemini real-time)"><i class="fa-solid fa-tower-broadcast"></i> <span id="call-kaiwa-label">Kaiwa Live</span></button>
+            </div>
             <div class="call-controls">
                 <button class="call-ctl" id="call-mute-btn" onclick="toggleCallMute()" title="Senyapkan mikrofon"><i class="fa-solid fa-microphone"></i></button>
                 <button class="call-ctl call-ctl-end" onclick="endCall()" title="Akhiri panggilan"><i class="fa-solid fa-phone-slash"></i></button>

@@ -2940,6 +2940,7 @@ async function allowMicFromModal() {
         await navigator.mediaDevices.getUserMedia({ audio: true });
         closeMicModal();
         if (pendingMicAction === 'call') { startCall(); return; }
+        if (pendingMicAction === 'kaiwa') { startCall(); startKaiwaLive(); return; }
         startVoiceInput();
     } catch (e) {
         closeMicModal();
@@ -3256,7 +3257,7 @@ function toggleCallMute() {
     }
     if (callMicMuted) {
         if (callRecog) { try { callRecog.stop(); } catch (e) { } }
-    } else {
+    } else if (!kaiwaActive) {
         startCallRecognition();
     }
 }
@@ -3270,6 +3271,7 @@ function toggleCallSpeaker() {
         btn.innerHTML = callSpeakerOn ? '<i class="fa-solid fa-volume-high"></i>' : '<i class="fa-solid fa-volume-xmark"></i>';
     }
     if (callAudio) callAudio.muted = !callSpeakerOn;
+    if (kaiwaOutGain) kaiwaOutGain.gain.value = callSpeakerOn ? 1 : 0;
 }
 
 async function toggleCall() {
@@ -3326,7 +3328,7 @@ function startCall() {
 }
 
 function startCallRecognition() {
-    if (!callActive || callSpeaking || callMicMuted) return;
+    if (!callActive || callSpeaking || callMicMuted || kaiwaActive) return;
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return;
     setCallUI(true, callListenLabel());
@@ -3459,6 +3461,7 @@ function base64ToBlob(b64, type) {
 }
 
 function endCall() {
+    stopKaiwaLive(true);
     callActive = false;
     callSpeaking = false;
     callMicMuted = false;
@@ -3479,6 +3482,322 @@ function endCall() {
     setCallUI(false);
     appendMessage('senka', '📞 Panggilan diakhiri — kabari lagi kalau mau ngobrol ya.');
     scrollToBottom(true);
+}
+
+/* ===== Kaiwa Live Mode (Gemini Multimodal Live via WebSocket) ===== */
+let kaiwaActive = false;
+let kaiwaWs = null;
+let kaiwaReady = false;
+let kaiwaStopping = false;
+let kaiwaMicStream = null;
+let kaiwaCtx = null;
+let kaiwaSrcNode = null;
+let kaiwaWorklet = null;
+let kaiwaProcessor = null;
+let kaiwaPlayCtx = null;
+let kaiwaOutGain = null;
+let kaiwaNextPlayTime = 0;
+let kaiwaScheduled = [];
+let kaiwaPendingPcm = [];
+let kaiwaTurnText = '';
+const KAIWA_MODEL = 'models/gemini-2.0-flash-exp';
+const KAIWA_WS_BASE = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent';
+// AudioWorklet inline: buffer sampel mic lalu post ~1600 blok sampel ke thread utama
+const KAIWA_WORKLET_SRC = 'class KaiwaPcmCapture extends AudioWorkletProcessor{constructor(){super();this.buf=new Float32Array(1600);this.fill=0}process(inputs){const ch=inputs[0]&&inputs[0][0];if(!ch)return true;let off=0;while(off<ch.length){const n=Math.min(ch.length-off,this.buf.length-this.fill);this.buf.set(ch.subarray(off,off+n),this.fill);this.fill+=n;off+=n;if(this.fill>=this.buf.length){this.port.postMessage(this.buf.slice(0));this.fill=0}}return true}}registerProcessor("kaiwa-pcm-capture",KaiwaPcmCapture);';
+const KAIWA_SYSTEM_TEXT = 'Kamu adalah Senka, teman AI untuk latihan Kaiwa (bahasa Jepang). Jika pengguna bicara bahasa Jepang, balas dengan Jepang. Jika pengguna pakai bahasa Indonesia atau bertanya arti kata, jelaskan dengan campuran bahasa Jepang dan Indonesia yang natural dan santai. Panggil lawan bicaramu dengan \'Pengguna\'/\'user\'.';
+
+function setKaiwaBtn(on) {
+    const btn = document.getElementById('call-kaiwa-btn');
+    const label = document.getElementById('call-kaiwa-label');
+    if (btn) btn.classList.toggle('on', on);
+    if (label) label.innerText = on ? 'Kaiwa Live ON' : 'Kaiwa Live';
+}
+
+async function toggleKaiwaLive() {
+    if (kaiwaActive || kaiwaWs) { stopKaiwaLive(false); return; }
+    if (!callActive) {
+        const status = await getMicStatus();
+        if (status === 'denied') {
+            showToast('Akses mic ditolak, izinkan mic di pengaturan browser dulu ya');
+            return;
+        }
+        if (status === 'prompt') { pendingMicAction = 'kaiwa'; openMicModal(); return; }
+        startCall();
+    }
+    startKaiwaLive();
+}
+
+async function startKaiwaLive() {
+    if (kaiwaActive || kaiwaWs) return;
+    kaiwaStopping = false;
+    // Hentikan loop STT-TTS lama biar tidak tabrakan dengan streaming dua arah
+    callSpeaking = false;
+    if (callRecog) { try { callRecog.stop(); } catch (e) { } }
+    if (callAudio) {
+        try { callAudio.pause(); callAudio.src = ''; } catch (e) { }
+        callAudio = null;
+    }
+    ensureKaiwaPlayCtx();
+    kaiwaActive = true;
+    setKaiwaBtn(true);
+    setCallUI(true, 'Menghubungkan Kaiwa Live...');
+    startCallTimer();
+    try {
+        const r = await fetch('/api/live/token', { headers: await authHeaders() });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || !d.key) throw new Error(d.error || 'Token Kaiwa Live kosong');
+        openKaiwaWs(d.key, d.model || KAIWA_MODEL);
+    } catch (e) {
+        showToast('Gagal mulai Kaiwa Live: ' + String(e.message || e).slice(0, 60));
+        stopKaiwaLive(true);
+    }
+}
+
+function openKaiwaWs(key, model) {
+    let ws;
+    try { ws = new WebSocket(KAIWA_WS_BASE + '?key=' + encodeURIComponent(key)); }
+    catch (e) {
+        showToast('Koneksi Kaiwa Live gagal dibuka');
+        stopKaiwaLive(true);
+        return;
+    }
+    kaiwaWs = ws;
+    kaiwaReady = false;
+    ws.onopen = () => {
+        if (kaiwaWs !== ws) return;
+        ws.send(JSON.stringify({
+            setup: {
+                model,
+                generationConfig: { responseModalities: ['AUDIO'] },
+                systemInstruction: { parts: [{ text: KAIWA_SYSTEM_TEXT }] }
+            }
+        }));
+        startKaiwaMic();
+    };
+    ws.onmessage = (ev) => { if (kaiwaWs === ws) handleKaiwaMsg(ev.data); };
+    ws.onerror = () => { };
+    ws.onclose = () => {
+        if (kaiwaWs !== ws) return;
+        const wasReady = kaiwaReady;
+        const intentional = kaiwaStopping;
+        kaiwaWs = null;
+        kaiwaReady = false;
+        teardownKaiwaGraph();
+        if (!intentional && kaiwaActive && callActive) {
+            // Koneksi putus tiba-tiba -> toast + fallback ke mode panggilan biasa
+            showToast(wasReady ? 'Koneksi Kaiwa Live terputus — balik ke mode panggilan biasa' : 'Kaiwa Live gagal nyambung — balik ke mode panggilan biasa');
+            kaiwaActive = false;
+            setKaiwaBtn(false);
+            flushKaiwaTurn();
+            setCallUI(true, callListenLabel());
+            if (!callSpeaking && !callMicMuted) startCallRecognition();
+        }
+    };
+}
+
+async function startKaiwaMic() {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true }
+        });
+        if (!kaiwaActive) {
+            stream.getTracks().forEach(t => { try { t.stop(); } catch (e) { } });
+            return;
+        }
+        kaiwaMicStream = stream;
+        if (!kaiwaCtx || kaiwaCtx.state === 'closed') {
+            try { kaiwaCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 }); }
+            catch (e) { kaiwaCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+        }
+        if (kaiwaCtx.state === 'suspended') await kaiwaCtx.resume().catch(() => { });
+        kaiwaSrcNode = kaiwaCtx.createMediaStreamSource(stream);
+        const sendChunk = sendKaiwaAudio;
+        let workletOk = false;
+        try {
+            const blobUrl = URL.createObjectURL(new Blob([KAIWA_WORKLET_SRC], { type: 'text/javascript' }));
+            await kaiwaCtx.audioWorklet.addModule(blobUrl);
+            URL.revokeObjectURL(blobUrl);
+            kaiwaWorklet = new AudioWorkletNode(kaiwaCtx, 'kaiwa-pcm-capture');
+            kaiwaWorklet.port.onmessage = (ev) => sendChunk(new Float32Array(ev.data));
+            kaiwaSrcNode.connect(kaiwaWorklet);
+            workletOk = true;
+        } catch (e) { workletOk = false; }
+        if (!workletOk) {
+            // Fallback browser lama tanpa AudioWorklet
+            kaiwaProcessor = kaiwaCtx.createScriptProcessor(2048, 1, 1);
+            kaiwaProcessor.onaudioprocess = (ev) => sendChunk(new Float32Array(ev.inputBuffer.getChannelData(0)));
+            kaiwaSrcNode.connect(kaiwaProcessor);
+            // Harus nyambung ke destination biar jalan, tapi gain 0 supaya mic tidak bocor ke speaker
+            const sink = kaiwaCtx.createGain();
+            sink.gain.value = 0;
+            kaiwaProcessor.connect(sink);
+            sink.connect(kaiwaCtx.destination);
+        }
+    } catch (e) {
+        showToast('Mic tidak bisa dibuka untuk Kaiwa Live');
+        stopKaiwaLive(false);
+    }
+}
+
+function ensureKaiwaPlayCtx() {
+    if (!kaiwaPlayCtx || kaiwaPlayCtx.state === 'closed') {
+        try { kaiwaPlayCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 }); }
+        catch (e) { kaiwaPlayCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+        kaiwaOutGain = kaiwaPlayCtx.createGain();
+        kaiwaOutGain.gain.value = callSpeakerOn ? 1 : 0;
+        kaiwaOutGain.connect(kaiwaPlayCtx.destination);
+        kaiwaNextPlayTime = 0;
+    }
+    if (kaiwaPlayCtx.state === 'suspended') kaiwaPlayCtx.resume().catch(() => { });
+    return kaiwaPlayCtx;
+}
+
+// Kumpulin Float32 dari mic, downsample ke 16kHz, kirim PCM16LE base64 per ~100ms
+function sendKaiwaAudio(f32) {
+    if (!kaiwaActive || callMicMuted) return;
+    const ws = kaiwaWs;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const ctxRate = (kaiwaCtx && kaiwaCtx.sampleRate) || 48000;
+    const step = ctxRate / 16000;
+    if (Math.abs(step - 1) >= 0.01) {
+        for (let i = 0; i < f32.length; i += step) kaiwaPendingPcm.push(f32[Math.floor(i)]);
+    } else {
+        for (let i = 0; i < f32.length; i++) kaiwaPendingPcm.push(f32[i]);
+    }
+    while (kaiwaPendingPcm.length >= 1600) {
+        const chunk = kaiwaPendingPcm.splice(0, 1600);
+        const out = new Uint8Array(chunk.length * 2);
+        for (let i = 0; i < chunk.length; i++) {
+            const s = Math.max(-1, Math.min(1, chunk[i]));
+            const v = Math.round(s < 0 ? s * 32768 : s * 32767);
+            out[i * 2] = v & 255;
+            out[i * 2 + 1] = (v >> 8) & 255;
+        }
+        let bin = '';
+        for (let i = 0; i < out.length; i += 8192) {
+            bin += String.fromCharCode.apply(null, out.subarray(i, Math.min(i + 8192, out.length)));
+        }
+        ws.send(JSON.stringify({
+            realtimeInput: { mediaChunks: [{ mimeType: 'audio/pcm;rate=16000', data: btoa(bin) }] }
+        }));
+    }
+}
+
+function scheduleKaiwaChunk(b64) {
+    const ctx = ensureKaiwaPlayCtx();
+    const bin = atob(b64);
+    const len = bin.length >> 1;
+    if (!len) return;
+    const f32 = new Float32Array(len);
+    for (let i = 0; i < len; i++) {
+        const v = bin.charCodeAt(i * 2) | (bin.charCodeAt(i * 2 + 1) << 8);
+        f32[i] = (v << 16 >> 16) / 32768;
+    }
+    const buf = ctx.createBuffer(1, len, 24000);
+    buf.copyToChannel(f32, 0);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(kaiwaOutGain || ctx.destination);
+    kaiwaNextPlayTime = Math.max(ctx.currentTime + 0.05, kaiwaNextPlayTime);
+    src.start(kaiwaNextPlayTime);
+    kaiwaNextPlayTime += buf.duration;
+    src.onended = () => {
+        const ix = kaiwaScheduled.indexOf(src);
+        if (ix >= 0) kaiwaScheduled.splice(ix, 1);
+    };
+    kaiwaScheduled.push(src);
+}
+
+function resetKaiwaPlayback() {
+    const list = kaiwaScheduled.slice();
+    kaiwaScheduled.length = 0;
+    for (const s of list) { try { s.stop(); } catch (e) { } }
+    if (kaiwaPlayCtx && kaiwaPlayCtx.state !== 'closed') kaiwaNextPlayTime = 0;
+}
+
+function handleKaiwaMsg(raw) {
+    let msg;
+    try { msg = JSON.parse(raw); } catch (e) { return; }
+    if (msg.setupComplete) {
+        kaiwaReady = true;
+        setCallUI(true, 'Kaiwa Live aktif - ngomong aja, Senka dengerin');
+        appendMessage('senka', '🎧 Kaiwa Live aktif — ngomong langsung aja bahasa Jepang/Indonesia, Senka dengerin real-time.');
+        scrollToBottom(true);
+        return;
+    }
+    const sc = msg.serverContent;
+    if (!sc) return; // toolCall & tipe lain diabaikan
+    if (sc.interrupted) {
+        flushKaiwaTurn();
+        resetKaiwaPlayback();
+    }
+    const parts = sc.modelTurn?.parts || [];
+    for (const p of parts) {
+        if (p.inlineData && typeof p.inlineData.data === 'string' && /audio/i.test(p.inlineData.mimeType || '')) {
+            scheduleKaiwaChunk(p.inlineData.data);
+        } else if (typeof p.text === 'string' && p.text) {
+            kaiwaTurnText += p.text;
+        }
+    }
+    if (sc.turnComplete) {
+        flushKaiwaTurn();
+        kaiwaNextPlayTime = 0;
+    }
+}
+
+// Simpan transkrip balasan Senka per giliran ke chat + memori
+function flushKaiwaTurn() {
+    const txt = kaiwaTurnText.trim();
+    kaiwaTurnText = '';
+    if (!txt || !callActive) return;
+    const ts = Date.now();
+    appendMessage('senka', txt);
+    memoryList.push({ role: 'assistant', content: [{ type: 'text', text: txt }], ts, time: formatMsgTime(ts) });
+    const aiItem = memoryList[memoryList.length - 1];
+    if (!supabaseEnabled) saveSessions();
+    else remoteSave('senka', 'text', txt, aiItem);
+    scrollToBottom(true);
+}
+
+function teardownKaiwaGraph() {
+    if (kaiwaMicStream) {
+        kaiwaMicStream.getTracks().forEach(t => { try { t.stop(); } catch (e) { } });
+        kaiwaMicStream = null;
+    }
+    if (kaiwaWorklet) { try { kaiwaWorklet.disconnect(); } catch (e) { } kaiwaWorklet = null; }
+    if (kaiwaProcessor) { try { kaiwaProcessor.disconnect(); } catch (e) { } kaiwaProcessor = null; }
+    if (kaiwaSrcNode) { try { kaiwaSrcNode.disconnect(); } catch (e) { } kaiwaSrcNode = null; }
+    resetKaiwaPlayback();
+    if (kaiwaCtx) { try { kaiwaCtx.close(); } catch (e) { } kaiwaCtx = null; }
+    if (kaiwaPlayCtx) { try { kaiwaPlayCtx.close(); } catch (e) { } kaiwaPlayCtx = null; }
+    kaiwaOutGain = null;
+    kaiwaNextPlayTime = 0;
+    kaiwaPendingPcm.length = 0;
+}
+
+function stopKaiwaLive(silent) {
+    if (!kaiwaActive && !kaiwaWs && !kaiwaMicStream) return;
+    kaiwaStopping = true;
+    kaiwaActive = false;
+    kaiwaReady = false;
+    setKaiwaBtn(false);
+    if (kaiwaWs) {
+        const ws = kaiwaWs;
+        kaiwaWs = null;
+        try { ws.close(); } catch (e) { }
+    }
+    teardownKaiwaGraph();
+    flushKaiwaTurn();
+    setTimeout(() => { kaiwaStopping = false; }, 500);
+    if (callActive) {
+        // Kembalikan UI & loop rekognisi panggilan biasa
+        setCallUI(true, callListenLabel());
+        if (!callSpeaking && !callMicMuted) startCallRecognition();
+    }
+    if (!silent) {
+        appendMessage('senka', '🎧 Kaiwa Live dimatikan — balik ke mode panggilan biasa.');
+        scrollToBottom(true);
+    }
 }
 
 function setMic(on) {
