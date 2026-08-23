@@ -1863,6 +1863,14 @@ function normalizeStickerUrl(url) {
 }
 
 function fuzzyStickerFile(file) {
+    const sq = (s) => String(s || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+    const target = sq(file);
+    // Cocokkan bentuk yang "disatukan" dulu: hmmokebiasa -> hmm,okebiasa.webp
+    if (target) {
+        for (const f of SENKA_STICKER_FILES) {
+            if (sq(f) === target) return f;
+        }
+    }
     const kw = file.replace(/\.webp$/i, '').toLowerCase().split(/[,\-_ ]+/).filter(Boolean);
     if (!kw.length) return null;
     let best = null, bestScore = 0;
@@ -1879,7 +1887,10 @@ function extractSticker(text) {
     const m = STICKER_TAG_RE.exec(text);
     if (m) return normalizeStickerUrl(m[1]);
     const m2 = STICKER_URL_RE.exec(text);
-    return m2 ? normalizeStickerUrl(m2[0]) : null;
+    if (m2) return normalizeStickerUrl(m2[0]);
+    // Model kadang nulis nama file stiker doang, ada juga yang bungkus markdown: [x.webp] (x.webp)
+    const m3 = /[\[(]?\s*([\w][\w,\-\. ]{0,60}\.webp)\s*[\])]?(?:\s*\(\s*[\w,\-\. ]{0,60}\.webp\s*\))?/i.exec(text);
+    return m3 ? normalizeStickerUrl(m3[1].trim()) : null;
 }
 
 function stripStickerTag(text) {
@@ -1889,6 +1900,8 @@ function stripStickerTag(text) {
         .replace(/\[STIKER[^\]]*\]/gi, '')
         .replace(STICKER_URL_RE, '')
         .replace(/[\[({]?\s*https?:\/\/[^\s)\]>]+\.webp\s*[\]})]?/gi, '')
+        // Nama file stiker telanjang / dibungkus markdown: [x.webp] (x.webp)
+        .replace(/\[?\s*\(?[\w][\w,\-\. ]{0,60}\.webp\)?\s*\]?(?:\s*\(\s*[\w,\-\. ]{0,60}\.webp\s*\))?/gi, '')
         .replace(/[\s]*[()]/g, '')
         .trim();
 }
