@@ -2421,34 +2421,6 @@ app.post('/api/translate', async (req, res) => {
 });
 
 // ===== Media generatif =====
-// [TES] Proxy window SSE: teruskan event LTX ke client maks 50 dtk per request
-app.get('/api/video/stream', async (req, res) => {
-    const url = (req.query.url || '').toString();
-    if (!url.startsWith(LTX_SPACE)) return res.status(400).json({ error: 'URL tidak valid.' });
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.flushHeaders();
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 50000);
-    req.on('close', () => ctrl.abort());
-    try {
-        const r = await fetch(url, { signal: ctrl.signal });
-        res.write(`event: upstream\ndata: "HTTP ${r.status}"\n\n`);
-        if (!r.ok || !r.body) { clearTimeout(timer); res.end(); return; }
-        const reader = r.body.getReader();
-        const dec = new TextDecoder();
-        while (true) {
-            const ch = await reader.read().catch(() => ({ done: true }));
-            if (ch.done) { res.write('event: upstream_end\ndata: null\n\n'); break; }
-            res.write(dec.decode(ch.value, { stream: true }));
-        }
-    } catch (e) {
-        res.write('event: window_end\ndata: null\n\n');
-    }
-    clearTimeout(timer);
-    res.end();
-});
-
 // Video: jalur UTAMA LTX Space via gradio API; cadangan TensorArt bila LTX rewel.
 const LTX_SPACE = 'https://lightricks-ltx-video-distilled.hf.space';
 const TENSORART_KEY = String(process.env.TENSORART_API_KEY || '').trim();
