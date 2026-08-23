@@ -2244,9 +2244,9 @@ app.post('/api/image', async (req, res) => {
                     toolName: 'photoreal_studio_z_image',
                     inputs: [
                         { type: 'STRING', value: enPrompt.slice(0, 800) },
-                        { type: 'INTEGER', value: '1024' },
-                        { type: 'INTEGER', value: '1024' },
-                        { type: 'INTEGER', value: '1' }
+                        { type: 'INTEGER', value: 1024 },
+                        { type: 'INTEGER', value: 1024 },
+                        { type: 'INTEGER', value: 1 }
                     ]
                 });
                 const t = created.data?.task;
