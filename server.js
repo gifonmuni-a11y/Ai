@@ -2421,6 +2421,13 @@ app.post('/api/translate', async (req, res) => {
 });
 
 // ===== Media generatif =====
+// Halaman diagnosa generate musik/video dari browser user.
+// Route eksplisit sebagai jaring pengaman selain express.static.
+app.get('/hf-test.html', (req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.sendFile('hf-test.html', { root: 'public' });
+});
+
 // Token HF untuk pemakaian langsung dari browser (musik). Sengaja diekspos ke
 // client atas permintaan owner — ganti mekanismenya kalau nanti mau aman.
 app.get('/api/hf-config', (req, res) => {
