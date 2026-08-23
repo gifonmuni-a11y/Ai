@@ -3521,6 +3521,74 @@ function generateVideo() {
     generateVideoWithPrompt(prompt);
 }
 
+// LTX: context event di space ini cepat dibuang kalau stream tidak dipegang,
+// makanya koneksi SSE dipelihara TERUS dari submit sampai selesai.
+const LTX_BROWSER_BASE = 'https://lightricks-ltx-video-distilled.hf.space';
+
+function ltxResolveUrl(u) {
+    if (!u) return null;
+    if (/^https?:\/\//i.test(u)) return u;
+    return `${LTX_BROWSER_BASE}/gradio_api/file=${encodeURIComponent(u)}`;
+}
+
+// Baca satu koneksi SSE sampai terminal / timeout / putus.
+// Hasil: {type:'progress'} | {type:'complete', url} | {type:'error', retry:boolean, message}
+async function ltxStreamOnce(url, maxMs) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), maxMs);
+    try {
+        const r = await fetch(url, { signal: ctrl.signal });
+        if (!r.ok || !r.body) { clearTimeout(timer); return { type: 'error', retry: true, message: 'HTTP ' + r.status }; }
+        const reader = r.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '', pendingEv = '';
+        while (true) {
+            const chunk = await reader.read().catch(() => ({ done: true }));
+            if (chunk.done) break;
+            buf += dec.decode(chunk.value, { stream: true });
+            const lines = buf.split('\n');
+            buf = lines.pop();
+            for (const raw of lines) {
+                const l = raw.trim();
+                if (!l) continue;
+                if (l.startsWith('event:')) { pendingEv = l.slice(6).trim(); continue; }
+                if (!l.startsWith('data:')) continue;
+                const data = l.slice(5).trim();
+                if (pendingEv === 'error') {
+                    clearTimeout(timer);
+                    try { reader.cancel(); } catch (e) { }
+                    const msg = (data === 'null' || data === '""') ? '' : data.replace(/^"|"$/g, '');
+                    // 404/pesan kosong = context hilang/quota -> layak disubmit ulang
+                    if (/404|not found/i.test(msg) || !msg) return { type: 'error', retry: true, message: msg || 'gpu' };
+                    return { type: 'error', retry: false, message: msg };
+                }
+                if (pendingEv === 'complete') {
+                    clearTimeout(timer);
+                    try { reader.cancel(); } catch (e) { }
+                    let arr = null;
+                    try { arr = JSON.parse(data); } catch (e) { }
+                    const pick = (o) => {
+                        if (typeof o === 'string') return /^https?:\/\//.test(o) || o.startsWith('/tmp/gradio/') ? o : null;
+                        if (!o || typeof o !== 'object') return null;
+                        const u = o.video?.url || o.video?.path || o.url || o.path;
+                        return (typeof u === 'string' && u) ? u : null;
+                    };
+                    let url = null;
+                    const items = Array.isArray(arr) ? arr.slice(0, 4) : [arr];
+                    for (const it of items) {
+                        url = pick(it) || (Array.isArray(it) ? pick(it[0]) : null);
+                        if (url) break;
+                    }
+                    return { type: 'complete', url };
+                }
+                pendingEv = '';
+            }
+        }
+    } catch (e) { }
+    clearTimeout(timer);
+    return { type: 'progress' };
+}
+
 async function generateVideoWithPrompt(prompt) {
     appendMessage('user', prompt);
     const loading = appendMessage('senka', '');
@@ -3529,52 +3597,57 @@ async function generateVideoWithPrompt(prompt) {
         scrollToBottom(true);
     };
     setLoadingText('Senka lagi bikin videomu');
-    // Server pilih provider sendiri: LTX utama, TensorArt cadangan.
-    // Kalau LTX rewel (RETRY), submit ulang diam-diam sampai deadline.
     const deadline = Date.now() + 6 * 60 * 1000;
     try {
         while (Date.now() < deadline) {
-            let data = null, lastErr = '';
-            for (let i = 1; i <= 2 && !data; i++) {
-                try {
-                    const resp = await fetch('/api/video', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ prompt })
-                    });
-                    const d = await resp.json().catch(() => ({}));
-                    if (!resp.ok) throw new Error(d.error || `API error (${resp.status})`);
-                    if (!d.jobId) throw new Error('Server tidak kasih job ID.');
-                    data = d;
-                } catch (e) {
-                    lastErr = e.message;
-                    if (/habis/i.test(lastErr)) break;
-                    if (i < 2 && Date.now() < deadline) await new Promise(r => setTimeout(r, 4000));
+            const resp = await fetch('/api/video', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prompt })
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                if (/habis/i.test(data.error || '')) throw new Error('Kredit cadangan videonya habis dan jalur utamanya lagi rewel — coba lagi besok ya.');
+                throw new Error(data.error || `API error (${resp.status})`);
+            }
+            if (!data.jobId) throw new Error('Server tidak kasih job ID.');
+            // --- Provider cadangan TensorArt: polling stateless biasa ---
+            if (!data.statusUrl) {
+                setLoadingText('Lewat jalur cadangan dulu ya');
+                let done = false;
+                while (Date.now() < deadline) {
+                    await new Promise(r => setTimeout(r, 8000));
+                    const sr = await fetch('/api/video/status?job=' + encodeURIComponent(data.jobId) + '&p=ta', { headers: await authHeaders() });
+                    const sd = await sr.json().catch(() => ({}));
+                    if (sd.status === 'COMPLETED') {
+                        if (!sd.videoUrl) throw new Error('Video sudah tidak tersedia.');
+                        renderMediaResult(loading, sd.videoUrl, { tag: 'Video AI', fileExt: '.mp4', saveType: 'video', fileName: 'senka-video-' });
+                        return;
+                    }
+                    if (sd.status === 'ERROR') throw new Error(sd.error || 'Gagal render video.');
                 }
+                break;
             }
-            if (!data) {
-                if (/habis/i.test(lastErr)) throw new Error('Kredit videonya habis buat hari ini — coba lagi besok ya, maaf!');
-                throw new Error(lastErr || 'Gagal mulai render video.');
-            }
-            const q = data.statusUrl
-                ? 'url=' + encodeURIComponent(data.statusUrl)
-                : 'job=' + encodeURIComponent(data.jobId) + '&p=' + encodeURIComponent(data.provider || 'ta');
-            let needResubmit = false;
+            // --- Jalur utama LTX: pegang SATU koneksi stream terus-menerus ---
+            setLoadingText('Videonya lagi digarap');
+            let drops = 0, done = false;
             while (Date.now() < deadline) {
-                await new Promise(r => setTimeout(r, 8000));
-                const sr = await fetch('/api/video/status?' + q, { headers: await authHeaders() });
-                const sd = await sr.json().catch(() => ({}));
-                if (sd.status === 'COMPLETED') {
-                    if (!sd.videoUrl) throw new Error('Video sudah tidak tersedia. Generate ulang ya.');
-                    renderMediaResult(loading, sd.videoUrl, { tag: 'Video AI', fileExt: '.mp4', saveType: 'video', fileName: 'senka-video-' });
+                const st = await ltxStreamOnce(data.statusUrl, 120000);
+                if (st.type === 'complete') {
+                    const url = ltxResolveUrl(st.url);
+                    if (!url) throw new Error('Video sudah tidak tersedia. Generate ulang ya.');
+                    renderMediaResult(loading, url, { tag: 'Video AI', fileExt: '.mp4', saveType: 'video', fileName: 'senka-video-' });
                     return;
                 }
-                if (sd.status === 'ERROR') throw new Error(sd.error || 'Gagal render video.');
-                if (sd.status === 'RETRY') { needResubmit = true; break; }
+                if (st.type === 'error') {
+                    if (!st.retry) throw new Error(st.message);
+                    break; // context hilang -> submit job baru
+                }
+                // progress: koneksi timeout/drop -> buka lagi selama belum lewat batas
+                if (++drops > 5) { done = true; break; }
             }
-            if (needResubmit && Date.now() < deadline) {
-                setLoadingText('Render-nya keganggu, Senka submit ulang');
-            }
+            if (done || Date.now() >= deadline) break;
+            setLoadingText('Render-nya keganggu, Senka submit ulang');
         }
         throw new Error('Waktu render habis. Coba lagi ya.');
     } catch (e) {
@@ -3582,6 +3655,7 @@ async function generateVideoWithPrompt(prompt) {
         scrollToBottom(true);
     }
 }
+
 
 
 const SEARCH_RE = /(^|[\s,.?!])(siapa|siapakah|kapan|dimana|di\s+mana|berapa|kenapa|mengapa|bagaimana|apakah|kepanjangan|definisi|arti|sejarah|perbedaan|info\s+tentang|berita\s+tentang|tentang|jelaskan|cari|search)\b/i;
