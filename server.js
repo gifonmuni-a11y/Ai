@@ -2424,12 +2424,19 @@ app.post('/api/translate', async (req, res) => {
 // [SEMENTARA] Probe: apakah ZeroGPU mau menerima job dari IP Vercel + token env?
 app.get('/api/hf-probe', async (req, res) => {
     const tok = String(process.env.HF_TOKEN || '').trim();
-    const out = { tokenAda: !!tok, langkah: [] };
+    const targets = {
+        music: ['https://facebook-musicgen.hf.space', '/gradio_api/call/predict_batched', ['short test beat', null]],
+        cogvideo: ['https://zai-org-cogvideox-5b-space.hf.space', '/gradio_api/call/generate', ['a cat walking slowly', null, null, 0.8, -1, false, false]],
+        ltx: ['https://lightricks-ltx-video-distilled.hf.space', '/gradio_api/call/text_to_video', ['a cat walking slowly', 'worst quality', null, null, 512, 704, 'text-to-video', 4, 9, 42, true, 1, true]]
+    };
+    const key = String(req.query.s || 'music').toLowerCase();
+    const [BASE, API, DATA] = targets[key] || targets.music;
+    const out = { target: key, tokenAda: !!tok, langkah: [] };
     try {
-        const sub = await fetch('https://facebook-musicgen.hf.space/gradio_api/call/predict_batched', {
+        const sub = await fetch(BASE + API, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}) },
-            body: JSON.stringify({ data: ['short test beat', null] })
+            body: JSON.stringify({ data: DATA })
         });
         const d = await sub.json().catch(() => ({}));
         out.langkah.push(`submit: HTTP ${sub.status} ${JSON.stringify(d).slice(0, 120)}`);
@@ -2441,7 +2448,7 @@ app.get('/api/hf-probe', async (req, res) => {
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), 20000);
         try {
-            const r = await fetch(`https://facebook-musicgen.hf.space/gradio_api/call/predict_batched/${d.event_id}`, {
+            const r = await fetch(`${BASE}${API}/${d.event_id}`, {
                 signal: ctrl.signal,
                 headers: tok ? { Authorization: 'Bearer ' + tok } : {}
             });
