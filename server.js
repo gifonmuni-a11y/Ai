@@ -669,7 +669,8 @@ async function callProvider(provider, messages, modelId, stream = false, tempera
     const bearerKey = failover ? failover.pick() : process.env[p.env];
     // Timeout SAMPAI header respons saja — biar provider yang hang gak menggantung
     // sampai Vercel bunuh fungsi (60d), tapi stream yang udah jalan gak dipotong.
-    const firstByteMs = stream ? 25000 : 45000;
+    // Non-stream lebih pendek: 2x percobaan masih harus muat di bawah 60d.
+    const firstByteMs = stream ? 25000 : 22000;
     const doFetch = (key) => {
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), firstByteMs);

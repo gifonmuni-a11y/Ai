@@ -3382,7 +3382,7 @@ async function sendCallMessage(text) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ messages: [...memoryList], modelKey, panggilan, call: true, callLang, gender: userGender, song: currentSong })
         });
-        const data = await response.json();
+        const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
         const raw = data.choices?.[0]?.message?.content || '';
         const clean = cleanCallText(raw);
@@ -3490,6 +3490,9 @@ let kaiwaWs = null;
 let kaiwaReady = false;
 let kaiwaStopping = false;
 let kaiwaConnectTimer = null;
+let kaiwaKey = '';
+let kaiwaModel = '';
+let kaiwaReconnects = 0;
 let kaiwaMicStream = null;
 let kaiwaCtx = null;
 let kaiwaSrcNode = null;
@@ -3505,7 +3508,7 @@ const KAIWA_MODEL = 'models/gemini-2.5-flash-native-audio-latest';
 const KAIWA_WS_BASE = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 // AudioWorklet inline: buffer sampel mic lalu post ~1600 blok sampel ke thread utama
 const KAIWA_WORKLET_SRC = 'class KaiwaPcmCapture extends AudioWorkletProcessor{constructor(){super();this.buf=new Float32Array(1600);this.fill=0}process(inputs){const ch=inputs[0]&&inputs[0][0];if(!ch)return true;let off=0;while(off<ch.length){const n=Math.min(ch.length-off,this.buf.length-this.fill);this.buf.set(ch.subarray(off,off+n),this.fill);this.fill+=n;off+=n;if(this.fill>=this.buf.length){this.port.postMessage(this.buf.slice(0));this.fill=0}}return true}}registerProcessor("kaiwa-pcm-capture",KaiwaPcmCapture);';
-const KAIWA_SYSTEM_TEXT = 'Kamu adalah Senka, teman AI untuk latihan Kaiwa (bahasa Jepang). Jika pengguna bicara bahasa Jepang, balas dengan Jepang. Jika pengguna pakai bahasa Indonesia atau bertanya arti kata, jelaskan dengan campuran bahasa Jepang dan Indonesia yang natural dan santai. Panggil lawan bicaramu dengan \'Pengguna\'/\'user\'.';
+const KAIWA_SYSTEM_TEXT = 'Kamu adalah Senka, teman AI untuk latihan Kaiwa (bahasa Jepang). Jika pengguna bicara bahasa Jepang, balas dengan Jepang. Jika pengguna pakai bahasa Indonesia atau bertanya arti kata, jelaskan dengan campuran bahasa Jepang dan Indonesia yang natural dan santai. Panggil lawan bicaramu dengan \'Pengguna\'/\'user\'. ATURAN KERAS OUTPUT: keluarkan HANYA dialog bicara yang siap diucapkan — DILARANG KERAS menampilkan proses berpikir, analisis, catatan internal, atau teks berbahasa Inggris dalam bentuk apa pun. Semua keluaranmu harus kalimat spoken yang natural.';
 
 function setKaiwaBtn(on) {
     const btn = document.getElementById('call-kaiwa-btn');
@@ -3555,7 +3558,10 @@ async function startKaiwaLive() {
         const r = await fetch('/api/live/token', { headers: await authHeaders() });
         const d = await r.json().catch(() => ({}));
         if (!r.ok || !d.key) throw new Error(d.error || 'Token Kaiwa Live kosong');
-        openKaiwaWs(d.key, d.model || KAIWA_MODEL);
+        kaiwaKey = d.key;
+        kaiwaModel = d.model || KAIWA_MODEL;
+        kaiwaReconnects = 0;
+        openKaiwaWs(kaiwaKey, kaiwaModel);
     } catch (e) {
         showToast('Gagal mulai Kaiwa Live: ' + String(e.message || e).slice(0, 60));
         stopKaiwaLive(true);
@@ -3581,7 +3587,8 @@ function openKaiwaWs(key, model) {
                 systemInstruction: { parts: [{ text: KAIWA_SYSTEM_TEXT }] }
             }
         }));
-        startKaiwaMic();
+        // Reconnect: pipeline mic masih hidup, jangan minta izin mic lagi
+        if (!kaiwaMicStream || !kaiwaMicStream.active) startKaiwaMic();
     };
     ws.onmessage = (ev) => {
         if (kaiwaWs !== ws) return;
@@ -3596,6 +3603,15 @@ function openKaiwaWs(key, model) {
         const intentional = kaiwaStopping;
         kaiwaWs = null;
         kaiwaReady = false;
+        // Sesi Gemini Live dibatasi waktu server — kalau putus sendiri, nyambung
+        // ulang mulus tanpa matiin mic (maks 3x), baru fallback ke panggilan biasa.
+        if (!intentional && kaiwaActive && callActive && kaiwaReconnects < 3) {
+            kaiwaReconnects++;
+            teardownKaiwaPlaybackOnly();
+            setCallUI(true, 'Nyambungin ulang Kaiwa Live...');
+            setTimeout(() => { if (kaiwaActive && callActive && !kaiwaWs) openKaiwaWs(kaiwaKey, kaiwaModel); }, 1200);
+            return;
+        }
         teardownKaiwaGraph();
         if (!intentional && kaiwaActive && callActive) {
             // Koneksi putus tiba-tiba -> toast + fallback ke mode panggilan biasa
@@ -3729,11 +3745,18 @@ function resetKaiwaPlayback() {
     if (kaiwaPlayCtx && kaiwaPlayCtx.state !== 'closed') kaiwaNextPlayTime = 0;
 }
 
+// Saat reconnect: matikan audio yang mengantre saja, pipeline mic dibiarkan hidup
+function teardownKaiwaPlaybackOnly() {
+    resetKaiwaPlayback();
+    flushKaiwaTurn();
+}
+
 function handleKaiwaMsg(raw) {
     let msg;
     try { msg = JSON.parse(raw); } catch (e) { return; }
     if (msg.setupComplete) {
         kaiwaReady = true;
+        kaiwaReconnects = 0;
         clearTimeout(kaiwaConnectTimer);
         setCallUI(true, 'Kaiwa Live aktif - ngomong aja, Senka dengerin');
         appendMessage('senka', '🎧 Kaiwa Live aktif — ngomong langsung aja bahasa Jepang/Indonesia, Senka dengerin real-time.');
@@ -3741,13 +3764,18 @@ function handleKaiwaMsg(raw) {
         return;
     }
     const sc = msg.serverContent;
-    if (!sc) return; // toolCall & tipe lain diabaikan
+    if (!sc) {
+        // goAway = server ngasih tau sesi mau ditutup -> tutup dulu, onclose bakal reconnect mulus
+        if (msg.goAway && kaiwaWs) { try { kaiwaWs.close(); } catch (e) { } }
+        return;
+    }
     if (sc.interrupted) {
         flushKaiwaTurn();
         resetKaiwaPlayback();
     }
     const parts = sc.modelTurn?.parts || [];
     for (const p of parts) {
+        if (p.thought) continue; // proses berpikir internal model — jangan ditampilkan/dibacakan
         if (p.inlineData && typeof p.inlineData.data === 'string' && /audio/i.test(p.inlineData.mimeType || '')) {
             scheduleKaiwaChunk(p.inlineData.data);
         } else if (typeof p.text === 'string' && p.text) {
@@ -3795,6 +3823,7 @@ function stopKaiwaLive(silent) {
     kaiwaStopping = true;
     kaiwaActive = false;
     kaiwaReady = false;
+    kaiwaReconnects = 0;
     clearTimeout(kaiwaConnectTimer);
     setKaiwaBtn(false);
     if (kaiwaWs) {
