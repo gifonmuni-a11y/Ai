@@ -3607,8 +3607,10 @@ async function generateVideoWithPrompt(prompt) {
             });
             const data = await resp.json().catch(() => ({}));
             if (!resp.ok) {
-                if (/habis/i.test(data.error || '')) throw new Error('Kredit cadangan videonya habis dan jalur utamanya lagi rewel — coba lagi besok ya.');
-                throw new Error(data.error || `API error (${resp.status})`);
+                // LTX flaky + kredit cadangan kosong = terus cari window sehat, jangan nyerah
+                setLoadingText('Semua studio lagi rewel, Senka terus mencari peluang');
+                await new Promise(r => setTimeout(r, 15000));
+                continue;
             }
             if (!data.jobId) throw new Error('Server tidak kasih job ID.');
             // --- Provider cadangan TensorArt: polling stateless biasa ---
@@ -3649,7 +3651,7 @@ async function generateVideoWithPrompt(prompt) {
             if (done || Date.now() >= deadline) break;
             setLoadingText('Render-nya keganggu, Senka submit ulang');
         }
-        throw new Error('Waktu render habis. Coba lagi ya.');
+        throw new Error('Studionya belum kebagian giliran — coba beberapa saat lagi ya.');
     } catch (e) {
         msgBodyOf(loading).innerText = 'Gagal: ' + e.message;
         scrollToBottom(true);

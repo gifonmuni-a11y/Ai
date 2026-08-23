@@ -2425,7 +2425,12 @@ app.post('/api/translate', async (req, res) => {
 const LTX_SPACE = 'https://lightricks-ltx-video-distilled.hf.space';
 const TENSORART_KEY = String(process.env.TENSORART_API_KEY || '').trim();
 const TENSORART_BASE = 'https://openapi.tensor.art/openworks/v1';
-const TENSORART_VIDEO_TOOL = 'text2video_wan22'; // durasi 3/4/5 dtk, rasio mis. "16:9-921600"
+const S = (v) => ({ type: 'STRING', value: v });
+// dicoba termurah dulu; urutan input tiap tool BEDA
+const TENSORART_VIDEO_TOOLS = [
+    { name: 'text2video_ltx23', inputs: (p) => [S(p), S('16:9-921600'), S('5')] },
+    { name: 'text2video_wan22', inputs: (p) => [S(p), S('5'), S('16:9-921600')] }
+];
 
 async function ltxSubmit(enPrompt) {
     const sub = await fetch(`${LTX_SPACE}/gradio_api/call/text_to_video`, {
@@ -2492,28 +2497,25 @@ async function tartPost(path, body) {
 
 
 
-// Buat task TensorArt dengan retry (CDN-nya suka timeout sekali jalan)
+// Buat task TensorArt: coba tool termurah dulu, retry kalau CDN rewel.
 async function tartCreateVideo(enPrompt) {
-    const body = {
-        toolName: TENSORART_VIDEO_TOOL,
-        inputs: [
-            { type: 'STRING', value: enPrompt.slice(0, 800) },
-            { type: 'STRING', value: '5' },
-            { type: 'STRING', value: '16:9-921600' }
-        ]
-    };
     let lastErr = null;
-    for (let i = 1; i <= 3; i++) {
-        try {
-            const d = await tartPost('/task', body);
-            const t = d.data?.task;
-            if (!t?.id) throw new Error('Task id kosong dari provider.');
-            return t;
-        } catch (e) {
-            lastErr = e;
-            console.error(`[video] tensorart create gagal (${i}/3):`, e.message);
-            if (/mapping|timeout|deadline/i.test(e.message) && i < 3) await new Promise(r => setTimeout(r, 2500));
-            else throw e;
+    for (const tool of TENSORART_VIDEO_TOOLS) {
+        const body = { toolName: tool.name, inputs: tool.inputs(enPrompt.slice(0, 800)) };
+        for (let i = 1; i <= 3; i++) {
+            try {
+                const d = await tartPost('/task', body);
+                const t = d.data?.task;
+                if (!t?.id) throw new Error('Task id kosong dari provider.');
+                console.error(`[video] task TensorArt dibuat via ${tool.name}: ${t.id}`);
+                return t;
+            } catch (e) {
+                lastErr = e;
+                console.error(`[video] ${tool} create gagal (${i}/3):`, e.message);
+                if (/WORKS_INSUFFICIENT/i.test(e.message)) break; // saldo kurang utk tool ini -> coba tool lain
+                if (/mapping|timeout|deadline/i.test(e.message) && i < 3) await new Promise(r => setTimeout(r, 2500));
+                else throw e;
+            }
         }
     }
     throw lastErr || new Error('TensorArt gagal berulang.');
