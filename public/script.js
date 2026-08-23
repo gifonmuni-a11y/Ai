@@ -3527,6 +3527,114 @@ function generateMusic() {
     generateMusicWithPrompt(prompt);
 }
 
+/* Musik: generate LANGSUNG dari browser ke HF MusicGen — ZeroGPU memblokir IP
+   datacenter (Vercel/server), tapi IP rumah/HP user aman.
+   Token HF diambil dari /api/hf-config (diset lewat env HF_TOKEN server).
+   CATATAN: token tetap terlihat publik di network tab — ini sementara. */
+const HF_MUSIC_SPACE = 'https://facebook-musicgen.hf.space';
+const HF_MUSIC_API = '/gradio_api/call/predict_batched';
+
+let _hfTokCache = null;
+async function hfToken() {
+    if (_hfTokCache !== null) return _hfTokCache;
+    try {
+        const r = await fetch('/api/hf-config');
+        const d = await r.json().catch(() => ({}));
+        _hfTokCache = (r.ok && d.hfToken) ? String(d.hfToken) : '';
+    } catch (e) { _hfTokCache = ''; }
+    return _hfTokCache;
+}
+async function hfAuthHeaders(extra = {}) {
+    const t = await hfToken();
+    return t ? { ...extra, 'Authorization': 'Bearer ' + t } : { ...extra };
+}
+
+function hfExtractMediaUrl(dataVal) {
+    let arr;
+    try { arr = JSON.parse(dataVal); } catch (e) { return null; }
+    const pick = (o) => {
+        if (typeof o === 'string') return /^https?:\/\//.test(o) || o.startsWith('/tmp/gradio/') ? o : null;
+        if (!o || typeof o !== 'object') return null;
+        const u = o.video?.url || o.video?.path || o.audio?.url || o.audio?.path || o.url || o.path;
+        return (typeof u === 'string' && u) ? u : null;
+    };
+    const items = Array.isArray(arr) ? arr.slice(0, 4) : [arr];
+    for (const it of items) {
+        const u = pick(it);
+        if (u) return u;
+        const inner = Array.isArray(it) ? it[0] : null;
+        const u2 = inner ? pick(inner) : null;
+        if (u2) return u2;
+    }
+    return null;
+}
+
+// Baca satu koneksi SSE gradio sampai event terminal / timeout.
+// Hasil: {type:'progress'} | {type:'complete', url} | {type:'error', message}
+// message '__retry__' berarti gangguan sementara (space restart / quota GPU).
+async function hfStreamEvent(url, maxMs) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), maxMs);
+    try {
+        const r = await fetch(url, {
+            signal: ctrl.signal,
+            headers: await hfAuthHeaders()
+        });
+        if (!r.ok || !r.body) { clearTimeout(timer); return { type: 'error', message: 'HTTP ' + r.status }; }
+        const reader = r.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '', pendingEv = '';
+        while (true) {
+            const chunk = await reader.read().catch(() => ({ done: true }));
+            if (chunk.done) break;
+            buf += dec.decode(chunk.value, { stream: true });
+            const lines = buf.split('\n');
+            buf = lines.pop();
+            for (const raw of lines) {
+                const l = raw.trim();
+                if (!l) continue;
+                if (l.startsWith('event:')) { pendingEv = l.slice(6).trim(); continue; }
+                if (!l.startsWith('data:')) continue;
+                const data = l.slice(5).trim();
+                if (pendingEv === 'error') {
+                    clearTimeout(timer);
+                    try { reader.cancel(); } catch (e) { }
+                    const msg = (data === 'null' || data === '""') ? '' : data.replace(/^"|"$/g, '');
+                    if (/404|not found/i.test(msg) || !msg) return { type: 'error', message: '__retry__' };
+                    return { type: 'error', message: msg };
+                }
+                if (pendingEv === 'complete') {
+                    clearTimeout(timer);
+                    try { reader.cancel(); } catch (e) { }
+                    return { type: 'complete', url: hfExtractMediaUrl(data) };
+                }
+                pendingEv = '';
+            }
+        }
+    } catch (e) { }
+    clearTimeout(timer);
+    return { type: 'progress' };
+}
+
+function hfResolveMedia(base, u) {
+    if (!u) return null;
+    if (/^https?:\/\//i.test(u)) return u;
+    return `${base}/gradio_api/file=${encodeURIComponent(u)}`;
+}
+
+async function translateEn(text) {
+    try {
+        const r = await fetch('/api/translate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, target: 'en' })
+        });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && d.translated) return d.translated;
+    } catch (e) { }
+    return text;
+}
+
 async function generateMusicWithPrompt(prompt) {
     appendMessage('user', prompt);
     const loading = appendMessage('senka', '');
@@ -3535,32 +3643,33 @@ async function generateMusicWithPrompt(prompt) {
         scrollToBottom(true);
     };
     setLoadingText('Senka lagi bikin musikmu');
-    // Sama seperti video: server-nya gratis & suka gangguan, jadi submit ulang
-    // diam-diam saat status RETRY sampai deadline total.
     const deadline = Date.now() + 6 * 60 * 1000;
     try {
+        const enPrompt = await translateEn(prompt);
         while (Date.now() < deadline) {
-            const resp = await fetch('/api/music', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ prompt })
-            });
-            const data = await resp.json().catch(() => ({}));
-            if (!resp.ok) {
-                if (resp.status === 400 || Date.now() >= deadline - 8000) {
-                    throw new Error(data.error || `API error (${resp.status})`);
-                }
-                await new Promise(r => setTimeout(r, 8000));
-                continue;
+            let ev = null;
+            for (let i = 1; i <= 3 && !ev; i++) {
+                try {
+                    const resp = await fetch(HF_MUSIC_SPACE + HF_MUSIC_API, {
+                        method: 'POST',
+                        headers: await hfAuthHeaders({ 'Content-Type': 'application/json' }),
+                        body: JSON.stringify({ data: [enPrompt, null] }) // skema MusicGen: [texts, melodies]
+                    });
+                    const d = await resp.json().catch(() => ({}));
+                    if (resp.ok && d.event_id) ev = d.event_id;
+                } catch (e) { }
+                if (!ev && i < 3 && Date.now() < deadline) await new Promise(r => setTimeout(r, 3000));
             }
-            if (!data.statusUrl) throw new Error('Server tidak kasih status URL.');
-            let needResubmit = false;
+            if (!ev) throw new Error('Studio musiknya lagi penuh. Coba beberapa saat lagi ya.');
+            const streamUrl = `${HF_MUSIC_SPACE}${HF_MUSIC_API}/${ev}`;
+            setLoadingText('Musiknya lagi digarap');
+            let retryJob = false;
             while (Date.now() < deadline) {
                 await new Promise(r => setTimeout(r, 8000));
-                const sr = await fetch('/api/music/status?url=' + encodeURIComponent(data.statusUrl), { headers: await authHeaders() });
-                const sd = await sr.json().catch(() => ({}));
-                if (sd.status === 'COMPLETED') {
-                    if (!sd.audioUrl) throw new Error('Musik sudah tidak tersedia. Generate ulang ya.');
+                const st = await hfStreamEvent(streamUrl, 25000);
+                if (st.type === 'complete') {
+                    const url = hfResolveMedia(HF_MUSIC_SPACE, st.url);
+                    if (!url) throw new Error('Musik sudah tidak tersedia. Generate ulang ya.');
                     const media = msgMediaOf(loading);
                     media.innerHTML = '';
                     msgBodyOf(loading).innerHTML = '';
@@ -3569,7 +3678,7 @@ async function generateMusicWithPrompt(prompt) {
                     tag.innerText = 'Musik AI';
                     media.appendChild(tag);
                     const a = document.createElement('audio');
-                    a.src = sd.audioUrl;
+                    a.src = url;
                     a.controls = true;
                     a.preload = 'metadata';
                     a.classList.add('chat-audio');
@@ -3580,21 +3689,20 @@ async function generateMusicWithPrompt(prompt) {
                     dl.className = 'msg-action';
                     dl.title = 'Download musik';
                     dl.innerHTML = '<i class="fa-solid fa-download"></i>';
-                    dl.onclick = () => downloadImage(sd.audioUrl, 'senka-musik-' + Date.now() + '.wav');
+                    dl.onclick = () => downloadImage(url, 'senka-musik-' + Date.now() + '.wav');
                     actions.appendChild(dl);
                     media.appendChild(actions);
-                    remoteSave('senka', 'voice', sd.audioUrl);
+                    remoteSave('senka', 'voice', url);
                     scrollToBottom(true);
                     return;
                 }
-                if (sd.status === 'ERROR') throw new Error(sd.error || 'Gagal bikin musik.');
-                if (sd.status === 'RETRY') { needResubmit = true; break; }
+                if (st.type === 'error') {
+                    if (st.message === '__retry__') { retryJob = true; break; }
+                    throw new Error(st.message);
+                }
             }
-            if (needResubmit && Date.now() < deadline) {
-                setLoadingText('Generasinya keganggu, Senka coba lagi');
-            } else if (Date.now() >= deadline) {
-                throw new Error('Waktu generasi habis. Coba lagi ya.');
-            }
+            if (Date.now() >= deadline) break;
+            if (retryJob) setLoadingText('Generasinya keganggu, Senka coba lagi');
         }
         throw new Error('Waktu generasi habis. Coba lagi ya.');
     } catch (e) {
@@ -3619,66 +3727,60 @@ async function generateVideoWithPrompt(prompt) {
         scrollToBottom(true);
     };
     setLoadingText('Senka lagi bikin videomu');
-    // Server video-nya gratis & sering gangguan (GPU quota penuh / space restart).
-    // Kalau render gagal sementara, submit ulang diam-diam sampai deadline total.
     const deadline = Date.now() + 6 * 60 * 1000;
     try {
+        // Submit ke server (TensorArt), ulang 1x kalau provider lagi rewel
+        let jobId = null, lastErr = null;
+        for (let i = 1; i <= 2 && !jobId; i++) {
+            try {
+                const resp = await fetch('/api/video', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt })
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok) throw new Error(data.error || `API error (${resp.status})`);
+                if (!data.jobId) throw new Error('Server tidak kasih job ID.');
+                jobId = data.jobId;
+            } catch (e) {
+                lastErr = e;
+                if (i < 2 && Date.now() < deadline) await new Promise(r => setTimeout(r, 4000));
+            }
+        }
+        if (!jobId) throw lastErr || new Error('Gagal mulai render video.');
         while (Date.now() < deadline) {
-            const resp = await fetch('/api/video', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ prompt })
-            });
-            const data = await resp.json().catch(() => ({}));
-            if (!resp.ok) {
-                if (resp.status === 400 || Date.now() >= deadline - 8000) {
-                    throw new Error(data.error || `API error (${resp.status})`);
-                }
-                await new Promise(r => setTimeout(r, 8000));
-                continue;
+            await new Promise(r => setTimeout(r, 8000));
+            const sr = await fetch('/api/video/status?job=' + encodeURIComponent(jobId), { headers: await authHeaders() });
+            const sd = await sr.json().catch(() => ({}));
+            if (sd.status === 'COMPLETED') {
+                if (!sd.videoUrl) throw new Error('Video sudah tidak tersedia. Generate ulang ya.');
+                const media = msgMediaOf(loading);
+                media.innerHTML = '';
+                msgBodyOf(loading).innerHTML = '';
+                const tag = document.createElement('div');
+                tag.className = 'msg-tag';
+                tag.innerText = 'Video AI';
+                media.appendChild(tag);
+                const v = document.createElement('video');
+                v.src = sd.videoUrl;
+                v.controls = true;
+                v.preload = 'metadata';
+                v.classList.add('chat-video');
+                media.appendChild(v);
+                const actions = document.createElement('div');
+                actions.className = 'msg-actions';
+                const dl = document.createElement('button');
+                dl.className = 'msg-action';
+                dl.title = 'Download video';
+                dl.innerHTML = '<i class="fa-solid fa-download"></i>';
+                dl.onclick = () => downloadImage(sd.videoUrl, 'senka-video-' + Date.now() + '.mp4');
+                actions.appendChild(dl);
+                media.appendChild(actions);
+                remoteSave('senka', 'video', sd.videoUrl);
+                scrollToBottom(true);
+                return;
             }
-            if (!data.statusUrl) throw new Error('Server tidak kasih status URL.');
-            let needResubmit = false;
-            while (Date.now() < deadline) {
-                await new Promise(r => setTimeout(r, 8000));
-                const sr = await fetch('/api/video/status?url=' + encodeURIComponent(data.statusUrl), { headers: await authHeaders() });
-                const sd = await sr.json().catch(() => ({}));
-                if (sd.status === 'COMPLETED') {
-                    if (!sd.videoUrl) throw new Error('Video sudah tidak tersedia. Generate ulang ya.');
-                    const media = msgMediaOf(loading);
-                    media.innerHTML = '';
-                    msgBodyOf(loading).innerHTML = '';
-                    const tag = document.createElement('div');
-                    tag.className = 'msg-tag';
-                    tag.innerText = 'Video AI';
-                    media.appendChild(tag);
-                    const v = document.createElement('video');
-                    v.src = sd.videoUrl;
-                    v.controls = true;
-                    v.preload = 'metadata';
-                    v.classList.add('chat-video');
-                    media.appendChild(v);
-                    const actions = document.createElement('div');
-                    actions.className = 'msg-actions';
-                    const dl = document.createElement('button');
-                    dl.className = 'msg-action';
-                    dl.title = 'Download video';
-                    dl.innerHTML = '<i class="fa-solid fa-download"></i>';
-                    dl.onclick = () => downloadImage(sd.videoUrl, 'senka-video-' + Date.now() + '.mp4');
-                    actions.appendChild(dl);
-                    media.appendChild(actions);
-                    remoteSave('senka', 'video', sd.videoUrl);
-                    scrollToBottom(true);
-                    return;
-                }
-                if (sd.status === 'ERROR') throw new Error(sd.error || 'Gagal render video.');
-                if (sd.status === 'RETRY') { needResubmit = true; break; }
-            }
-            if (needResubmit && Date.now() < deadline) {
-                setLoadingText('Render-nya keganggu, Senka submit ulang');
-            } else if (Date.now() >= deadline) {
-                throw new Error('Waktu render habis. Coba lagi ya.');
-            }
+            if (sd.status === 'ERROR') throw new Error(sd.error || 'Gagal render video.');
         }
         throw new Error('Waktu render habis. Coba lagi ya.');
     } catch (e) {
