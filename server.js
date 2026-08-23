@@ -3036,7 +3036,7 @@ app.post('/api/transcribe', upload.single('audio'), async (req, res) => {
 app.get('/api/live/token', (req, res) => {
     const tok = decodeToken(req);
     if (!tok || !tok.uid) return res.status(401).json({ error: 'Belum login.' });
-    res.json({ key: String(process.env.GEMINI_LIVE_API_KEY || ''), model: 'models/gemini-2.0-flash-exp' });
+    res.json({ key: String(process.env.GEMINI_LIVE_API_KEY || ''), model: 'models/gemini-2.5-flash-native-audio-latest' });
 });
 
 const isVercel = process.env.VERCEL === '1';

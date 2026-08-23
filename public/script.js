@@ -3500,8 +3500,8 @@ let kaiwaNextPlayTime = 0;
 let kaiwaScheduled = [];
 let kaiwaPendingPcm = [];
 let kaiwaTurnText = '';
-const KAIWA_MODEL = 'models/gemini-2.0-flash-exp';
-const KAIWA_WS_BASE = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent';
+const KAIWA_MODEL = 'models/gemini-2.5-flash-native-audio-latest';
+const KAIWA_WS_BASE = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 // AudioWorklet inline: buffer sampel mic lalu post ~1600 blok sampel ke thread utama
 const KAIWA_WORKLET_SRC = 'class KaiwaPcmCapture extends AudioWorkletProcessor{constructor(){super();this.buf=new Float32Array(1600);this.fill=0}process(inputs){const ch=inputs[0]&&inputs[0][0];if(!ch)return true;let off=0;while(off<ch.length){const n=Math.min(ch.length-off,this.buf.length-this.fill);this.buf.set(ch.subarray(off,off+n),this.fill);this.fill+=n;off+=n;if(this.fill>=this.buf.length){this.port.postMessage(this.buf.slice(0));this.fill=0}}return true}}registerProcessor("kaiwa-pcm-capture",KaiwaPcmCapture);';
 const KAIWA_SYSTEM_TEXT = 'Kamu adalah Senka, teman AI untuk latihan Kaiwa (bahasa Jepang). Jika pengguna bicara bahasa Jepang, balas dengan Jepang. Jika pengguna pakai bahasa Indonesia atau bertanya arti kata, jelaskan dengan campuran bahasa Jepang dan Indonesia yang natural dan santai. Panggil lawan bicaramu dengan \'Pengguna\'/\'user\'.';
