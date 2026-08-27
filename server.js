@@ -1846,7 +1846,7 @@ const TIKTOK_TTS_URL = process.env.TIKTOK_TTS_URL || 'https://tiktok-tts.weilnet
 const TIKTOK_TTS_URL_OFFICIAL = process.env.TIKTOK_TTS_URL_OFFICIAL || 'https://api16-normal-c-useast1a.tiktokv.com/media/api/text/speech/invoke/';
 const TIKTOK_TTS_VOICE = process.env.TIKTOK_TTS_VOICE || 'jp_001';
 const TIKTOK_VOICES = { jpn: TIKTOK_TTS_VOICE, ind: process.env.TIKTOK_TTS_VOICE_ID || 'id_001', eng: (process.env.TIKTOK_TTS_VOICE_EN || 'en_001') };
-const TIKTOK_TTS_TIMEOUT = Number(process.env.TIKTOK_TTS_TIMEOUT) || 25000;
+const TIKTOK_TTS_TIMEOUT = Number(process.env.TIKTOK_TTS_TIMEOUT) || 45000;
 
 function detectTtsLang(text) {
     if (/[\u3040-\u30ff\u4e00-\u9faf\uac00-\ud7af]/.test(text)) return 'jpn';
@@ -2026,7 +2026,7 @@ async function tiktokRace(text, voice = TIKTOK_TTS_VOICE) {
     } else if (officialIncluded) {
         officialTtsFailStreak += 1;
         if (officialTtsFailStreak >= 3) {
-            officialTtsOfflineUntil = Date.now() + 120000;
+            officialTtsOfflineUntil = Date.now() + 3600000; // 1 jam (dulu 2 menit) agar TTS tidak mati sesaat
             officialTtsFailStreak = 0;
             console.error('[tts] Official API TikTok gagal 3x berturut → dinonaktifkan 2 menit (mirror tetap dipakai)');
         }
@@ -2150,93 +2150,98 @@ async function edgeTts(text, lang) {
     return { segments, contentType: 'audio/mpeg', provider: 'edge', label: 'Edge TTS (wanita Microsoft)', voice: EDGE_VOICES[lang] || EDGE_VOICES.ind, lang };
 }
 
+const TIKTOK_TTS_TIMEOUT_MS = 45000;
+
+// Split per kalimat: dukung tanda baca half-width (.,!?) DAN
+// full-width Jepang (。、！？) — supaya kalimat Jepang tidak
+// kepotong asal-asalan karena tanda bacanya beda karakter dari ASCII.
+const SENTENCE_SPLIT_REGEX = /(?<=[.,!?。、！？])\s*|\n+/;
+
+/**
+ * Bungkus sebuah promise dengan timeout manual. Dipakai supaya
+ * batas 45 detik untuk tiktokTts tetap konsisten walau fungsi
+ * tiktokTts sendiri tidak (atau belum) punya parameter timeout.
+ */
+function withTimeout(promise, ms, label = 'Proses') {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} melebihi ${ms}ms`)), ms)
+    ),
+  ]);
+}
+
+/**
+ * Pecah teks panjang jadi array chunk per-kalimat. Chunk kosong
+ * atau yang cuma berisi tanda baca/spasi (tanpa huruf/angka sama
+ * sekali) dibuang supaya tidak dikirim ke TTS.
+ */
+function chunkTextForTts(text) {
+  return text
+    .split(SENTENCE_SPLIT_REGEX)
+    .map((c) => c.trim())
+    .filter((c) => c.length > 0 && /[\p{L}\p{N}]/u.test(c));
+}
+
 app.post('/api/tts', async (req, res) => {
-    const rawText = String(req.body?.text || '').trim().slice(0, 500);
-    if (!rawText) return res.status(400).json({ error: 'Teks kosong.' });
-    const mode = req.body?.mode === 'ind' ? 'ind' : 'jpn';
-    const wantsStream = String(req.headers.accept || '').includes('text/event-stream');
+  const { text } = req.body || {};
 
-    const t0 = Date.now();
-    let text = rawText.replace(/[*_#`{}]/g, '');
-    let lang = detectTtsLang(text);
-    if (mode === 'ind') {
+  if (!text || typeof text !== 'string' || !text.trim()) {
+    return res.status(400).json({ error: 'Field "text" wajib diisi.' });
+  }
+
+  try {
+    const chunks = chunkTextForTts(text);
+
+    if (chunks.length === 0) {
+      return res.status(400).json({ error: 'Tidak ada teks valid untuk diproses TTS.' });
+    }
+
+    const audioChunks = [];
+
+    // Sengaja sekuensial (bukan Promise.all) sesuai desain awal —
+    // lebih aman untuk rate limit TikTok TTS dan urutan tetap terjaga.
+    for (const chunk of chunks) {
+      try {
+        const lang = detectTtsLang(chunk); // 'jpn' | 'ind'
+        let ttsResult;
+
         if (lang === 'jpn') {
-            const id = await translateToIndonesian(text);
-            if (id && id !== text) text = id;
-        }
-        lang = 'ind';
-        text = addIdExpressions(text);
-    } else if (lang !== 'jpn') {
-        const jp = await translateToJapanese(text);
-        if (jp && jp !== text) {
-            text = jp;
-            lang = 'jpn';
+          ttsResult = await withTimeout(
+            tiktokTts(chunk, 'jpn'),
+            TIKTOK_TTS_TIMEOUT_MS,
+            'tiktokTts'
+          );
         } else {
-            text = addIdExpressions(text);
-            lang = 'ind';
+          ttsResult = await edgeTts(chunk, 'ind');
         }
-    }
-    console.error(`[tts] mode=${mode} lang=${lang} teks=${String(text).length}char translate=${Date.now() - t0}ms`);
 
-    const cacheKey = 'v8|' + mode + '|' + lang + '|' + text;
-    if (ttsCache.has(cacheKey)) {
-        const payload = ttsCache.get(cacheKey);
-        if (wantsStream) {
-            res.setHeader('Content-Type', 'text/event-stream');
-            res.setHeader('Cache-Control', 'no-cache');
-            res.flushHeaders();
-            for (const seg of payload.segments) {
-                res.write(`event: segment\ndata: ${JSON.stringify({ audioBase64: seg.audioBase64, contentType: payload.contentType })}\n\n`);
+        if (ttsResult && Array.isArray(ttsResult.segments) && ttsResult.segments.length > 0) {
+          // Beberapa chunk TTS punya >1 segment (mis. chunk panjang) — push semua segment
+          for (const seg of ttsResult.segments) {
+            if (seg && seg.audioBase64) {
+              audioChunks.push(seg.audioBase64);
             }
-            res.write(`event: done\ndata: ${JSON.stringify(payload)}\n\n`);
-            return res.end();
+          }
+        } else {
+          console.warn(`[TTS] Buffer kosong untuk chunk: "${chunk}"`);
         }
-        return res.json(payload);
+      } catch (chunkErr) {
+        // Satu chunk gagal jangan sampai gagalkan seluruh respons —
+        // cukup dilewati, chunk lain tetap lanjut diproses.
+        console.error(`[TTS] Gagal memproses chunk: "${chunk}" ->`, chunkErr.message);
+      }
     }
 
-    const speakAll = async () => {
-        console.time('[tts] total (tayo ke audio)');
-        let out = await tiktokTts(text, lang);
-        if (!out) {
-            console.error('[tts] TikTok gagal → fallback Edge TTS');
-            out = await edgeTts(text, lang);
-        }
-        console.timeEnd('[tts] total (tayo ke audio)');
-        if (!out) return null;
-        return { ...out, segments: out.segments, audioBase64: out.segments[0].audioBase64 };
-    };
-
-    if (wantsStream) {
-        res.setHeader('Content-Type', 'text/event-stream');
-        res.setHeader('Cache-Control', 'no-cache');
-        res.setHeader('Connection', 'keep-alive');
-        res.flushHeaders();
-        try {
-            const payload = await speakAll();
-            if (!payload) {
-                res.write(`event: error\ndata: ${JSON.stringify({ error: 'Semua model TTS gagal. Coba lagi ya.' })}\n\n`);
-                res.end();
-                return;
-            }
-            for (const seg of payload.segments) {
-                res.write(`event: segment\ndata: ${JSON.stringify({ audioBase64: seg.audioBase64, contentType: payload.contentType })}\n\n`);
-            }
-            res.write(`event: done\ndata: ${JSON.stringify(payload)}\n\n`);
-            cacheSet(ttsCache, cacheKey, payload);
-        } catch (e) {
-            res.write(`event: error\ndata: ${JSON.stringify({ error: 'TTS error: ' + (e.message || e) })}\n\n`);
-        }
-        return res.end();
+    if (audioChunks.length === 0) {
+      return res.status(502).json({ error: 'Semua proses TTS gagal, coba lagi.' });
     }
 
-    try {
-        const payload = await speakAll();
-        if (!payload) return res.status(502).json({ error: 'Semua model TTS gagal. Coba lagi ya.' });
-        cacheSet(ttsCache, cacheKey, payload);
-        return res.json(payload);
-    } catch (e) {
-        res.status(500).json({ error: 'TTS error: ' + (e.message || e) });
-    }
+    return res.status(200).json({ audioChunks });
+  } catch (err) {
+    console.error('[TTS] Error tak terduga di endpoint /api/tts:', err);
+    return res.status(500).json({ error: 'Terjadi kesalahan pada server TTS.' });
+  }
 });
 
 app.post('/api/image', async (req, res) => {
