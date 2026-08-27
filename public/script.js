@@ -2735,46 +2735,119 @@ function playSpeechBlob(b64, type) {
     });
 }
 
+/**
+ * Memutar array audio (Base64 dari /api/tts) secara berurutan
+ * seperti antrian (queue). Chunk berikutnya di-preload saat chunk
+ * sekarang masih diputar, supaya transisi antar kalimat halus
+ * tanpa jeda buffering yang kentara.
+ *
+ * @param {string[]} audioChunks - Array string Base64 (MP3).
+ * @param {Object} [callbacks]
+ * @param {(index: number) => void} [callbacks.onChunkStart] - dipanggil tiap chunk mulai
+ * @param {() => void} [callbacks.onQueueEnd] - dipanggil saat seluruh antrian selesai
+ * @param {(err: any, index: number) => void} [callbacks.onError] - dipanggil saat 1 chunk gagal
+ * @returns {{ stop: () => void }} kontrol untuk menghentikan playback secara manual.
+ */
+function playTtsQueue(audioChunks, callbacks = {}) {
+    const { onChunkStart, onQueueEnd, onError } = callbacks;
+
+    if (!Array.isArray(audioChunks) || audioChunks.length === 0) {
+        console.warn('[TTS Queue] audioChunks kosong, tidak ada yang diputar.');
+        if (onQueueEnd) onQueueEnd();
+        return { stop: () => {} };
+    }
+
+    let currentAudio = null;
+    let preloadedNext = null;
+    let stopped = false;
+
+    function toAudio(base64) {
+        const audio = new Audio(`data:audio/mp3;base64,${base64}`);
+        audio.preload = 'auto';
+        return audio;
+    }
+
+    function playIndex(index) {
+        if (stopped) return;
+
+        if (index >= audioChunks.length) {
+            if (onQueueEnd) onQueueEnd();
+            return;
+        }
+
+        try {
+            currentAudio = preloadedNext || toAudio(audioChunks[index]);
+            preloadedNext = null;
+
+            // Preload chunk berikutnya lebih awal, supaya begitu chunk ini
+            // "onended", chunk berikutnya sudah selesai didecode browser —
+            // tidak ada jeda buffering di antara kalimat.
+            if (index + 1 < audioChunks.length) {
+                preloadedNext = toAudio(audioChunks[index + 1]);
+            }
+
+            currentAudio.onended = () => playIndex(index + 1);
+
+            currentAudio.onerror = () => {
+                console.error(`[TTS Queue] Gagal memutar chunk #${index}:`, currentAudio.error);
+                if (onError) onError(currentAudio.error, index);
+                playIndex(index + 1); // lewati chunk yang rusak, lanjut ke berikutnya
+            };
+
+            if (onChunkStart) onChunkStart(index);
+
+            const playPromise = currentAudio.play();
+            if (playPromise) {
+                playPromise.catch((err) => {
+                    console.error(`[TTS Queue] play() ditolak browser pada chunk #${index}:`, err);
+                    if (onError) onError(err, index);
+                    playIndex(index + 1);
+                });
+            }
+        } catch (err) {
+            console.error(`[TTS Queue] Error tak terduga pada chunk #${index}:`, err);
+            if (onError) onError(err, index);
+            playIndex(index + 1);
+        }
+    }
+
+    playIndex(0);
+
+    return {
+        stop() {
+            stopped = true;
+            if (currentAudio) {
+                currentAudio.onended = null;
+                currentAudio.onerror = null;
+                currentAudio.pause();
+                currentAudio.currentTime = 0;
+            }
+            preloadedNext = null;
+        },
+    };
+}
+
 async function ttsStreamTo(onSegment, body) {
     const r = await fetch('/api/tts', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify(body)
     });
     if (!r.ok) return { error: true };
-    if (!(r.headers.get('content-type') || '').includes('text/event-stream')) {
-        const d = await r.json();
-        if (!d.segments || d.segments.length === 0) return { error: true };
+    const d = await r.json().catch(() => ({}));
+    if (d.error) return { error: true };
+    // Cek format baru: audioChunks (dwibahasa) atau legacy: segments
+    if (Array.isArray(d.audioChunks) && d.audioChunks.length > 0) {
+        for (const chunk of d.audioChunks) {
+            await onSegment(chunk, 'audio/mpeg');
+        }
+    } else if (Array.isArray(d.segments) && d.segments.length > 0) {
+        // Legacy fallback
         for (const seg of d.segments) {
             await onSegment(seg.audioBase64, d.contentType || 'audio/mpeg');
         }
-        return { error: false };
-    }
-    const reader = r.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let pendingEvent = '';
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
-        for (const line of lines) {
-            if (line.startsWith('event:')) { pendingEvent = line.slice(6).trim(); continue; }
-            if (!line.startsWith('data:')) continue;
-            const payload = line.slice(5).trim();
-            if (pendingEvent === 'segment') {
-                pendingEvent = '';
-                try {
-                    const seg = JSON.parse(payload);
-                    await onSegment(seg.audioBase64, seg.contentType || 'audio/mpeg');
-                } catch (e) { }
-                continue;
-            }
-            if (pendingEvent === 'error') { pendingEvent = ''; return { error: true }; }
-            pendingEvent = '';
-        }
+    } else {
+        return { error: true };
     }
     return { error: false };
 }
@@ -4013,7 +4086,7 @@ async function generateVideoWithPrompt(prompt) {
             setLoadingText('Videonya lagi digarap');
             let drops = 0, done = false;
             while (Date.now() < deadline) {
-                const st = await ltxStreamOnce(data.statusUrl, 120000);
+                const st = await ltxStreamOnce(data.statusUrl, 3600000);
                 if (st.type === 'complete') {
                     const url = ltxResolveUrl(st.url);
                     if (!url) throw new Error('Video sudah tidak tersedia. Generate ulang ya.');
@@ -4317,7 +4390,8 @@ async function handleSenkaCommand(text) {
             scrollToBottom(true);
             return true;
         }
-        appendMessage('senka', '📜 Lirik "' + currentSong.title + '"' + (currentSong.artist ? ' — ' + currentSong.artist : '') + '\n\n' + lyrics.slice(0, 3500));
+        const sourceInfo = d && d.source ? '\n\n<i>*(Lirik dari ' + d.source + ')*</i>' : '';
+        appendMessage('senka', '📜 Lirik "' + currentSong.title + '"' + (currentSong.artist ? ' — ' + currentSong.artist : '') + '\n\n' + lyrics.slice(0, 3500) + sourceInfo);
         scrollToBottom(true);
         return true;
     }
