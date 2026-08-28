@@ -1845,16 +1845,7 @@ const EN_WORDS = /\b(the|you|your|i|and|to|of|a|is|it|we|they|me|my|hello|hi|hey
 const TIKTOK_TTS_URL = process.env.TIKTOK_TTS_URL || 'https://tiktok-tts.weilnet.workers.dev/api/generation';
 const TIKTOK_TTS_URL_OFFICIAL = process.env.TIKTOK_TTS_URL_OFFICIAL || 'https://api16-normal-c-useast1a.tiktokv.com/media/api/text/speech/invoke/';
 const TIKTOK_TTS_VOICE = process.env.TIKTOK_TTS_VOICE || 'jp_001';
-const TIKTOK_VOICES = { jpn: TIKTOK_TTS_VOICE, ind: process.env.TIKTOK_TTS_VOICE_ID || 'id_001', eng: (process.env.TIKTOK_TTS_VOICE_EN || 'en_001') };
 const TIKTOK_TTS_TIMEOUT = Number(process.env.TIKTOK_TTS_TIMEOUT) || 45000;
-
-function detectTtsLang(text) {
-    if (/[\u3040-\u30ff\u4e00-\u9faf\uac00-\ud7af]/.test(text)) return 'jpn';
-    const enHits = (text.match(EN_WORDS) || []).length;
-    const latinWords = (text.match(/[A-Za-z]{3,}/g) || []).length;
-    if (latinWords > 4 && enHits >= Math.ceil(latinWords * 0.35)) return 'eng';
-    return 'ind';
-}
 
 function chunkTtsText(text, max = 185) {
     const segs = [];
@@ -2066,113 +2057,18 @@ async function tiktokTts(text, lang) {
 const EDGE_WS_URL = 'wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4&ConnectionId=';
 const EDGE_VOICES = { jpn: 'ja-JP-NanamiNeural', ind: 'id-ID-GadisNeural', eng: 'en-US-JennyNeural' };
 const EDGE_VERSION = '1-143.0.3650.75';
-const EDGE_TRUSTED = '6A5AA1D4EAFF4E9FB37E23D68491D6F4';
-const EDGE_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0',
-    'Accept-Encoding': 'gzip, deflate, br, zstd',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Pragma': 'no-cache',
-    'Cache-Control': 'no-cache',
-    'Origin': 'chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold'
-};
+const TIKTOK_TTS_TIMEOUT_MS = 60000;
 
-function edgeSecMsGec() {
-    const ticks = BigInt(Math.floor(Date.now() / 1000)) + 11644473600n;
-    const floored = ticks - (ticks % 300n);
-    const ns = floored * 10000000n;
-    return crypto.createHash('sha256').update(ns.toString() + EDGE_TRUSTED, 'ascii').digest('hex').toUpperCase();
-}
+// Split per kalimat: dukung tanda baca half-width (.,!?) DAN
+// full-width Jepang (。、！？) — supaya kalimat Jepang tidak
+// kepotong asal-asalan karena tanda bacanya beda karakter dari ASCII.
+const SENTENCE_SPLIT_REGEX = /(?<=[.,!?。、！？])\s*|\n+/;
 
-function edgeEscape(text) {
-    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-async function edgeTtsRequest(text, lang) {
-    const voice = EDGE_VOICES[lang] || EDGE_VOICES.ind;
-    const connId = crypto.randomUUID();
-    const muid = crypto.randomBytes(16).toString('hex').toUpperCase();
-    const url = EDGE_WS_URL + connId +
-        '&Sec-MS-GEC-Version=' + EDGE_VERSION +
-        '&Sec-MS-GEC=' + encodeURIComponent(edgeSecMsGec());
-    return new Promise((resolve, reject) => {
-        const chunks = [];
-        const now = () => new Date(Date.now()).toISOString().replace(/\.\d{3}Z$/, 'Z') + 'Z';
-        let ws = null;
-        let resolved = false;
-        const cleanup = () => {
-            if (resolved) return;
-            resolved = true;
-            try { ws.close(); } catch (e) { }
-        };
-        const timeout = setTimeout(() => {
-            console.error('[TTS] Edge TTS request timeout');
-            cleanup();
-            reject(new Error('Edge TTS timeout'));
-        }, 60000);
-        try {
-            ws = new WebSocket(url, {
-                perMessageDeflate: true,
-                headers: Object.assign({}, EDGE_HEADERS, { Cookie: 'muid=' + muid + ';' }),
-                agent: false
-            });
-        } catch (e) {
-            clearTimeout(timeout);
-            return resolve(null);
-        }
-        ws.on('open', () => {
-            console.error('[TTS] Edge WS connected');
-            try {
-                ws.send(now() + '\r\nContent-Type: application/json; charset=utf-8\r\nPath: speech.config\r\n\r\n{"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"false","wordBoundaryEnabled":"true"},"outputFormat":"audio-24khz-48kbitrate-mono-mp3"}}}}');
-                const ssml = "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='" + voice.split('-').slice(0, 2).join('-') +
-                    "'><voice name='" + voice + "'><prosody pitch='+0Hz' rate='+5%' volume='+0%'>" + edgeEscape(text) + '</prosody></voice></speak>';
-                ws.send('X-RequestId:' + connId + '\r\nContent-Type: application/ssml+xml\r\nX-Timestamp:' + now() + '\r\nPath: ssml\r\n\r\n' + ssml);
-            } catch (e) {
-                clearTimeout(timeout);
-                cleanup();
-                resolve(null);
-            }
-        });
-        ws.on('message', (data, isBinary) => {
-            if (!isBinary) {
-                const msg = data.toString('utf8');
-                if (msg.includes('Path: turn.end')) {
-                    console.error('[TTS] Edge WS turn.end');
-                    clearTimeout(timeout);
-                    cleanup();
-                }
-            } else {
-                chunks.push(data);
-            }
-        });
-        ws.on('error', (e) => {
-            console.error('[TTS] Edge WS error:', e.message);
-            clearTimeout(timeout);
-            cleanup();
-            resolve(null);
-        });
-        ws.on('close', (code, reason) => {
-            console.error('[TTS] Edge WS closed:', code, reason?.toString());
-            clearTimeout(timeout);
-            if (resolved) return;
-            resolved = true;
-            if (chunks.length === 0) return resolve(null);
-            const buf = Buffer.concat(chunks);
-            resolve(buf.length > 1000 ? buf : null);
-        });
-    });
-}
-
-async function edgeTts(text, lang) {
-    return localTts(text, lang);
-}
-
-async function localTts(text, lang) {
-    const voiceMap = { jpn: 'ja', ind: 'id', eng: 'en' };
-    const voice = voiceMap[lang] || 'id';
+async function localTts(text) {
     const tmpFile = `/tmp/tts_${Date.now()}_${Math.random().toString(36).slice(2)}.wav`;
     
     return new Promise((resolve) => {
-        const proc = spawn('espeak-ng', ['-v', voice, '-w', tmpFile, text]);
+        const proc = spawn('espeak-ng', ['-v', 'id', '-w', tmpFile, text]);
         proc.on('close', (code) => {
             if (code !== 0) {
                 console.error('[TTS] espeak-ng failed with code:', code);
@@ -2186,9 +2082,9 @@ async function localTts(text, lang) {
                     segments: [{ audioBase64: buf.toString('base64') }],
                     contentType: 'audio/wav',
                     provider: 'espeak-ng',
-                    label: 'eSpeak NG (' + voice + ')',
-                    lang,
-                    voice
+                    label: 'eSpeak NG (id)',
+                    lang: 'ind',
+                    voice: 'id'
                 });
             } catch (e) {
                 console.error('[TTS] read file error:', e.message);
@@ -2201,13 +2097,6 @@ async function localTts(text, lang) {
         });
     });
 }
-
-const TIKTOK_TTS_TIMEOUT_MS = 60000;
-
-// Split per kalimat: dukung tanda baca half-width (.,!?) DAN
-// full-width Jepang (。、！？) — supaya kalimat Jepang tidak
-// kepotong asal-asalan karena tanda bacanya beda karakter dari ASCII.
-const SENTENCE_SPLIT_REGEX = /(?<=[.,!?。、！？])\s*|\n+/;
 
 /**
  * Bungkus sebuah promise dengan timeout manual. Dipakai supaya
@@ -2251,22 +2140,11 @@ app.post('/api/tts', async (req, res) => {
 
     const audioChunks = [];
 
-    // Sengaja sekuensial (bukan Promise.all) sesuai desain awal —
-    // lebih aman untuk rate limit TikTok TTS dan urutan tetap terjaga.
     for (const chunk of chunks) {
       try {
-        const lang = detectTtsLang(chunk); // 'jpn' | 'ind'
-        let ttsResult;
-
-        if (lang === 'jpn') {
-          console.log('[TTS] Japanese detected, using Edge TTS directly (TikTok TTS broken)');
-          ttsResult = await edgeTts(chunk, 'jpn');
-        } else {
-          ttsResult = await edgeTts(chunk, 'ind');
-        }
+        const ttsResult = await localTts(chunk);
 
         if (ttsResult && Array.isArray(ttsResult.segments) && ttsResult.segments.length > 0) {
-          // Beberapa chunk TTS punya >1 segment (mis. chunk panjang) — push semua segment
           for (const seg of ttsResult.segments) {
             if (seg && seg.audioBase64) {
               audioChunks.push(seg.audioBase64);
@@ -2276,8 +2154,6 @@ app.post('/api/tts', async (req, res) => {
           console.warn(`[TTS] Buffer kosong untuk chunk: "${chunk}"`);
         }
       } catch (chunkErr) {
-        // Satu chunk gagal jangan sampai gagalkan seluruh respons —
-        // cukup dilewati, chunk lain tetap lanjut diproses.
         console.error(`[TTS] Gagal memproses chunk: "${chunk}" ->`, chunkErr.message);
       }
     }

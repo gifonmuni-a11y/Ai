@@ -3109,30 +3109,13 @@ let callSpeakerOn = true;
 let callMinimized = false;
 let callConnectedAt = 0;
 let callTimerInt = null;
-let callLang = localStorage.getItem('senka_call_lang') === 'ja' ? 'ja' : 'id';
 const CALL_PROFILE_IMG = 'assets/profiletelfonsenka.webp';
 const CALL_WALLPAPER_IMG = 'assets/wallpapertelfonsenka.webp';
 
-function callRecogLang() { return callLang === 'ja' ? 'ja-JP' : 'id-ID'; }
+function callRecogLang() { return 'id-ID'; }
 function callListenLabel() {
     if (!callActive) return '';
-    return callSpeaking ? 'Senka bicara...' : (callLang === 'ja' ? '聞いてる... (日本語)' : 'Mendengarkan...');
-}
-function updateCallLangBtn() {
-    const btn = document.getElementById('call-lang-btn');
-    const label = document.getElementById('call-lang-label');
-    if (label) label.innerText = callLang === 'ja' ? '日本語 JP' : 'Indonesia';
-    if (btn) btn.classList.toggle('jp', callLang === 'ja');
-}
-function toggleCallLang() {
-    callLang = callLang === 'ja' ? 'id' : 'ja';
-    localStorage.setItem('senka_call_lang', callLang);
-    updateCallLangBtn();
-    if (callRecog) callRecog.lang = callRecogLang();
-    showToast(callLang === 'ja' ? 'Mode 日本語 aktif — ngomong bahasa Jepang aja, Senka jawab pakai Jepang' : 'Kembali ke bahasa Indonesia');
-    if (callActive && !callSpeaking && !callMicMuted && callRecog) {
-        try { callRecog.stop(); } catch (e) { }
-    }
+    return callSpeaking ? 'Senka bicara...' : 'Mendengarkan...';
 }
 
 function formatCallDur(ms) {
@@ -3380,7 +3363,7 @@ async function toggleCall() {
         return;
     }
     if (status === 'prompt') { pendingMicAction = 'call'; openMicModal(); return; }
-    startCall();
+    startKaiwaLive();
 }
 
 function startCall() {
@@ -3404,13 +3387,10 @@ function startCall() {
     }
     unlockAudio();
     initCallScreenAssets();
-    updateCallLangBtn();
-    setCallUI(true, 'Memanggil');
-    appendMessage('senka', callLang === 'ja'
-        ? '📞 Panggilan dimulai — 日本語で話してね、Senka dengerin.'
-        : '📞 Panggilan dimulai — ngomong aja, aku dengerin.');
+    setCallUI(true, 'Menghubungkan Kaiwa Live...');
+    appendMessage('senka', '📞 Panggilan Kaiwa dimulai — ngomong aja, Senka dengerin & jawab real-time.');
     scrollToBottom(true);
-    startCallRecognition();
+    startKaiwaLive();
 }
 
 function startCallRecognition() {
@@ -3466,7 +3446,7 @@ async function sendCallMessage(text) {
         const response = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages: [...memoryList], modelKey, panggilan, call: true, callLang, gender: userGender, song: currentSong })
+            body: JSON.stringify({ messages: [...memoryList], modelKey, panggilan, call: true, gender: userGender, song: currentSong })
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
@@ -3509,7 +3489,7 @@ async function speakCallText(text) {
             if (!callActive) return;
             const blob = base64ToBlob(b64, type || 'audio/mpeg');
             await playCallBlob(blob);
-        }, { text, mode: callLang === 'ja' ? 'jpn' : speakMode });
+        }, { text, mode: speakMode });
         if (result.error) throw new Error('TTS gagal');
     } catch (e) {
         showToast(`Suara Senka gagal diputar: ${String(e.message || e).slice(0, 40)} — teksnya udah tampil di chat`);
