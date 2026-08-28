@@ -2162,7 +2162,7 @@ const SENTENCE_SPLIT_REGEX = /(?<=[.,!?。、！？])\s*|\n+/;
  * batas 45 detik untuk tiktokTts tetap konsisten walau fungsi
  * tiktokTts sendiri tidak (atau belum) punya parameter timeout.
  */
-function withTimeout(promise, ms, label = 'Proses') {
+function ttsWithTimeout(promise, ms, label = 'Proses') {
   return Promise.race([
     promise,
     new Promise((_, reject) =>
@@ -2207,7 +2207,7 @@ app.post('/api/tts', async (req, res) => {
         let ttsResult;
 
         if (lang === 'jpn') {
-          ttsResult = await withTimeout(
+          ttsResult = await ttsWithTimeout(
             tiktokTts(chunk, 'jpn'),
             TIKTOK_TTS_TIMEOUT_MS,
             'tiktokTts'
