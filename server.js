@@ -3,8 +3,8 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 import multer from 'multer';
-import crypto from 'crypto';
-import WebSocket from 'ws';
+import { spawn } from 'child_process';
+import fs from 'fs';
 
 dotenv.config();
 const app = express();
@@ -2019,7 +2019,7 @@ async function tiktokRace(text, voice = TIKTOK_TTS_VOICE) {
     const officialIncluded = Date.now() >= officialTtsOfflineUntil;
     const quickOne = tiktokSpeakJson(text, voice);
     const officialP = officialIncluded ? tiktokSpeak(text, voice) : Promise.resolve(null);
-    const b64 = await firstNonNull([quickOne, officialP]);
+    let b64 = await firstNonNull([quickOne, officialP]);
     const officialResult = await officialP;
     if (officialResult) {
         officialTtsFailStreak = 0;
@@ -2094,20 +2094,33 @@ async function edgeTtsRequest(text, lang) {
     const url = EDGE_WS_URL + connId +
         '&Sec-MS-GEC-Version=' + EDGE_VERSION +
         '&Sec-MS-GEC=' + encodeURIComponent(edgeSecMsGec());
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
         const chunks = [];
         const now = () => new Date(Date.now()).toISOString().replace(/\.\d{3}Z$/, 'Z') + 'Z';
         let ws = null;
+        let resolved = false;
+        const cleanup = () => {
+            if (resolved) return;
+            resolved = true;
+            try { ws.close(); } catch (e) { }
+        };
+        const timeout = setTimeout(() => {
+            console.error('[TTS] Edge TTS request timeout');
+            cleanup();
+            reject(new Error('Edge TTS timeout'));
+        }, 60000);
         try {
             ws = new WebSocket(url, {
                 perMessageDeflate: true,
-                headers: Object.assign({}, EDGE_HEADERS, { Cookie: 'muid=' + muid + ';' })
+                headers: Object.assign({}, EDGE_HEADERS, { Cookie: 'muid=' + muid + ';' }),
+                agent: false
             });
         } catch (e) {
+            clearTimeout(timeout);
             return resolve(null);
         }
-        const timeout = setTimeout(() => { try { ws.close(); } catch (e) { } }, 25000);
         ws.on('open', () => {
+            console.error('[TTS] Edge WS connected');
             try {
                 ws.send(now() + '\r\nContent-Type: application/json; charset=utf-8\r\nPath: speech.config\r\n\r\n{"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"false","wordBoundaryEnabled":"true"},"outputFormat":"audio-24khz-48kbitrate-mono-mp3"}}}}');
                 const ssml = "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='" + voice.split('-').slice(0, 2).join('-') +
@@ -2115,23 +2128,33 @@ async function edgeTtsRequest(text, lang) {
                 ws.send('X-RequestId:' + connId + '\r\nContent-Type: application/ssml+xml\r\nX-Timestamp:' + now() + '\r\nPath: ssml\r\n\r\n' + ssml);
             } catch (e) {
                 clearTimeout(timeout);
-                try { ws.close(); } catch (x) { }
+                cleanup();
                 resolve(null);
             }
         });
         ws.on('message', (data, isBinary) => {
             if (!isBinary) {
-                if (data.toString('utf8').includes('Path: turn.end')) {
+                const msg = data.toString('utf8');
+                if (msg.includes('Path: turn.end')) {
+                    console.error('[TTS] Edge WS turn.end');
                     clearTimeout(timeout);
-                    try { ws.close(); } catch (e) { }
+                    cleanup();
                 }
             } else {
                 chunks.push(data);
             }
         });
-        ws.on('error', () => { });
-        ws.on('close', () => {
+        ws.on('error', (e) => {
+            console.error('[TTS] Edge WS error:', e.message);
             clearTimeout(timeout);
+            cleanup();
+            resolve(null);
+        });
+        ws.on('close', (code, reason) => {
+            console.error('[TTS] Edge WS closed:', code, reason?.toString());
+            clearTimeout(timeout);
+            if (resolved) return;
+            resolved = true;
             if (chunks.length === 0) return resolve(null);
             const buf = Buffer.concat(chunks);
             resolve(buf.length > 1000 ? buf : null);
@@ -2140,17 +2163,46 @@ async function edgeTtsRequest(text, lang) {
 }
 
 async function edgeTts(text, lang) {
-    const chunks = chunkTtsText(text, 300);
-    const segments = [];
-    for (const c of chunks) {
-        const buf = await edgeTtsRequest(c, lang);
-        if (!buf) return null;
-        segments.push({ audioBase64: buf.toString('base64') });
-    }
-    return { segments, contentType: 'audio/mpeg', provider: 'edge', label: 'Edge TTS (wanita Microsoft)', voice: EDGE_VOICES[lang] || EDGE_VOICES.ind, lang };
+    return localTts(text, lang);
 }
 
-const TIKTOK_TTS_TIMEOUT_MS = 45000;
+async function localTts(text, lang) {
+    const voiceMap = { jpn: 'ja', ind: 'id', eng: 'en' };
+    const voice = voiceMap[lang] || 'id';
+    const tmpFile = `/tmp/tts_${Date.now()}_${Math.random().toString(36).slice(2)}.wav`;
+    
+    return new Promise((resolve) => {
+        const proc = spawn('espeak-ng', ['-v', voice, '-w', tmpFile, text]);
+        proc.on('close', (code) => {
+            if (code !== 0) {
+                console.error('[TTS] espeak-ng failed with code:', code);
+                return resolve(null);
+            }
+            try {
+                const buf = fs.readFileSync(tmpFile);
+                fs.unlinkSync(tmpFile);
+                if (buf.length < 1000) return resolve(null);
+                return resolve({
+                    segments: [{ audioBase64: buf.toString('base64') }],
+                    contentType: 'audio/wav',
+                    provider: 'espeak-ng',
+                    label: 'eSpeak NG (' + voice + ')',
+                    lang,
+                    voice
+                });
+            } catch (e) {
+                console.error('[TTS] read file error:', e.message);
+                resolve(null);
+            }
+        });
+        proc.on('error', (e) => {
+            console.error('[TTS] espawn error:', e.message);
+            resolve(null);
+        });
+    });
+}
+
+const TIKTOK_TTS_TIMEOUT_MS = 60000;
 
 // Split per kalimat: dukung tanda baca half-width (.,!?) DAN
 // full-width Jepang (。、！？) — supaya kalimat Jepang tidak
@@ -2207,11 +2259,8 @@ app.post('/api/tts', async (req, res) => {
         let ttsResult;
 
         if (lang === 'jpn') {
-          ttsResult = await ttsWithTimeout(
-            tiktokTts(chunk, 'jpn'),
-            TIKTOK_TTS_TIMEOUT_MS,
-            'tiktokTts'
-          );
+          console.log('[TTS] Japanese detected, using Edge TTS directly (TikTok TTS broken)');
+          ttsResult = await edgeTts(chunk, 'jpn');
         } else {
           ttsResult = await edgeTts(chunk, 'ind');
         }
