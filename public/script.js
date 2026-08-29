@@ -141,6 +141,11 @@ window.onload = async () => {
     document.getElementById('panggilan-input').value = panggilan;
     document.getElementById('autospeak-input').checked = autospeak;
 
+    const minimizeBtn = document.querySelector('.call-minimize');
+    if (minimizeBtn) minimizeBtn.addEventListener('click', minimizeCall);
+    const callPill = document.getElementById('call-pill');
+    if (callPill) callPill.addEventListener('click', (e) => { if (!e.target.closest('.call-pill-end')) restoreCall(); });
+
     try {
         const resp = await fetch('/api/config');
         const cfg = await resp.json();
@@ -3281,6 +3286,7 @@ function initCallScreenAssets() {
         probe.onload = () => { bg.style.backgroundImage = "url('" + CALL_WALLPAPER_IMG + "')"; };
         probe.onerror = () => { bg.style.backgroundImage = "url('assets/wallpaper.webp')"; };
         probe.src = CALL_WALLPAPER_IMG;
+        if (probe.complete) probe.onload();
     }
     const img = document.getElementById('call-profile-img');
     const pillImg = document.getElementById('call-pill-img');
@@ -3295,6 +3301,7 @@ function initCallScreenAssets() {
             if (pillImg) pillImg.src = 'assets/avatar.webp';
         };
         probe.src = CALL_PROFILE_IMG;
+        if (probe.complete) probe.onload();
     }
 }
 
@@ -3365,7 +3372,6 @@ async function toggleCall() {
     if (status === 'prompt') { pendingMicAction = 'call'; openMicModal(); return; }
     startKaiwaLive();
 }
-
 function startCall() {
     pendingMicAction = null;
     callActive = true;
@@ -3385,8 +3391,11 @@ function startCall() {
         mBtn.classList.remove('on');
         mBtn.innerHTML = '<i class="fa-solid fa-microphone"></i>';
     }
+
     unlockAudio();
     initCallScreenAssets();
+    startCallTimer();
+    updateCallTimer();
     setCallUI(true, 'Menghubungkan Kaiwa Live...');
     appendMessage('senka', '📞 Panggilan Kaiwa dimulai — ngomong aja, Senka dengerin & jawab real-time.');
     scrollToBottom(true);

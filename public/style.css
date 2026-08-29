@@ -258,11 +258,12 @@ video.avatar, video.avatar-border, video.call-avatar-border, video.senka-avatar-
 .call-bg {
     position: absolute; inset: 0;
     background: center / cover no-repeat rgba(10, 14, 30, 1);
-    opacity: 0.85;
+    opacity: 1;
+    pointer-events: none;
 }
 .call-bg::after {
     content: ''; position: absolute; inset: 0;
-    background: linear-gradient(180deg, rgba(3, 6, 14, 0.45), rgba(3, 6, 14, 0.55));
+    background: linear-gradient(180deg, rgba(3, 6, 14, 0.2), rgba(3, 6, 14, 0.35));
 }
 .call-content {
     position: relative; z-index: 2;
@@ -310,13 +311,14 @@ video.avatar, video.avatar-border, video.call-avatar-border, video.senka-avatar-
 }
 @keyframes callDots { 0% { content: ''; } 25% { content: '.'; } 50% { content: '..'; } 75% { content: '...'; } }
 .call-minimize {
-    position: absolute; top: 18px; left: 50%; transform: translateX(-50%); z-index: 3;
+    position: absolute; top: 18px; left: 50%; transform: translateX(-50%); z-index: 10;
     width: 42px; height: 42px; border-radius: 50%;
     background: rgba(24, 30, 58, 0.55); border: 1px solid rgba(255, 255, 255, 0.2);
     color: #fff; cursor: pointer;
     display: flex; align-items: center; justify-content: center; font-size: 1rem;
     backdrop-filter: blur(8px);
     transition: background 0.2s ease, transform 0.15s ease;
+    pointer-events: auto;
 }
 .call-minimize:hover { background: rgba(56, 189, 248, 0.35); }
 .call-minimize:active { transform: translateX(-50%) scale(0.92); }
