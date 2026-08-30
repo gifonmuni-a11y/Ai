@@ -3370,6 +3370,7 @@ async function toggleCall() {
         return;
     }
     if (status === 'prompt') { pendingMicAction = 'call'; openMicModal(); return; }
+    startCall();
     startKaiwaLive();
 }
 function startCall() {
